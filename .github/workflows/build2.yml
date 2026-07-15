@@ -30,9 +30,11 @@ jobs:
         run: npm run build
 
       - name: Package app (generate .dmg)
-        run: npm run dist
+        run: npm run dist -- --publish never
 
       - uses: actions/upload-artifact@v4
         with:
           name: macOS-安装包
-          path: release/*.dmg
+          path: |
+            release/*.dmg
+            release/*.zip
