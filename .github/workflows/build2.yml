@@ -13,17 +13,25 @@ jobs:
       CSC_IDENTITY_AUTO_DISCOVERY: false
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
       - name: Install dependencies
         run: npm install
-      - name: Build macOS
+
+      - name: Build app (generate dist/)
+        run: npm run build
+
+      - name: Package app (generate .dmg)
         run: npm run dist
+
       - uses: actions/upload-artifact@v4
         with:
           name: macOS-安装包
