@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron'
+import { ipcMain, BrowserWindow } from 'electron'
 import { addFeed, listFeeds, getArticles } from './feedService'
 import {
   getDb,
@@ -7,7 +7,16 @@ import {
   articles as articlesTable
 } from './db'
 import { eq } from 'drizzle-orm'
-import type { IpcResponse, Feed, Article, ArticleContent } from '../shared/types'
+import { summarizeArticle, translateArticle } from './llmService'
+import { getLlmConfig, setLlmConfig, resetLlmConfig } from './configService'
+import type {
+  IpcResponse,
+  Feed,
+  Article,
+  ArticleContent,
+  SummarizeRequest,
+  TranslateRequest
+} from '../shared/types'
 
 /**
  * 注册所有 IPC 处理器。
@@ -179,4 +188,64 @@ export function registerIpcHandlers(): void {
       }
     }
   )
+
+  // ================================================================
+  // M4 — LLM 通用接入 IPC 通道
+  // ================================================================
+
+  // LLM 配置读写
+  ipcMain.handle('llm:getConfig', async () => {
+    return getLlmConfig()
+  })
+
+  ipcMain.handle('llm:setConfig', async (_event, updates: Record<string, string>) => {
+    setLlmConfig(updates)
+    return { success: true }
+  })
+
+  ipcMain.handle('llm:resetConfig', async () => {
+    resetLlmConfig()
+    return { success: true }
+  })
+
+  // 流式摘要 — 主进程主动推送 chunk 到渲染进程
+  // 渲染进程调用 invoke('llm:summarize', request) 触发，
+  // 主进程通过 webContents.send('llm:stream-chunk', ...) 推送进度
+  ipcMain.handle('llm:summarize', async (event, request: SummarizeRequest) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return { success: false, error: '窗口不存在' }
+
+    // 在后台启动流式调用，不阻塞 invoke 返回
+    summarizeArticle(request, (chunk) => {
+      win.webContents.send('llm:stream-chunk', chunk)
+    }).catch((err) => {
+      console.error('[ipcHandlers] summarizeArticle 未捕获异常：', err)
+      win.webContents.send('llm:stream-chunk', {
+        type: 'summarize',
+        articleId: request.articleId,
+        message: String(err)
+      })
+    })
+
+    return { success: true }
+  })
+
+  // 流式翻译 — 同上
+  ipcMain.handle('llm:translate', async (event, request: TranslateRequest) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return { success: false, error: '窗口不存在' }
+
+    translateArticle(request, (chunk) => {
+      win.webContents.send('llm:stream-chunk', chunk)
+    }).catch((err) => {
+      console.error('[ipcHandlers] translateArticle 未捕获异常：', err)
+      win.webContents.send('llm:stream-chunk', {
+        type: 'translate',
+        articleId: request.articleId,
+        message: String(err)
+      })
+    })
+
+    return { success: true }
+  })
 }

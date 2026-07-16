@@ -68,19 +68,18 @@ html, body, #root {
 /* 三栏布局 */
 .app-layout {
   display: flex;
+  flex-direction: column;
   height: 100vh;
   overflow: hidden;
 }
 
 /* 侧边栏 */
 .sidebar {
-  width: 260px;
-  min-width: 200px;
   border-right: 1px solid #e5e7eb;
   display: flex;
   flex-direction: column;
   background: #f9fafb;
-  transition: width 0.2s ease;
+  overflow: hidden;
 }
 
 .dark .sidebar {
@@ -89,24 +88,22 @@ html, body, #root {
 }
 
 .sidebar.collapsed {
-  width: 0;
-  min-width: 0;
+  width: 0 !important;
+  min-width: 0 !important;
   overflow: hidden;
+  border-right: none;
 }
 
 /* 文章列表 */
 .article-list {
-  width: 360px;
-  min-width: 280px;
-  border-right: 1px solid #e5e7eb;
   display: flex;
   flex-direction: column;
   background: #ffffff;
+  overflow: hidden;
 }
 
 .dark .article-list {
   background: #111827;
-  border-right-color: #374151;
 }
 
 /* 阅读区 */
@@ -119,6 +116,27 @@ html, body, #root {
 
 .dark .reader-view {
   background: #111827;
+}
+
+/* ---- 拖拽分隔条 ---- */
+.resize-handle {
+  width: 5px;
+  cursor: col-resize;
+  background: transparent;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 5;
+  transition: background-color 0.15s ease;
+}
+
+.resize-handle:hover,
+.resize-handle:active {
+  background: #3b82f6;
+}
+
+.dark .resize-handle:hover,
+.dark .resize-handle:active {
+  background: #60a5fa;
 }
 
 /* 文章列表项 */

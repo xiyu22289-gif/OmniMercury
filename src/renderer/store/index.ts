@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Feed, Article, IpcResponse } from '../../shared/types'
+import type { Feed, Article, LlmConfig } from '../../shared/types'
 
 interface AppState {
   // ---- 数据 ----
@@ -17,6 +17,15 @@ interface AppState {
   isLoading: boolean
   error: string | null
 
+  // ---- LLM 状态 ----
+  showSettings: boolean
+  llmConfig: LlmConfig | null
+  summaryStream: string
+  summaryLoading: boolean
+  translateStream: string
+  translateLoading: boolean
+  translateMode: 'original' | 'translation' | 'bilingual'
+
   // ---- 操作 ----
   setFeeds: (feeds: Feed[]) => void
   setArticles: (articles: Article[]) => void
@@ -29,9 +38,22 @@ interface AppState {
   toggleDarkMode: () => void
   setLoading: (loading: boolean) => void
   setError: (error: string | null) => void
+
+  // ---- LLM 操作 ----
+  setShowSettings: (show: boolean) => void
+  setLlmConfig: (config: LlmConfig) => void
+  appendSummaryDelta: (delta: string) => void
+  setSummaryLoading: (loading: boolean) => void
+  resetSummary: () => void
+  appendTranslateDelta: (delta: string) => void
+  setTranslateLoading: (loading: boolean) => void
+  resetTranslate: () => void
+  setTranslateMode: (mode: 'original' | 'translation' | 'bilingual') => void
+  loadLlmConfig: () => Promise<void>
 }
 
 export const useStore = create<AppState>((set, get) => ({
+  // ---- 数据默认值 ----
   feeds: [],
   articles: [],
   selectedFeedId: null,
@@ -39,11 +61,23 @@ export const useStore = create<AppState>((set, get) => ({
   articleContent: null,
   searchQuery: '',
   searchResults: [],
+
+  // ---- UI 默认值 ----
   sidebarOpen: true,
   darkMode: false,
   isLoading: false,
   error: null,
 
+  // ---- LLM 默认值 ----
+  showSettings: false,
+  llmConfig: null,
+  summaryStream: '',
+  summaryLoading: false,
+  translateStream: '',
+  translateLoading: false,
+  translateMode: 'original',
+
+  // ---- RSS 操作 ----
   setFeeds: (feeds) => set({ feeds }),
   setArticles: (articles) => set({ articles }),
   selectFeed: async (feedId) => {
@@ -62,7 +96,14 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
   selectArticle: async (articleId) => {
-    set({ selectedArticleId: articleId, isLoading: true, articleContent: null })
+    set({
+      selectedArticleId: articleId,
+      isLoading: true,
+      articleContent: null,
+      summaryStream: '',
+      translateStream: '',
+      translateMode: 'original'
+    })
     try {
       const response = await window.api.getArticleContent(articleId)
       if (response.payload.error === 0) {
@@ -80,5 +121,24 @@ export const useStore = create<AppState>((set, get) => ({
   toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
   toggleDarkMode: () => set((state) => ({ darkMode: !state.darkMode })),
   setLoading: (loading) => set({ isLoading: loading }),
-  setError: (error) => set({ error })
+  setError: (error) => set({ error }),
+
+  // ---- LLM 操作 ----
+  setShowSettings: (show) => set({ showSettings: show }),
+  setLlmConfig: (config) => set({ llmConfig: config }),
+  appendSummaryDelta: (delta) => set((state) => ({ summaryStream: state.summaryStream + delta })),
+  setSummaryLoading: (loading) => set({ summaryLoading: loading }),
+  resetSummary: () => set({ summaryStream: '' }),
+  appendTranslateDelta: (delta) => set((state) => ({ translateStream: state.translateStream + delta })),
+  setTranslateLoading: (loading) => set({ translateLoading: loading }),
+  resetTranslate: () => set({ translateStream: '' }),
+  setTranslateMode: (mode) => set({ translateMode: mode }),
+  loadLlmConfig: async () => {
+    try {
+      const config = await window.api.getLlmConfig()
+      set({ llmConfig: config })
+    } catch {
+      // 非 Electron 环境（浏览器 mock），忽略
+    }
+  }
 }))

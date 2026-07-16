@@ -1,15 +1,38 @@
+import type {
+  IpcResponse,
+  LlmStreamChunk,
+  LlmStreamDone,
+  LlmStreamError,
+  LlmConfig
+} from '../shared/types'
+
 export {}
 
 declare global {
   interface Window {
     api: {
-      addFeed: (url: string) => Promise<import('../shared/types').IpcResponse>
-      listFeeds: () => Promise<import('../shared/types').IpcResponse>
-      refreshFeeds: () => Promise<import('../shared/types').IpcResponse>
-      getArticles: (feedId: number, offset?: number, limit?: number) => Promise<import('../shared/types').IpcResponse>
-      getArticleContent: (articleId: number) => Promise<import('../shared/types').IpcResponse>
-      removeFeed: (feedId: number) => Promise<import('../shared/types').IpcResponse>
-      searchArticles: (query: string, feedId?: number, offset?: number, limit?: number) => Promise<import('../shared/types').IpcResponse>
+      // ---- RSS 业务 ----
+      addFeed: (url: string) => Promise<IpcResponse>
+      listFeeds: () => Promise<IpcResponse>
+      refreshFeeds: () => Promise<IpcResponse>
+      getArticles: (feedId: number, offset?: number, limit?: number) => Promise<IpcResponse>
+      getArticleContent: (articleId: number) => Promise<IpcResponse>
+      removeFeed: (feedId: number) => Promise<IpcResponse>
+      searchArticles: (query: string, feedId?: number, offset?: number, limit?: number) => Promise<IpcResponse>
+
+      // ---- LLM 配置 ----
+      getLlmConfig: () => Promise<LlmConfig>
+      setLlmConfig: (updates: Record<string, string>) => Promise<{ success: boolean }>
+      resetLlmConfig: () => Promise<{ success: boolean }>
+
+      // ---- LLM 流式操作 ----
+      summarize: (articleId: number, content: string, title: string) => Promise<{ success: boolean }>
+      translate: (articleId: number, content: string, title: string) => Promise<{ success: boolean }>
+
+      /** 监听流式数据块，返回取消监听的函数 */
+      onStreamChunk: (
+        callback: (chunk: LlmStreamChunk | LlmStreamDone | LlmStreamError) => void
+      ) => () => void
     }
   }
 }
