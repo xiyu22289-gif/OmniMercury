@@ -96,7 +96,7 @@ export default function App() {
       </div>
 
       {/* 主内容区 — 三栏 + 拖拽分隔条 */}
-      <div className="flex flex-1 mt-10">
+      <div className="flex flex-1 min-h-0">
         {/* 侧边栏 */}
         <div
           className={sidebarOpen ? '' : 'sidebar collapsed'}

@@ -19,6 +19,7 @@ declare global {
       getArticleContent: (articleId: number) => Promise<IpcResponse>
       removeFeed: (feedId: number) => Promise<IpcResponse>
       searchArticles: (query: string, feedId?: number, offset?: number, limit?: number) => Promise<IpcResponse>
+      getCachedArticleContent: (articleId: number) => Promise<IpcResponse>
 
       // ---- LLM 配置 ----
       getLlmConfig: () => Promise<LlmConfig>

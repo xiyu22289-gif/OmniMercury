@@ -24,6 +24,8 @@ const api = {
     ipcRenderer.invoke('backend:removeFeed', feedId),
   searchArticles: (query: string, feedId?: number, offset?: number, limit?: number) =>
     ipcRenderer.invoke('backend:searchArticles', query, feedId, offset, limit),
+  getCachedArticleContent: (articleId: number) =>
+    ipcRenderer.invoke('backend:getCachedArticleContent', articleId),
 
   // ---- LLM 配置 ----
   getLlmConfig: (): Promise<LlmConfig> =>

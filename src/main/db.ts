@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { sqliteTable, integer, text } from 'drizzle-orm/sqlite-core';
-import { eq } from 'drizzle-orm';
+import { eq, like, sql } from 'drizzle-orm';
 import path from 'path';
 
 // ============================================================
@@ -196,4 +196,57 @@ export function clearAllData(): void {
   const sqlite = getDb();
   sqlite.delete(articles).run();
   sqlite.delete(feeds).run();
+}
+
+// ============================================================
+// 搜索 & 离线缓存
+// ============================================================
+
+/**
+ * 按标题模糊搜索文章。
+ *
+ * 使用 LIKE '%query%' 实现输入即搜索（如 "you are" 可匹配 "You Are Great"）。
+ * 返回结果按 title 首字母大小写排序：使用 SQLite COLLATE NOCASE 实现 case-insensitive
+ * 排序（例如 "excellent" 的 e 早于 "great" 的 g，所以 excellent 先出现）。
+ *
+ * @param query - 搜索关键词
+ * @param limit - 最大返回条数（默认 20，用于 suggestions 下拉）
+ */
+export function searchArticlesByTitle(
+  query: string,
+  limit = 20,
+): Pick<Article, 'id' | 'feedId' | 'title' | 'link' | 'summary' | 'author' | 'pubDate' | 'createdAt' | 'isRead'>[] {
+  return getDb()
+    .select({
+      id: articles.id,
+      feedId: articles.feedId,
+      title: articles.title,
+      link: articles.link,
+      summary: articles.summary,
+      author: articles.author,
+      pubDate: articles.pubDate,
+      createdAt: articles.createdAt,
+      isRead: articles.isRead,
+    })
+    .from(articles)
+    .where(like(articles.title, `%${query}%`))
+    .orderBy(sql`LOWER(${articles.title}) ASC`)
+    .limit(limit)
+    .all();
+}
+
+/**
+ * 按 ID 获取文章完整内容（含 content 和 contentMd）。
+ * 用于离线回退：网络不可用时，渲染进程可通过 IPC 直接从本地 DB 获取已缓存内容。
+ */
+export function getArticleContentById(articleId: number): Pick<Article, 'id' | 'content' | 'contentMd'> | undefined {
+  return getDb()
+    .select({
+      id: articles.id,
+      content: articles.content,
+      contentMd: articles.contentMd,
+    })
+    .from(articles)
+    .where(eq(articles.id, articleId))
+    .get();
 }

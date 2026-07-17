@@ -1,5 +1,5 @@
 import { ipcMain, BrowserWindow } from 'electron'
-import { addFeed, listFeeds, getArticles } from './feedService'
+import { addFeed, listFeeds, getArticles, searchArticles, getCachedArticleContent } from './feedService'
 import {
   getDb,
   getFeedById,
@@ -176,15 +176,63 @@ export function registerIpcHandlers(): void {
   })
 
   // ================================================================
-  // backend:searchArticles — 搜索文章
-  // TODO: Phase 2 完善 — 全文搜索
+  // backend:searchArticles — 按标题模糊搜索文章
   // ================================================================
   ipcMain.handle(
     'backend:searchArticles',
-    async (_event, _query: string, _feedId?: number, _offset?: number, _limit?: number): Promise<IpcResponse> => {
+    async (_event, query: string, _feedId?: number, _offset?: number, _limit?: number): Promise<IpcResponse> => {
+      if (!query || !query.trim()) {
+        return {
+          type: 'search_articles',
+          payload: { error: 0, articles: [] }
+        }
+      }
+
+      const limit = typeof _limit === 'number' && _limit > 0 ? _limit : 20
+      const results = searchArticles(query.trim(), limit)
+
+      const articles: Article[] = results.map((a) => ({
+        id: a.id,
+        feed_id: a.feedId,
+        title: a.title,
+        url: a.link ?? '',
+        author: a.author ?? undefined,
+        summary: a.summary ?? undefined,
+        published_at: a.pubDate ?? a.createdAt ?? '',
+        fetched_at: a.createdAt ?? '',
+        is_read: a.isRead === 1
+      }))
+
       return {
         type: 'search_articles',
-        payload: { error: 0, articles: [] }
+        payload: { error: 0, articles }
+      }
+    }
+  )
+
+  // ================================================================
+  // backend:getCachedArticleContent — 从本地 DB 获取文章离线内容
+  // ================================================================
+  ipcMain.handle(
+    'backend:getCachedArticleContent',
+    async (_event, articleId: number): Promise<IpcResponse> => {
+      const cached = getCachedArticleContent(articleId)
+
+      if (!cached) {
+        return {
+          type: 'get_cached_article_content',
+          payload: { error: 1, message: '本地无缓存内容' }
+        }
+      }
+
+      const content: ArticleContent = {
+        id: cached.id,
+        content: cached.body
+      }
+
+      return {
+        type: 'get_cached_article_content',
+        payload: { error: 0, content }
       }
     }
   )
