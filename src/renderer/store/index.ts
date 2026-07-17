@@ -18,6 +18,10 @@ interface AppState {
   isLoading: boolean
   error: string | null
 
+  // ---- M3 阅读模式 ----
+  readerMode: 'reader' | 'original'
+  readerTheme: 'light' | 'dark' | 'sepia'
+
   // ---- LLM 状态 ----
   showSettings: boolean
   llmConfig: LlmConfig | null
@@ -42,6 +46,10 @@ interface AppState {
   toggleDarkMode: () => void
   setLoading: (loading: boolean) => void
   setError: (error: string | null) => void
+
+  // ---- M3 阅读模式操作 ----
+  setReaderMode: (mode: 'reader' | 'original') => void
+  setReaderTheme: (theme: 'light' | 'dark' | 'sepia') => void
 
   // ---- LLM 操作 ----
   setShowSettings: (show: boolean) => void
@@ -72,6 +80,10 @@ export const useStore = create<AppState>((set, get) => ({
   darkMode: false,
   isLoading: false,
   error: null,
+
+  // ---- M3 阅读模式默认值 ----
+  readerMode: 'reader',
+  readerTheme: 'light',
 
   // ---- LLM 默认值 ----
   showSettings: false,
@@ -235,6 +247,10 @@ export const useStore = create<AppState>((set, get) => ({
   toggleDarkMode: () => set((state) => ({ darkMode: !state.darkMode })),
   setLoading: (loading) => set({ isLoading: loading }),
   setError: (error) => set({ error }),
+
+  // ---- M3 阅读模式操作 ----
+  setReaderMode: (mode) => set({ readerMode: mode }),
+  setReaderTheme: (theme) => set({ readerTheme: theme }),
 
   // ---- LLM 操作 ----
   setShowSettings: (show) => set({ showSettings: show }),

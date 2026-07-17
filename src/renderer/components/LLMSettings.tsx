@@ -49,7 +49,7 @@ export default function LLMSettings() {
   }
 
   const handleSave = async () => {
-    await window.api.setLlmConfig(form)
+    await window.api.setLlmConfig(form as unknown as Record<string, string>)
     await loadLlmConfig()
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)

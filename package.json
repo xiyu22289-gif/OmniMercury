@@ -30,6 +30,7 @@
     }
   },
   "dependencies": {
+    "@mozilla/readability": "^0.6.0",
     "axios": "^1.18.1",
     "better-sqlite3": "^12.11.1",
     "class-variance-authority": "^0.7.1",
@@ -37,17 +38,23 @@
     "drizzle-orm": "^0.45.2",
     "electron-store": "^8.2.0",
     "eventsource-parser": "^1.1.2",
+    "jsdom": "^22.1.0",
     "lucide-react": "^0.400.0",
     "openai": "^4.104.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "rss-parser": "^3.13.0",
     "tailwind-merge": "^2.6.1",
+    "turndown": "^7.2.4",
     "zustand": "^4.5.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
+    "@types/jsdom": "^28.0.3",
     "@types/node": "^20.14.0",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
+    "@types/turndown": "^5.0.6",
     "@vitejs/plugin-react": "^4.3.0",
     "autoprefixer": "^10.4.19",
     "electron": "^31.7.7",

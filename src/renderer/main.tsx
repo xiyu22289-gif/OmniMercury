@@ -16,6 +16,7 @@ if (!window.api) {
     getArticleContent: () => mockResolve({ content: { id: 0, content: '' } }),
     removeFeed: () => mockResolve({}),
     searchArticles: () => mockResolve({ articles: [] }),
+    getCachedArticleContent: () => mockResolve({ content: { id: 0, content: '' } }),
     getLlmConfig: () => mockResolve({}) as unknown as Promise<{ baseUrl: string; apiKey: string; model: string; translateTarget: string }>,
     setLlmConfig: () => Promise.resolve({ success: true }),
     resetLlmConfig: () => Promise.resolve({ success: true }),

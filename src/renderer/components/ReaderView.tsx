@@ -1,7 +1,31 @@
 import { useEffect, useCallback } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { useStore } from '../store'
-import { Globe, ExternalLink, Sparkles, Languages, Loader, Settings } from 'lucide-react'
+import {
+  Globe, ExternalLink, Sparkles, Languages, Loader, Settings,
+  BookOpen, Sun, Moon, Coffee
+} from 'lucide-react'
 import type { LlmStreamChunk, LlmStreamDone, LlmStreamError } from '../../shared/types'
+
+/** 阅读主题对应的 CSS 类名和背景色 */
+const READER_THEME_STYLES: Record<
+  'light' | 'dark' | 'sepia',
+  { container: string; prose: string }
+> = {
+  light: {
+    container: 'bg-white',
+    prose: 'prose-gray'
+  },
+  dark: {
+    container: 'bg-gray-900',
+    prose: 'prose-invert'
+  },
+  sepia: {
+    container: 'bg-amber-50',
+    prose: 'prose-amber'
+  }
+}
 
 export default function ReaderView() {
   const {
@@ -9,6 +33,11 @@ export default function ReaderView() {
     articleContent,
     articles,
     isLoading,
+    // 阅读模式
+    readerMode,
+    readerTheme,
+    setReaderMode,
+    setReaderTheme,
     // LLM 状态
     summaryStream,
     summaryLoading,
@@ -38,7 +67,6 @@ export default function ReaderView() {
           if ('delta' in chunk && chunk.delta) {
             appendSummaryDelta(chunk.delta)
           } else if ('fullText' in chunk && chunk.fullText !== undefined) {
-            // 流结束：完整文本已在 appendSummaryDelta 累积，此处可忽略
             setSummaryLoading(false)
           } else if ('message' in chunk && chunk.message) {
             setError(chunk.message)
@@ -113,27 +141,130 @@ export default function ReaderView() {
     setTranslateMode(modes[(currentIdx + 1) % modes.length])
   }
 
-  // ---- 渲染 ----
+  // 阅读主题循环切换
+  const cycleReaderTheme = () => {
+    const themes: Array<'light' | 'dark' | 'sepia'> = ['light', 'dark', 'sepia']
+    const currentIdx = themes.indexOf(readerTheme)
+    setReaderTheme(themes[(currentIdx + 1) % themes.length])
+  }
 
-  if (!selectedArticleId || !selectedArticle) {
+  // 主题图标
+  const ThemeIcon = readerTheme === 'light' ? Sun : readerTheme === 'dark' ? Moon : Coffee
+  const themeLabel = readerTheme === 'light' ? '浅色' : readerTheme === 'dark' ? '深色' : '护眼'
+
+  // ---- 渲染 Markdown（reader 模式） ----
+  const renderMarkdownContent = () => {
+    const displayContent = articleContent || selectedArticle?.summary || ''
+
+    if (!displayContent && !isLoading) {
+      return (
+        <div className="text-gray-400 text-sm py-8 text-center">
+          <Globe size={48} className="mx-auto mb-3 opacity-30" />
+          Content not available. The article may need to be fetched from the source.
+        </div>
+      )
+    }
+
     return (
-      <div className="reader-view flex items-center justify-center text-gray-400 text-sm">
-        Select an article to read
+      <div className={`prose prose-sm ${READER_THEME_STYLES[readerTheme].prose} max-w-none leading-relaxed`}>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            // 自定义链接在新窗口打开
+            a: ({ href, children, ...props }) => (
+              <a
+                href={href}
+                target="_blank"
+                rel="noreferrer"
+                className="text-blue-500 hover:text-blue-600 underline"
+                {...props}
+              >
+                {children}
+              </a>
+            ),
+            // 图片使用懒加载
+            img: ({ src, alt, ...props }) => (
+              <img
+                src={src}
+                alt={alt || ''}
+                loading="lazy"
+                className="rounded-lg max-w-full"
+                {...props}
+              />
+            ),
+            // 代码块样式
+            code: ({ children, className, ...props }) => {
+              const isInline = !className
+              if (isInline) {
+                return (
+                  <code
+                    className="px-1 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-sm font-mono"
+                    {...props}
+                  >
+                    {children}
+                  </code>
+                )
+              }
+              return (
+                <code className={className} {...props}>
+                  {children}
+                </code>
+              )
+            },
+            pre: ({ children, ...props }) => (
+              <pre
+                className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4 overflow-x-auto text-sm"
+                {...props}
+              >
+                {children}
+              </pre>
+            ),
+          }}
+        >
+          {displayContent}
+        </ReactMarkdown>
+      </div>
+    )
+  }
+
+  // ---- 渲染原始网页（original 模式） ----
+  const renderOriginalContent = () => {
+    // 原始网页模式：打开外部链接
+    if (selectedArticle?.url) {
+      return (
+        <div className="flex flex-col items-center justify-center py-12 text-gray-400">
+          <Globe size={48} className="mb-3 opacity-30" />
+          <p className="text-sm mb-4">原始网页需在外部浏览器中查看</p>
+          <a
+            href={selectedArticle.url}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-500 text-white text-sm rounded-lg hover:bg-blue-600 transition-colors"
+          >
+            <ExternalLink size={14} />
+            在浏览器中打开原文
+          </a>
+        </div>
+      )
+    }
+
+    return (
+      <div className="text-gray-400 text-sm py-8 text-center">
+        No original URL available
       </div>
     )
   }
 
   // 根据翻译模式决定显示的内容
   const renderContent = () => {
-    // 优先显示流式翻译/摘要的实时累积文本
-    const displayOriginal = articleContent || selectedArticle.summary || ''
-
     if (translateMode === 'translation' && translateStream) {
       // 仅译文
       return (
-        <div className="prose prose-sm dark:prose-invert max-w-none leading-relaxed whitespace-pre-wrap">
-          {translateStream}
-          {translateLoading && <span className="inline-block w-2 h-4 bg-blue-500 animate-pulse ml-0.5" />}
+        <div className={`rounded-lg p-6 ${READER_THEME_STYLES[readerTheme].container}`}>
+          <div className={`prose prose-sm ${READER_THEME_STYLES[readerTheme].prose} max-w-none leading-relaxed`}>
+            <div className="whitespace-pre-wrap">{translateStream}</div>
+            {translateLoading && <span className="inline-block w-2 h-4 bg-blue-500 animate-pulse ml-0.5" />}
+          </div>
         </div>
       )
     }
@@ -142,17 +273,14 @@ export default function ReaderView() {
       // 双语对照
       return (
         <div className="grid grid-cols-2 gap-4">
-          <div className="border-r border-gray-200 dark:border-gray-700 pr-4">
+          <div className={`rounded-lg p-6 ${READER_THEME_STYLES[readerTheme].container} border-r border-gray-200 dark:border-gray-700`}>
             <div className="text-xs font-medium text-gray-400 mb-2 uppercase tracking-wider">原文</div>
-            <div
-              className="prose prose-sm dark:prose-invert max-w-none leading-relaxed"
-              dangerouslySetInnerHTML={{ __html: displayOriginal }}
-            />
+            {readerMode === 'reader' ? renderMarkdownContent() : renderOriginalContent()}
           </div>
-          <div className="pl-4">
+          <div className={`rounded-lg p-6 ${READER_THEME_STYLES[readerTheme].container}`}>
             <div className="text-xs font-medium text-gray-400 mb-2 uppercase tracking-wider">译文</div>
-            <div className="prose prose-sm dark:prose-invert max-w-none leading-relaxed whitespace-pre-wrap">
-              {translateStream}
+            <div className={`prose prose-sm ${READER_THEME_STYLES[readerTheme].prose} max-w-none leading-relaxed`}>
+              <div className="whitespace-pre-wrap">{translateStream}</div>
               {translateLoading && <span className="inline-block w-2 h-4 bg-blue-500 animate-pulse ml-0.5" />}
             </div>
           </div>
@@ -160,29 +288,33 @@ export default function ReaderView() {
       )
     }
 
-    // 默认：原文
+    // 默认：原文（reader 或 original 模式）
     return (
       <>
         {isLoading && (
           <div className="flex items-center justify-center py-12">
-            <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+            <div className="flex flex-col items-center gap-3">
+              <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+              <span className="text-xs text-gray-400">正在提取正文...</span>
+            </div>
           </div>
         )}
 
-        {!isLoading && articleContent && (
-          <div
-            className="prose prose-sm dark:prose-invert max-w-none leading-relaxed"
-            dangerouslySetInnerHTML={{ __html: articleContent }}
-          />
-        )}
-
-        {!isLoading && !articleContent && (
-          <div className="text-gray-400 text-sm py-8 text-center">
-            <Globe size={48} className="mx-auto mb-3 opacity-30" />
-            Content not available. The article may need to be fetched from the source.
+        {!isLoading && (
+          <div className={`rounded-lg p-6 ${READER_THEME_STYLES[readerTheme].container}`}>
+            {readerMode === 'reader' ? renderMarkdownContent() : renderOriginalContent()}
           </div>
         )}
       </>
+    )
+  }
+
+  // 空状态
+  if (!selectedArticleId || !selectedArticle) {
+    return (
+      <div className="reader-view flex items-center justify-center text-gray-400 text-sm">
+        Select an article to read
+      </div>
     )
   }
 
@@ -194,7 +326,7 @@ export default function ReaderView() {
           {selectedArticle.title || '(Untitled)'}
         </h1>
 
-        <div className="flex items-center gap-3 text-sm text-gray-500 dark:text-gray-400 mb-2">
+        <div className="flex items-center gap-3 text-sm text-gray-500 dark:text-gray-400 mb-2 flex-wrap">
           {selectedArticle.author && (
             <span>{selectedArticle.author}</span>
           )}
@@ -220,8 +352,39 @@ export default function ReaderView() {
           </a>
         </div>
 
-        {/* ---- LLM 操作栏 ---- */}
-        <div className="flex items-center gap-2 mb-4 pb-3 border-b border-gray-200 dark:border-gray-700">
+        {/* ---- 工具栏：阅读模式 + 主题 + LLM 操作 ---- */}
+        <div className="flex items-center gap-2 mb-4 pb-3 border-b border-gray-200 dark:border-gray-700 flex-wrap">
+          {/* 阅读模式切换 */}
+          <button
+            onClick={() => setReaderMode(readerMode === 'reader' ? 'original' : 'reader')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors
+              ${readerMode === 'reader'
+                ? 'bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400'
+                : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+              }`}
+            title={readerMode === 'reader' ? '阅读模式（点击切换原始网页）' : '原始网页（点击切换阅读模式）'}
+          >
+            <BookOpen size={13} />
+            {readerMode === 'reader' ? '阅读模式' : '原始网页'}
+          </button>
+
+          {/* 阅读主题切换（仅在 reading mode 显示） */}
+          {readerMode === 'reader' && (
+            <button
+              onClick={cycleReaderTheme}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg
+                       bg-orange-50 text-orange-600 hover:bg-orange-100
+                       dark:bg-orange-900/20 dark:text-orange-400 dark:hover:bg-orange-900/30
+                       transition-colors"
+              title={`当前主题：${themeLabel}（点击切换）`}
+            >
+              <ThemeIcon size={13} />
+              {themeLabel}
+            </button>
+          )}
+
+          <div className="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1" />
+
           {/* 摘要按钮 */}
           <button
             onClick={handleSummarize}
@@ -294,8 +457,10 @@ export default function ReaderView() {
                 <Loader size={12} className="animate-spin text-purple-400 ml-1" />
               )}
             </div>
-            <div className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap">
-              {summaryStream}
+            <div className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {summaryStream}
+              </ReactMarkdown>
             </div>
           </div>
         )}

@@ -9,6 +9,7 @@ import {
 import { eq } from 'drizzle-orm'
 import { summarizeArticle, translateArticle } from './llmService'
 import { getLlmConfig, setLlmConfig, resetLlmConfig } from './configService'
+import { getOrFetchArticleContent } from './contentService'
 import type {
   IpcResponse,
   Feed,
@@ -109,16 +110,18 @@ export function registerIpcHandlers(): void {
   )
 
   // ================================================================
-  // backend:getArticleContent — 获取文章正文
+  // backend:getArticleContent — 获取文章正文（含 M3 清洗流水线）
   // ================================================================
   ipcMain.handle(
     'backend:getArticleContent',
     async (_event, articleId: number): Promise<IpcResponse> => {
+      // 1. 查询文章基本信息（含 link 用于清洗流水线）
       const article = getDb()
         .select({
           id: articlesTable.id,
           content: articlesTable.content,
-          contentMd: articlesTable.contentMd
+          contentMd: articlesTable.contentMd,
+          link: articlesTable.link,
         })
         .from(articlesTable)
         .where(eq(articlesTable.id, articleId))
@@ -131,7 +134,49 @@ export function registerIpcHandlers(): void {
         }
       }
 
-      const body = article.contentMd ?? article.content ?? '(暂无正文内容)'
+      // 2. 如果已有缓存的 contentMd，直接返回（快速路径）
+      if (article.contentMd) {
+        const content: ArticleContent = {
+          id: article.id,
+          content: article.contentMd
+        }
+        return {
+          type: 'get_article_content',
+          payload: { error: 0, content }
+        }
+      }
+
+      // 3. 如果文章有原始链接，走清洗流水线
+      if (article.link) {
+        try {
+          const result = await getOrFetchArticleContent(articleId, article.link)
+
+          const content: ArticleContent = {
+            id: articleId,
+            content: result.content
+          }
+
+          return {
+            type: 'get_article_content',
+            payload: { error: 0, content }
+          }
+        } catch (err) {
+          console.error('[ipcHandlers] getOrFetchArticleContent 异常：', err)
+          // 降级：尝试返回原始 content
+          const fallback = article.content ?? '(暂无正文内容)'
+          const content: ArticleContent = {
+            id: articleId,
+            content: fallback
+          }
+          return {
+            type: 'get_article_content',
+            payload: { error: 0, content }
+          }
+        }
+      }
+
+      // 4. 没有链接也没有缓存 contentMd，返回原始 content
+      const body = article.content ?? '(暂无正文内容)'
 
       const content: ArticleContent = {
         id: article.id,
