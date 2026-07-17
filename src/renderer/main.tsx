@@ -16,6 +16,12 @@ if (!window.api) {
     getArticleContent: () => mockResolve({ content: { id: 0, content: '' } }),
     removeFeed: () => mockResolve({}),
     searchArticles: () => mockResolve({ articles: [] }),
+    getLlmConfig: () => mockResolve({}) as unknown as Promise<{ baseUrl: string; apiKey: string; model: string; translateTarget: string }>,
+    setLlmConfig: () => Promise.resolve({ success: true }),
+    resetLlmConfig: () => Promise.resolve({ success: true }),
+    summarize: () => Promise.resolve({ success: true }),
+    translate: () => Promise.resolve({ success: true }),
+    onStreamChunk: () => () => {}, // no-op, returns cleanup fn
   }
 }
 

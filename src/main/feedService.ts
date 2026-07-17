@@ -6,6 +6,8 @@ import {
   insertArticles,
   getArticlesByFeedId,
   getAllFeeds,
+  searchArticlesByTitle,
+  getArticleContentById,
   type Feed,
   type Article,
   type NewArticle,
@@ -44,12 +46,17 @@ export interface FeedSummary {
 export interface ArticleSummary {
   id: number;
   title: string;
-  isRead: number;
+  isRead: number | null;
   summary: string | null;
   link: string | null;
   author: string | null;
   pubDate: string | null;
   createdAt: string | null;
+}
+
+/** searchArticles 返回的文章摘要（含 feedId） */
+export interface SearchArticleSummary extends ArticleSummary {
+  feedId: number;
 }
 
 // ============================================================
@@ -235,4 +242,34 @@ export function getArticles(feedId: number): ArticleSummary[] {
     pubDate: a.pubDate,
     createdAt: a.createdAt,
   }));
+}
+
+/**
+ * 按标题模糊搜索文章（供 SearchBar suggestions 使用）。
+ * 使用 LIKE 实现输入即搜索，结果按首字母大小写不敏感排序。
+ */
+export function searchArticles(query: string, limit = 20): SearchArticleSummary[] {
+  return searchArticlesByTitle(query, limit).map((a) => ({
+    id: a.id,
+    feedId: a.feedId,
+    title: a.title,
+    isRead: a.isRead,
+    summary: a.summary,
+    link: a.link,
+    author: a.author,
+    pubDate: a.pubDate,
+    createdAt: a.createdAt,
+  }));
+}
+
+/**
+ * 从本地 DB 获取文章离线内容（不依赖网络）。
+ * 返回 contentMd（清洗后 Markdown）或 content（原始文本），都没有则返回 undefined。
+ */
+export function getCachedArticleContent(articleId: number): { id: number; body: string } | undefined {
+  const row = getArticleContentById(articleId);
+  if (!row) return undefined;
+  const body = row.contentMd ?? row.content ?? '';
+  if (!body) return undefined;
+  return { id: row.id, body };
 }

@@ -34,3 +34,6 @@ npm-debug.log*
 # 系统文件
 .DS_Store
 Thumbs.db
+
+# 同学参考项目（不提交）
+src/OmniMercury000/

@@ -35,7 +35,10 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.45.2",
+    "electron-store": "^8.2.0",
+    "eventsource-parser": "^1.1.2",
     "lucide-react": "^0.400.0",
+    "openai": "^4.104.0",
     "rss-parser": "^3.13.0",
     "tailwind-merge": "^2.6.1",
     "zustand": "^4.5.0"

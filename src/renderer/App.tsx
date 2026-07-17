@@ -1,10 +1,20 @@
-import { useEffect, useCallback } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useStore } from './store'
 import Sidebar from './components/Sidebar'
 import ArticleList from './components/ArticleList'
 import ReaderView from './components/ReaderView'
 import SearchBar from './components/SearchBar'
+import LLMSettings from './components/LLMSettings'
+import ResizeHandle from './components/ResizeHandle'
 import { Menu as MenuIcon, Sun, Moon } from 'lucide-react'
+
+/** 默认宽度常量 */
+const DEFAULT_SIDEBAR_WIDTH = 260
+const DEFAULT_LIST_WIDTH = 360
+const MIN_SIDEBAR_WIDTH = 160
+const MIN_LIST_WIDTH = 240
+const MAX_SIDEBAR_WIDTH = 500
+const MAX_LIST_WIDTH = 600
 
 export default function App() {
   const {
@@ -12,7 +22,27 @@ export default function App() {
     setFeeds, selectFeed, setError, isLoading
   } = useStore()
 
-  // 初始化：加载订阅源列表
+  // ---- 可拖拽宽度状态 ----
+  const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH)
+  const [listWidth, setListWidth] = useState(DEFAULT_LIST_WIDTH)
+
+  // 侧边栏收起/展开
+  const handleToggleSidebar = useCallback(() => {
+    if (sidebarOpen) {
+      // 收起前记住当前宽度
+      setSidebarWidth((prev) => {
+        // 仅当不是已收起状态时才存记忆值
+        return prev
+      })
+      toggleSidebar()
+    } else {
+      toggleSidebar()
+      // 恢复默认宽度（如果上次宽度 < 最小值则用默认）
+      setSidebarWidth((prev) => (prev < MIN_SIDEBAR_WIDTH ? DEFAULT_SIDEBAR_WIDTH : prev))
+    }
+  }, [sidebarOpen, toggleSidebar])
+
+  // ---- 初始化：加载订阅源列表 ----
   useEffect(() => {
     async function loadFeeds() {
       try {
@@ -45,7 +75,7 @@ export default function App() {
       {/* 顶栏 */}
       <div className="fixed top-0 left-0 right-0 h-10 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center px-3 gap-2 z-10">
         <button
-          onClick={toggleSidebar}
+          onClick={handleToggleSidebar}
           className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
           title="Toggle sidebar"
         >
@@ -65,10 +95,53 @@ export default function App() {
         </button>
       </div>
 
-      {/* 主内容区 */}
-      <div className="flex flex-1 mt-10">
-        <Sidebar />
-        <ArticleList />
+      {/* 主内容区 — 三栏 + 拖拽分隔条 */}
+      <div className="flex flex-1 min-h-0">
+        {/* 侧边栏 */}
+        <div
+          className={sidebarOpen ? '' : 'sidebar collapsed'}
+          style={{
+            width: sidebarOpen ? sidebarWidth : 0,
+            minWidth: sidebarOpen ? MIN_SIDEBAR_WIDTH : 0
+          }}
+        >
+          <Sidebar />
+        </div>
+
+        {/* 分隔条 1：侧边栏 ↔ 文章列表 */}
+        {sidebarOpen && (
+          <ResizeHandle
+            direction="horizontal"
+            onResize={(delta) => {
+              setSidebarWidth((prev) =>
+                Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, prev + delta))
+              )
+            }}
+          />
+        )}
+
+        {/* 文章列表 */}
+        <div
+          className="article-list"
+          style={{
+            width: listWidth,
+            minWidth: MIN_LIST_WIDTH
+          }}
+        >
+          <ArticleList />
+        </div>
+
+        {/* 分隔条 2：文章列表 ↔ 阅读区 */}
+        <ResizeHandle
+          direction="horizontal"
+          onResize={(delta) => {
+            setListWidth((prev) =>
+              Math.min(MAX_LIST_WIDTH, Math.max(MIN_LIST_WIDTH, prev + delta))
+            )
+          }}
+        />
+
+        {/* 阅读区 */}
         <ReaderView />
       </div>
 
@@ -78,6 +151,9 @@ export default function App() {
           Loading...
         </div>
       )}
+
+      {/* LLM 设置对话框 */}
+      <LLMSettings />
     </div>
   )
 }

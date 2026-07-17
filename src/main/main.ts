@@ -19,8 +19,11 @@ function createWindow(): void {
   })
 
   // 开发模式加载 Vite dev server，生产模式加载打包文件
-  if (process.env.ELECTRON_RENDERER_URL) {
-    mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
+  if (!app.isPackaged && process.env['ELECTRON_RENDERER_URL']) {
+    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+  } else if (!app.isPackaged) {
+    // Fallback: dev 模式下 env 未注入时手动连 localhost
+    mainWindow.loadURL('http://localhost:5173')
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
