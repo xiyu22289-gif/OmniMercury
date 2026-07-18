@@ -1,333 +1,164 @@
 /**
  * LLM 通用接入服务 — 兼容 OpenAI 协议的流式调用。
- *
- * 遵循 AGENTS.md §3.2：
- * - 统一使用 openai SDK，通过 baseURL + apiKey 适配全品类模型
- * - 流式输出固定使用 eventsource-parser 解析 SSE
- * - 严禁抛未捕获异常：所有错误统一返回 { success: false, error }
  */
 
 import OpenAI from 'openai'
-import { createParser, type ParsedEvent, type ReconnectInterval } from 'eventsource-parser'
-import { getLlmConfig, type LlmConfig } from './configService'
+import { getLlmConfig, getApiKeyForModel, type LlmConfig } from './configService'
 import { getDb, articles as articlesTable } from './db'
 import { eq } from 'drizzle-orm'
-import type {
-  LlmStreamChunk,
-  LlmStreamDone,
-  LlmStreamError,
-  SummarizeRequest,
-  TranslateRequest
-} from '../shared/types'
+import type { LlmStreamChunk, LlmStreamDone, LlmStreamError, SummarizeRequest, TranslateRequest } from '../shared/types'
 
-// ============================================================
-// 类型定义
-// ============================================================
-
-export interface LlmResultSuccess {
-  success: true
-  text: string
-}
-
-export interface LlmResultFailure {
-  success: false
-  error: string
-}
-
-export type LlmResult = LlmResultSuccess | LlmResultFailure
-
-/** 流式回调类型 */
 type StreamCallback = (chunk: LlmStreamChunk | LlmStreamDone | LlmStreamError) => void
 
-// ============================================================
-// OpenAI 客户端工厂（每次调用按最新配置重建，保证配置热更新）
-// ============================================================
-
-function createClient(config: LlmConfig): OpenAI {
-  if (!config.apiKey) {
-    throw new Error('API Key 未配置。请在设置中填写 LLM API Key。')
-  }
-  return new OpenAI({
-    apiKey: config.apiKey,
-    baseURL: config.baseUrl,
-    timeout: 120_000 // 2 分钟超时（翻译可能较慢）
-  })
+function createClient(config: LlmConfig, activeKey: string): OpenAI {
+  if (!activeKey) throw new Error('API Key 未配置。请在设置中填写 LLM API Key。')
+  return new OpenAI({ apiKey: activeKey, baseURL: config.baseUrl, timeout: 120_000 })
 }
 
-// ============================================================
-// 流式 SSE 解析辅助
-// ============================================================
+type ChatStream = AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>
 
-/**
- * 将 OpenAI 兼容的 ReadableStream 转为逐块回调。
- *
- * @param stream    fetch 返回的 ReadableStream
- * @param onDelta  每收到一个增量文本片段调用
- * @param onDone   流结束调用（传入完整累积文本）
- * @param onError  流内出错调用
- */
-async function parseStream(
-  stream: ReadableStream<Uint8Array>,
+async function consumeStream(
+  stream: ChatStream,
   onDelta: (delta: string) => void,
   onDone: (fullText: string) => void,
   onError: (message: string) => void
 ): Promise<void> {
   let fullText = ''
-  const decoder = new TextDecoder()
-
-  const parser = createParser(
-    (event: ParsedEvent | ReconnectInterval) => {
-      if (event.type !== 'event') return
-
-      const data = event.data
-      if (data === '[DONE]') {
-        onDone(fullText)
-        return
-      }
-
-      try {
-        const parsed = JSON.parse(data)
-        const delta = parsed.choices?.[0]?.delta?.content
-        if (delta) {
-          fullText += delta
-          onDelta(delta)
-        }
-      } catch {
-        // 某些 SSE chunk 非 JSON（如注释），安全忽略
-      }
-    }
-  )
-
-  const reader = stream.getReader()
   try {
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) {
-        // 流自然结束但未收到 [DONE] 标记
-        onDone(fullText)
-        break
-      }
-      const chunk = decoder.decode(value, { stream: true })
-      parser.feed(chunk)
+    for await (const chunk of stream) {
+      const delta = chunk.choices?.[0]?.delta?.content
+      if (delta) { fullText += delta; onDelta(delta) }
     }
+    onDone(fullText)
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    onError(message)
+    onError(err instanceof Error ? err.message : String(err))
   }
 }
 
-// ============================================================
-// AI 摘要 Prompt
-// ============================================================
+/** Kimi 只接受 temperature=1，其他模型保持 0.1 */
+function getTemperature(model: string): number {
+  if (model.startsWith('kimi-')) return 1
+  return 0.1
+}
+
+function splitHtmlIntoParagraphs(html: string): string[] {
+  const parts = html.split(/(<\/p>|<\/h[1-6]>|<\/li>|<\/blockquote>|<\/div>)/i)
+  const paragraphs: string[] = []
+  let current = ''
+  for (const part of parts) {
+    current += part
+    if (/\/(p|h[1-6]|li|blockquote|div)>$/i.test(part.trim())) {
+      if (current.trim()) paragraphs.push(current.trim())
+      current = ''
+    }
+  }
+  if (current.trim()) paragraphs.push(current.trim())
+  return paragraphs.length > 0 ? paragraphs : [html]
+}
+
+function buildParagraphTranslatePrompt(paragraph: string, targetLang: string): string {
+  const cleaned = paragraph.replace(/<img[^>]*\/?>/gi, '[Image]')
+  if (!cleaned.trim() || /^[\s\W_]+$/.test(cleaned.replace(/<[^>]+>/g, '').trim())) return ''
+  return `Translate this HTML fragment to ${targetLang}. Preserve all HTML tags exactly. Only translate visible text. No explanations:\n\n${cleaned}`
+}
+
+export async function translateParagraphs(request: TranslateRequest, callback: StreamCallback): Promise<void> {
+  const { articleId, content, targetLang } = request
+  if (!content?.trim()) { callback({ type: 'translate', articleId, message: '文章内容为空，无法翻译。' }); return }
+
+  let config: LlmConfig
+  try { config = getLlmConfig() } catch (err) {
+    callback({ type: 'translate', articleId, message: `读取 LLM 配置失败：${err instanceof Error ? err.message : String(err)}` }); return
+  }
+
+  const activeKey = getApiKeyForModel(config.model)
+  if (!activeKey) { callback({ type: 'translate', articleId, message: '未配置 API Key' }); return }
+
+  const paragraphs = splitHtmlIntoParagraphs(content)
+  const temp = getTemperature(config.model)
+  for (let i = 0; i < paragraphs.length; i++) {
+    const prompt = buildParagraphTranslatePrompt(paragraphs[i], targetLang)
+    if (!prompt) { callback({ type: 'translateParagraph', articleId, paragraphIndex: i, fullText: '' }); continue }
+    try {
+      const client = createClient(config, activeKey)
+      const stream = await client.chat.completions.create({ model: config.model, messages: [{ role: 'user', content: prompt }], temperature: temp, stream: true })
+      await consumeStream(stream,
+        (delta) => callback({ type: 'translateParagraph', articleId, paragraphIndex: i, delta }),
+        (fullText) => callback({ type: 'translateParagraph', articleId, paragraphIndex: i, fullText }),
+        (errorMsg) => callback({ type: 'translateParagraph', articleId, paragraphIndex: i, message: errorMsg })
+      )
+      // 段间延迟 500ms，防止短时间内大量请求触发限流
+      if (i < paragraphs.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 500))
+      }
+    } catch (err) {
+      callback({ type: 'translateParagraph', articleId, paragraphIndex: i, message: `[翻译失败] ${err instanceof Error ? err.message : String(err)}` })
+    }
+  }
+}
 
 function buildSummarizePrompt(title: string, content: string): string {
-  // 截断过长内容（模型上下文窗口限制）
   const maxContentLen = 8000
-  const truncated =
-    content.length > maxContentLen ? content.slice(0, maxContentLen) + '\n\n[内容过长已截断...]' : content
-
-  return `请为以下文章生成一段简洁的中文摘要（约200字），涵盖文章的核心观点和关键信息：
-
-标题：${title}
-
-正文：
-${truncated}
-
-摘要：`
+  const truncated = content.length > maxContentLen ? content.slice(0, maxContentLen) + '\n\n[内容过长已截断...]' : content
+  return `请为以下文章生成一段简洁的中文摘要（约200字）：\n\n标题：${title}\n\n正文：\n${truncated}\n\n摘要：`
 }
 
-// ============================================================
-// AI 翻译 Prompt
-// ============================================================
-
-function buildTranslatePrompt(content: string, targetLang: string): string {
-  const maxContentLen = 8000
-  const truncated =
-    content.length > maxContentLen ? content.slice(0, maxContentLen) + '\n\n[内容过长已截断...]' : content
-
-  return `请将以下内容翻译为${targetLang}。保持原文的 Markdown 格式、段落结构和链接。只输出译文，不要包含任何解释或前言：
-
-${truncated}`
-}
-
-// ============================================================
-// 公开 API — 流式摘要
-// ============================================================
-
-/**
- * 调用 LLM 生成文章摘要（流式）。
- *
- * 每一步都会通过 callback 发送进度块给渲染进程。
- * 完成后自动将摘要写入数据库 articles.summary 字段。
- */
-export async function summarizeArticle(
-  request: SummarizeRequest,
-  callback: StreamCallback
-): Promise<void> {
+export async function summarizeArticle(request: SummarizeRequest, callback: StreamCallback): Promise<void> {
   const { articleId, content, title } = request
   const type = 'summarize' as const
-
-  // 参数校验
-  if (!content?.trim()) {
-    callback({ type, articleId, message: '文章内容为空，无法生成摘要。' })
-    return
-  }
+  if (!content?.trim()) { callback({ type, articleId, message: '文章内容为空' }); return }
 
   let config: LlmConfig
-  try {
-    config = getLlmConfig()
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    callback({ type, articleId, message: `读取 LLM 配置失败：${message}` })
-    return
-  }
-
-  if (!config.apiKey) {
-    callback({ type, articleId, message: '未配置 API Key，请在设置中填写。' })
-    return
-  }
+  try { config = getLlmConfig() } catch (err) { callback({ type, articleId, message: `配置失败：${err}` }); return }
+  const activeKey = getApiKeyForModel(config.model)
+  if (!activeKey) { callback({ type, articleId, message: '未配置 API Key' }); return }
 
   let client: OpenAI
-  try {
-    client = createClient(config)
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    callback({ type, articleId, message })
-    return
-  }
+  try { client = createClient(config, activeKey) } catch (err) { callback({ type, articleId, message: String(err) }); return }
 
   const prompt = buildSummarizePrompt(title, content)
-
   try {
-    const stream = await client.chat.completions.create({
-      model: config.model,
-      messages: [
-        { role: 'system', content: '你是一个专业的文章摘要助手，擅长提取核心观点并生成简洁、信息密集的中文摘要。' },
-        { role: 'user', content: prompt }
-      ],
-      temperature: 0.3,
-      max_tokens: 800,
-      stream: true,
-      stream_options: { include_usage: true }
-    })
-
-    // ReadableStream → SSE 解析 → 逐块回调
-    await parseStream(
-      stream.toReadableStream(),
-      // onDelta
-      (delta) => {
-        callback({ type, articleId, delta })
-      },
-      // onDone → 持久化摘要
+    const stream = await client.chat.completions.create({ model: config.model, messages: [{ role: 'system', content: '你是一个专业的文章摘要助手。' }, { role: 'user', content: prompt }], temperature: getTemperature(config.model), max_tokens: 800, stream: true })
+    await consumeStream(stream,
+      (delta) => callback({ type, articleId, delta }),
       (fullText) => {
-        if (fullText.trim()) {
-          try {
-            getDb()
-              .update(articlesTable)
-              .set({ summary: fullText.trim() })
-              .where(eq(articlesTable.id, articleId))
-              .run()
-          } catch (dbErr) {
-            console.error('[llmService] 摘要入库失败：', dbErr)
-          }
-        }
+        if (fullText.trim()) { try { getDb().update(articlesTable).set({ summary: fullText.trim() }).where(eq(articlesTable.id, articleId)).run() } catch {} }
         callback({ type, articleId, fullText: fullText.trim() })
       },
-      // onError
-      (errorMsg) => {
-        callback({ type, articleId, message: errorMsg })
-      }
+      (errorMsg) => callback({ type, articleId, message: errorMsg })
     )
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    callback({ type, articleId, message: `LLM 调用失败：${message}` })
-  }
+  } catch (err) { callback({ type, articleId, message: `LLM 调用失败：${err}` }) }
 }
 
-// ============================================================
-// 公开 API — 流式翻译
-// ============================================================
+function buildTranslatePrompt(content: string, targetLang: string): string {
+  const maxContentLen = 6000
+  const truncated = content.length > maxContentLen ? content.slice(0, maxContentLen) + '\n[Content truncated...]' : content
+  return `You are a professional translator. Translate the following HTML content to ${targetLang}. Preserve ALL HTML tags. Only translate visible text. Output ONLY the translated HTML:\n\n${truncated}`
+}
 
-/**
- * 调用 LLM 翻译文章内容（流式）。
- *
- * 完成后自动将译文存入数据库 articles.content_md 字段。
- * 注意：原文保留在 articles.content 中不覆盖。
- */
-export async function translateArticle(
-  request: TranslateRequest,
-  callback: StreamCallback
-): Promise<void> {
-  const { articleId, content, title } = request
+export async function translateArticle(request: TranslateRequest, callback: StreamCallback): Promise<void> {
+  const { articleId, content, title, targetLang } = request
   const type = 'translate' as const
-
-  if (!content?.trim()) {
-    callback({ type, articleId, message: '文章内容为空，无法翻译。' })
-    return
-  }
+  if (!content?.trim()) { callback({ type, articleId, message: '文章内容为空' }); return }
 
   let config: LlmConfig
-  try {
-    config = getLlmConfig()
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    callback({ type, articleId, message: `读取 LLM 配置失败：${message}` })
-    return
-  }
-
-  if (!config.apiKey) {
-    callback({ type, articleId, message: '未配置 API Key，请在设置中填写。' })
-    return
-  }
+  try { config = getLlmConfig() } catch (err) { callback({ type, articleId, message: `配置失败：${err}` }); return }
+  const activeKey = getApiKeyForModel(config.model)
+  if (!activeKey) { callback({ type, articleId, message: '未配置 API Key' }); return }
 
   let client: OpenAI
+  try { client = createClient(config, activeKey) } catch (err) { callback({ type, articleId, message: String(err) }); return }
+
+  const prompt = buildTranslatePrompt(content, targetLang)
   try {
-    client = createClient(config)
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    callback({ type, articleId, message })
-    return
-  }
-
-  const prompt = buildTranslatePrompt(content, config.translateTarget)
-
-  try {
-    const stream = await client.chat.completions.create({
-      model: config.model,
-      messages: [
-        { role: 'system', content: `你是一个专业的翻译助手。请将用户提供的文章精准翻译为${config.translateTarget}。` },
-        { role: 'user', content: prompt }
-      ],
-      temperature: 0.1,
-      stream: true,
-      stream_options: { include_usage: true }
-    })
-
-    await parseStream(
-      stream.toReadableStream(),
-      (delta) => {
-        callback({ type, articleId, delta })
-      },
+    const stream = await client.chat.completions.create({ model: config.model, messages: [{ role: 'system', content: 'You are a professional translator.' }, { role: 'user', content: prompt }], temperature: getTemperature(config.model), stream: true })
+    await consumeStream(stream,
+      (delta) => callback({ type, articleId, delta }),
       (fullText) => {
-        if (fullText.trim()) {
-          try {
-            getDb()
-              .update(articlesTable)
-              .set({ contentMd: fullText.trim() })
-              .where(eq(articlesTable.id, articleId))
-              .run()
-          } catch (dbErr) {
-            console.error('[llmService] 译文入库失败：', dbErr)
-          }
-        }
+        if (fullText.trim()) { try { getDb().update(articlesTable).set({ contentMd: fullText.trim() }).where(eq(articlesTable.id, articleId)).run() } catch {} }
         callback({ type, articleId, fullText: fullText.trim() })
       },
-      (errorMsg) => {
-        callback({ type, articleId, message: errorMsg })
-      }
+      (errorMsg) => callback({ type, articleId, message: errorMsg })
     )
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    callback({ type, articleId, message: `LLM 翻译调用失败：${message}` })
-  }
+  } catch (err) { callback({ type, articleId, message: `LLM 调用失败：${err}` }) }
 }

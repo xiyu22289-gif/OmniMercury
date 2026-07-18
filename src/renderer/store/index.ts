@@ -25,7 +25,13 @@ interface AppState {
   summaryLoading: boolean
   translateStream: string
   translateLoading: boolean
-  translateMode: 'original' | 'translation' | 'bilingual'
+  translateMode: 'original' | 'translation'
+  /** 段落翻译：每段的译文数组，索引对应段落索引 */
+  paragraphTranslations: string[]
+  /** 展示模式 */
+  displayMode: 'replace' | 'sideBySide' | 'topBottom' | 'newTab'
+  /** 翻译目标语言 */
+  translateTargetLang: string
 
   // ---- 操作 ----
   setFeeds: (feeds: Feed[]) => void
@@ -52,7 +58,12 @@ interface AppState {
   appendTranslateDelta: (delta: string) => void
   setTranslateLoading: (loading: boolean) => void
   resetTranslate: () => void
-  setTranslateMode: (mode: 'original' | 'translation' | 'bilingual') => void
+  setTranslateMode: (mode: 'original' | 'translation') => void
+  toggleTranslateMode: () => void
+  appendParagraphTranslation: (paraIndex: number, delta: string) => void
+  resetParagraphTranslations: () => void
+  setDisplayMode: (mode: 'replace' | 'sideBySide' | 'topBottom' | 'newTab') => void
+  setTranslateTargetLang: (lang: string) => void
   loadLlmConfig: () => Promise<void>
 }
 
@@ -81,6 +92,9 @@ export const useStore = create<AppState>((set, get) => ({
   translateStream: '',
   translateLoading: false,
   translateMode: 'original',
+  paragraphTranslations: [],
+  displayMode: 'topBottom',
+  translateTargetLang: 'Chinese',
 
   // ---- RSS 操作 ----
   setFeeds: (feeds) => set({ feeds }),
@@ -246,6 +260,19 @@ export const useStore = create<AppState>((set, get) => ({
   setTranslateLoading: (loading) => set({ translateLoading: loading }),
   resetTranslate: () => set({ translateStream: '' }),
   setTranslateMode: (mode) => set({ translateMode: mode }),
+  toggleTranslateMode: () =>
+    set((state) => ({
+      translateMode: state.translateMode === 'original' ? 'translation' : 'original'
+    })),
+  appendParagraphTranslation: (paraIndex, delta) =>
+    set((state) => {
+      const arr = [...state.paragraphTranslations]
+      arr[paraIndex] = (arr[paraIndex] || '') + delta
+      return { paragraphTranslations: arr }
+    }),
+  resetParagraphTranslations: () => set({ paragraphTranslations: [] }),
+  setDisplayMode: (mode) => set({ displayMode: mode }),
+  setTranslateTargetLang: (lang) => set({ translateTargetLang: lang }),
   loadLlmConfig: async () => {
     try {
       const config = await window.api.getLlmConfig()

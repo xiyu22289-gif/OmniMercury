@@ -6,25 +6,23 @@ interface FormData {
   baseUrl: string
   apiKey: string
   model: string
-  translateTarget: string
 }
 
 const PRESET_MODELS = [
-  { label: 'OpenAI (GPT-4o-mini)', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
-  { label: 'DeepSeek (deepseek-chat)', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
-  { label: '通义千问 (qwen-turbo)', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-turbo' },
-  { label: '智谱 (glm-4-flash)', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash' },
-  { label: 'Ollama (本地)', baseUrl: 'http://localhost:11434/v1', model: 'qwen2.5:7b' },
+  { label: 'DeepSeek V4 Flash', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-v4-flash' },
+  { label: 'ChatECNU (华东师大)', baseUrl: 'https://chat.ecnu.edu.cn/open/api/v1', model: 'ecnu-max' },
+  { label: 'Kimi (Moonshot)', baseUrl: 'https://api.moonshot.cn/v1', model: 'kimi-k2.7-code-highspeed' },
+  { label: 'OpenAI (ChatGPT)', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+  { label: 'Claude', baseUrl: 'https://codeapi.icu/v1', model: 'claude-sonnet-5' },
 ]
 
 export default function LLMSettings() {
   const { showSettings, setShowSettings, llmConfig, setLlmConfig, loadLlmConfig } = useStore()
 
   const [form, setForm] = useState<FormData>({
-    baseUrl: 'https://api.openai.com/v1',
+    baseUrl: 'https://api.deepseek.com/v1',
     apiKey: '',
-    model: 'gpt-4o-mini',
-    translateTarget: 'Chinese'
+    model: 'deepseek-chat'
   })
   const [saved, setSaved] = useState(false)
 
@@ -33,26 +31,37 @@ export default function LLMSettings() {
     if (showSettings && llmConfig) {
       setForm({
         baseUrl: llmConfig.baseUrl,
-        apiKey: llmConfig.apiKey,
-        model: llmConfig.model,
-        translateTarget: llmConfig.translateTarget
+        apiKey: llmConfig.apiKeys?.[llmConfig.model] || llmConfig.apiKey,
+        model: llmConfig.model
       })
     }
   }, [showSettings, llmConfig])
 
   const handlePreset = (preset: typeof PRESET_MODELS[number]) => {
+    // 读取该模型之前存储的 API Key，若无则为空
+    const savedKey = llmConfig?.apiKeys?.[preset.model] || ''
     setForm((prev) => ({
       ...prev,
       baseUrl: preset.baseUrl,
-      model: preset.model
+      model: preset.model,
+      apiKey: savedKey
     }))
   }
 
   const handleSave = async () => {
-    await window.api.setLlmConfig(form)
+    // 将当前 key 写入 apiKeys[当前模型]
+    const updatedApiKeys = { ...(llmConfig?.apiKeys ?? {}), [form.model]: form.apiKey }
+    await window.api.setLlmConfig({
+      ...form,
+      apiKeys: updatedApiKeys,
+      apiKey: form.apiKey
+    } as unknown as Record<string, string>)
     await loadLlmConfig()
     setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
+    setTimeout(() => {
+      setSaved(false)
+      setShowSettings(false)
+    }, 400)
   }
 
   const handleReset = async () => {
@@ -64,7 +73,7 @@ export default function LLMSettings() {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white dark:bg-gray-850 rounded-xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
         {/* 标题栏 */}
         <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center gap-2">
@@ -85,27 +94,32 @@ export default function LLMSettings() {
         <div className="px-5 py-4 space-y-4">
           {/* 快捷预设 */}
           <div>
-            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">
+            <label className="block text-xs font-medium text-gray-700 dark:text-gray-200 mb-2">
               快捷预设
             </label>
             <div className="flex flex-wrap gap-1.5">
-              {PRESET_MODELS.map((preset) => (
-                <button
-                  key={preset.model}
-                  onClick={() => handlePreset(preset)}
-                  className="px-2.5 py-1 text-xs rounded-full border border-gray-300 dark:border-gray-600
-                           text-gray-600 dark:text-gray-300 hover:bg-blue-50 hover:border-blue-300
-                           dark:hover:bg-blue-900/30 transition-colors"
-                >
-                  {preset.label}
-                </button>
-              ))}
+              {PRESET_MODELS.map((preset) => {
+                const isActive = form.model === preset.model
+                return (
+                  <button
+                    key={preset.model}
+                    onClick={() => handlePreset(preset)}
+                    className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${
+                      isActive
+                        ? 'bg-blue-500 text-white border-blue-500 dark:bg-blue-600 dark:border-blue-500 dark:text-white'
+                        : 'border-gray-300 text-gray-600 hover:bg-gray-100 dark:border-gray-500 dark:text-gray-200 dark:hover:bg-gray-700'
+                    }`}
+                  >
+                    {preset.label}
+                  </button>
+                )
+              })}
             </div>
           </div>
 
           {/* Base URL */}
           <div>
-            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
+            <label className="block text-xs font-medium text-gray-700 dark:text-gray-200 mb-1">
               Base URL
             </label>
             <input
@@ -113,14 +127,15 @@ export default function LLMSettings() {
               value={form.baseUrl}
               onChange={(e) => setForm((prev) => ({ ...prev, baseUrl: e.target.value }))}
               placeholder="https://api.openai.com/v1"
-              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600
-                       dark:bg-gray-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-500
+                       bg-white dark:bg-gray-700 dark:text-gray-100 rounded-lg focus:outline-none
+                       focus:ring-2 focus:ring-blue-500/50 placeholder:text-gray-400 dark:placeholder:text-gray-500"
             />
           </div>
 
           {/* API Key */}
           <div>
-            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
+            <label className="block text-xs font-medium text-gray-700 dark:text-gray-200 mb-1">
               API Key
             </label>
             <input
@@ -128,17 +143,18 @@ export default function LLMSettings() {
               value={form.apiKey}
               onChange={(e) => setForm((prev) => ({ ...prev, apiKey: e.target.value }))}
               placeholder="sk-..."
-              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600
-                       dark:bg-gray-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-500
+                       bg-white dark:bg-gray-700 dark:text-gray-100 rounded-lg focus:outline-none
+                       focus:ring-2 focus:ring-blue-500/50 placeholder:text-gray-400 dark:placeholder:text-gray-500"
             />
-            <p className="text-[11px] text-gray-400 mt-1">
+            <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">
               密钥仅存储在本地，绝不联网上传
             </p>
           </div>
 
           {/* 模型名称 */}
           <div>
-            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
+            <label className="block text-xs font-medium text-gray-700 dark:text-gray-200 mb-1">
               模型名称
             </label>
             <input
@@ -146,38 +162,20 @@ export default function LLMSettings() {
               value={form.model}
               onChange={(e) => setForm((prev) => ({ ...prev, model: e.target.value }))}
               placeholder="gpt-4o-mini"
-              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600
-                       dark:bg-gray-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-500
+                       bg-white dark:bg-gray-700 dark:text-gray-100 rounded-lg focus:outline-none
+                       focus:ring-2 focus:ring-blue-500/50 placeholder:text-gray-400 dark:placeholder:text-gray-500"
             />
           </div>
 
-          {/* 翻译目标语言 */}
-          <div>
-            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
-              翻译目标语言
-            </label>
-            <select
-              value={form.translateTarget}
-              onChange={(e) => setForm((prev) => ({ ...prev, translateTarget: e.target.value }))}
-              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600
-                       dark:bg-gray-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-            >
-              <option value="Chinese">中文</option>
-              <option value="English">English</option>
-              <option value="Japanese">日本語</option>
-              <option value="Korean">한국어</option>
-              <option value="French">Français</option>
-              <option value="German">Deutsch</option>
-            </select>
-          </div>
         </div>
 
         {/* 底部按钮 */}
-        <div className="flex items-center justify-between px-5 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+        <div className="flex items-center justify-between px-5 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
           <button
             onClick={handleReset}
-            className="flex items-center gap-1 px-3 py-1.5 text-xs text-gray-500 hover:text-red-500
-                     rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+            className="flex items-center gap-1 px-3 py-1.5 text-xs text-gray-600 dark:text-gray-300 hover:text-red-500
+                     dark:hover:text-red-400 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors"
           >
             <RotateCcw size={13} />
             重置

@@ -22,7 +22,8 @@ export interface LlmConfig {
   baseUrl: string
   apiKey: string
   model: string
-  translateTarget: string
+  /** 每个模型独立的 API Key 映射 */
+  apiKeys: Record<string, string>
 }
 
 // ============================================================
@@ -51,16 +52,35 @@ function saveToDisk(config: LlmConfig): void {
 // ============================================================
 
 const DEFAULTS: LlmConfig = {
-  baseUrl: 'https://api.openai.com/v1',
+  baseUrl: 'https://api.deepseek.com/v1',
   apiKey: '',
-  model: 'gpt-4o-mini',
-  translateTarget: 'Chinese'
+  model: 'deepseek-v4-flash',
+  apiKeys: {}
 }
 
-/** 获取当前 LLM 配置 */
+/** 旧模型名 → 新模型名迁移映射 */
+const MODEL_MIGRATIONS: Record<string, string> = {
+  'deepseek-chat': 'deepseek-v4-flash',
+  'moonshot-v1-8k': 'kimi-k2.7-code-highspeed',
+  'kimi-k2.6': 'kimi-k2.7-code-highspeed',
+  'ecnu-chat': 'ecnu-max',
+}
+
+/** 获取当前 LLM 配置（自动迁移过时的模型名） */
 export function getLlmConfig(): LlmConfig {
   const disk = loadFromDisk()
-  return { ...DEFAULTS, ...disk }
+  const merged = { ...DEFAULTS, ...disk }
+  // 自动迁移旧的模型名
+  if (merged.model && MODEL_MIGRATIONS[merged.model]) {
+    merged.model = MODEL_MIGRATIONS[merged.model]
+  }
+  return merged
+}
+
+/** 获取指定模型上次保存的 API Key，若无则返回空字符串 */
+export function getApiKeyForModel(model: string): string {
+  const config = getLlmConfig()
+  return config.apiKeys[model] || config.apiKey || ''
 }
 
 /** 更新 LLM 配置（部分更新） */

@@ -28,7 +28,8 @@ declare global {
 
       // ---- LLM 流式操作 ----
       summarize: (articleId: number, content: string, title: string) => Promise<{ success: boolean }>
-      translate: (articleId: number, content: string, title: string) => Promise<{ success: boolean }>
+      translate: (articleId: number, content: string, title: string, targetLang: string) => Promise<{ success: boolean }>
+      translateParagraphs: (articleId: number, content: string, title: string, targetLang: string) => Promise<{ success: boolean }>
 
       /** 监听流式数据块，返回取消监听的函数 */
       onStreamChunk: (

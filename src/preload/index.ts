@@ -38,8 +38,10 @@ const api = {
   // ---- LLM 流式操作（invoke 触发，on 接收进度） ----
   summarize: (articleId: number, content: string, title: string) =>
     ipcRenderer.invoke('llm:summarize', { articleId, content, title }),
-  translate: (articleId: number, content: string, title: string) =>
-    ipcRenderer.invoke('llm:translate', { articleId, content, title }),
+  translate: (articleId: number, content: string, title: string, targetLang: string) =>
+    ipcRenderer.invoke('llm:translate', { articleId, content, title, targetLang }),
+  translateParagraphs: (articleId: number, content: string, title: string, targetLang: string) =>
+    ipcRenderer.invoke('llm:translateParagraphs', { articleId, content, title, targetLang }),
 
   /** 监听流式数据块 */
   onStreamChunk: (
