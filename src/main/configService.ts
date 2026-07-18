@@ -61,8 +61,6 @@ const DEFAULTS: LlmConfig = {
 /** 旧模型名 → 新模型名迁移映射 */
 const MODEL_MIGRATIONS: Record<string, string> = {
   'deepseek-chat': 'deepseek-v4-flash',
-  'moonshot-v1-8k': 'kimi-k2.7-code-highspeed',
-  'kimi-k2.6': 'kimi-k2.7-code-highspeed',
   'ecnu-chat': 'ecnu-max',
 }
 
