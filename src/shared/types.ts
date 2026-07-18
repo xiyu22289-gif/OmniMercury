@@ -42,6 +42,12 @@ export interface IpcResponse {
     feed_id?: number
     new_count?: number
     message?: string
+    /** OPML 导入：成功导入的订阅源数量 */
+    feed_count?: number
+    /** OPML 导入：失败的订阅源数量 */
+    failed_count?: number
+    /** OPML 导入：OPML 文件标题 */
+    opml_title?: string
   }
 }
 
@@ -66,6 +72,8 @@ export interface SummarizeRequest {
   articleId: number
   content: string
   title: string
+  /** 摘要目标语言（如 Chinese / English / Japanese 等） */
+  targetLang: string
 }
 
 /** 翻译请求参数 */

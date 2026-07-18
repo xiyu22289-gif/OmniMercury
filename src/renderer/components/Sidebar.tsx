@@ -1,15 +1,55 @@
 import { useState } from 'react'
 import { useStore } from '../store'
-import { Rss, Plus, RefreshCw, Trash2, FolderOpen } from 'lucide-react'
+import { Rss, Plus, RefreshCw, Trash2, FolderOpen, Upload } from 'lucide-react'
 
 export default function Sidebar() {
   const {
     feeds, selectedFeedId, sidebarOpen,
-    selectFeed, setFeeds, setError, setLoading
+    selectFeed, setFeeds, setError, setLoading,
+    setOpmlImporting, setOpmlProgress, setOpmlDialogOpen
   } = useStore()
 
   const [addUrl, setAddUrl] = useState('')
   const [showAdd, setShowAdd] = useState(false)
+
+  /** OPML 文件导入流程 */
+  const handleOpmlImport = async () => {
+    // 1) 打开文件选择对话框
+    const selectResult = await window.api.selectOpmlFile()
+    if (selectResult.canceled || !selectResult.filePath) return
+
+    // 2) 开始导入
+    setOpmlImporting(true)
+    setOpmlDialogOpen(true)
+
+    // 3) 监听进度
+    const unsub = window.api.onOpmlProgress((progress) => {
+      setOpmlProgress({
+        current: progress.current,
+        total: progress.total,
+        feedTitle: progress.feed.title,
+        feedUrl: progress.feed.xmlUrl,
+        success: progress.feed.success,
+      })
+    })
+
+    try {
+      await window.api.importOpml(selectResult.filePath)
+
+      // 4) 重新加载订阅源列表
+      const listResp = await window.api.listFeeds()
+      if (listResp.payload.error === 0 && listResp.payload.feeds) {
+        setFeeds(listResp.payload.feeds)
+      }
+    } catch (err) {
+      setError(String(err))
+    } finally {
+      unsub()
+      setOpmlImporting(false)
+      setOpmlProgress(null)
+      setOpmlDialogOpen(false)
+    }
+  }
 
   const handleAddFeed = async () => {
     const url = addUrl.trim()
@@ -81,6 +121,13 @@ export default function Sidebar() {
         >
           <Plus size={14} />
           Add
+        </button>
+        <button
+          onClick={handleOpmlImport}
+          className="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+          title="Import OPML file"
+        >
+          <Upload size={14} />
         </button>
         <button
           onClick={handleRefresh}

@@ -23,6 +23,8 @@ interface AppState {
   llmConfig: LlmConfig | null
   summaryStream: string
   summaryLoading: boolean
+  /** 正在生成摘要的文章 ID，用于隔离不同文章的摘要状态 */
+  summarizingArticleId: number | null
   translateStream: string
   translateLoading: boolean
   translateMode: 'original' | 'translation'
@@ -32,6 +34,11 @@ interface AppState {
   displayMode: 'replace' | 'sideBySide' | 'topBottom' | 'newTab'
   /** 翻译目标语言 */
   translateTargetLang: string
+
+  // ---- OPML 导入状态 ----
+  opmlImporting: boolean
+  opmlProgress: { current: number; total: number; feedTitle: string; feedUrl: string; success: boolean } | null
+  opmlDialogOpen: boolean
 
   // ---- 操作 ----
   setFeeds: (feeds: Feed[]) => void
@@ -48,6 +55,9 @@ interface AppState {
   toggleDarkMode: () => void
   setLoading: (loading: boolean) => void
   setError: (error: string | null) => void
+  setOpmlImporting: (importing: boolean) => void
+  setOpmlProgress: (progress: { current: number; total: number; feedTitle: string; feedUrl: string; success: boolean } | null) => void
+  setOpmlDialogOpen: (open: boolean) => void
 
   // ---- LLM 操作 ----
   setShowSettings: (show: boolean) => void
@@ -55,6 +65,7 @@ interface AppState {
   appendSummaryDelta: (delta: string) => void
   setSummaryLoading: (loading: boolean) => void
   resetSummary: () => void
+  setSummarizingArticleId: (id: number | null) => void
   appendTranslateDelta: (delta: string) => void
   setTranslateLoading: (loading: boolean) => void
   resetTranslate: () => void
@@ -78,6 +89,11 @@ export const useStore = create<AppState>((set, get) => ({
   searchResults: [],
   searchSuggestions: [],
 
+  // ---- OPML 导入默认值 ----
+  opmlImporting: false,
+  opmlProgress: null,
+  opmlDialogOpen: false,
+
   // ---- UI 默认值 ----
   sidebarOpen: true,
   darkMode: false,
@@ -89,6 +105,7 @@ export const useStore = create<AppState>((set, get) => ({
   llmConfig: null,
   summaryStream: '',
   summaryLoading: false,
+  summarizingArticleId: null,
   translateStream: '',
   translateLoading: false,
   translateMode: 'original',
@@ -126,6 +143,8 @@ export const useStore = create<AppState>((set, get) => ({
         isLoading: true,
         articleContent: null,
         summaryStream: '',
+        summaryLoading: false,
+        summarizingArticleId: null,
         translateStream: '',
         translateMode: 'original'
       })
@@ -154,6 +173,8 @@ export const useStore = create<AppState>((set, get) => ({
         isLoading: true,
         articleContent: null,
         summaryStream: '',
+        summaryLoading: false,
+        summarizingArticleId: null,
         translateStream: '',
         translateMode: 'original'
       })
@@ -207,6 +228,8 @@ export const useStore = create<AppState>((set, get) => ({
       isLoading: true,
       articleContent: null,
       summaryStream: '',
+      summaryLoading: false,
+      summarizingArticleId: null,
       translateStream: '',
       translateMode: 'original'
     })
@@ -250,12 +273,18 @@ export const useStore = create<AppState>((set, get) => ({
   setLoading: (loading) => set({ isLoading: loading }),
   setError: (error) => set({ error }),
 
+  // ---- OPML 操作 ----
+  setOpmlImporting: (importing) => set({ opmlImporting: importing }),
+  setOpmlProgress: (progress) => set({ opmlProgress: progress }),
+  setOpmlDialogOpen: (open) => set({ opmlDialogOpen: open }),
+
   // ---- LLM 操作 ----
   setShowSettings: (show) => set({ showSettings: show }),
   setLlmConfig: (config) => set({ llmConfig: config }),
   appendSummaryDelta: (delta) => set((state) => ({ summaryStream: state.summaryStream + delta })),
   setSummaryLoading: (loading) => set({ summaryLoading: loading }),
-  resetSummary: () => set({ summaryStream: '' }),
+  resetSummary: () => set({ summaryStream: '', summarizingArticleId: null }),
+  setSummarizingArticleId: (id) => set({ summarizingArticleId: id }),
   appendTranslateDelta: (delta) => set((state) => ({ translateStream: state.translateStream + delta })),
   setTranslateLoading: (loading) => set({ translateLoading: loading }),
   resetTranslate: () => set({ translateStream: '' }),

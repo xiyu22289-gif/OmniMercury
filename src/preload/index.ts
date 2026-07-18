@@ -3,8 +3,22 @@ import type {
   LlmStreamChunk,
   LlmStreamDone,
   LlmStreamError,
-  LlmConfig
+  LlmConfig,
+  IpcResponse,
 } from '../shared/types'
+
+/** OPML 导入进度事件 */
+export interface OpmlImportProgress {
+  current: number
+  total: number
+  feed: {
+    title: string
+    xmlUrl: string
+    success: boolean
+    feedId?: number
+    error?: string
+  }
+}
 
 /**
  * Preload 脚本 — 暴露安全的 API 给渲染进程。
@@ -36,8 +50,8 @@ const api = {
     ipcRenderer.invoke('llm:resetConfig'),
 
   // ---- LLM 流式操作（invoke 触发，on 接收进度） ----
-  summarize: (articleId: number, content: string, title: string) =>
-    ipcRenderer.invoke('llm:summarize', { articleId, content, title }),
+  summarize: (articleId: number, content: string, title: string, targetLang: string) =>
+    ipcRenderer.invoke('llm:summarize', { articleId, content, title, targetLang }),
   translate: (articleId: number, content: string, title: string, targetLang: string) =>
     ipcRenderer.invoke('llm:translate', { articleId, content, title, targetLang }),
   translateParagraphs: (articleId: number, content: string, title: string, targetLang: string) =>
@@ -55,7 +69,31 @@ const api = {
     return () => {
       ipcRenderer.removeListener('llm:stream-chunk', handler)
     }
-  }
+  },
+
+  // ---- OPML 导入 ----
+  /** 打开文件选择对话框选择 OPML 文件 */
+  selectOpmlFile: (): Promise<{ canceled: boolean; filePath?: string; error?: string }> =>
+    ipcRenderer.invoke('opml:selectFile'),
+
+  /** 预览 OPML 文件内容 */
+  previewOpml: (filePath: string): Promise<IpcResponse> =>
+    ipcRenderer.invoke('opml:preview', filePath),
+
+  /** 执行 OPML 批量导入 */
+  importOpml: (filePath: string): Promise<IpcResponse> =>
+    ipcRenderer.invoke('opml:import', filePath),
+
+  /** 监听 OPML 导入进度 */
+  onOpmlProgress: (callback: (progress: OpmlImportProgress) => void) => {
+    const handler = (_event: IpcRendererEvent, progress: OpmlImportProgress) => {
+      callback(progress)
+    }
+    ipcRenderer.on('opml:import-progress', handler)
+    return () => {
+      ipcRenderer.removeListener('opml:import-progress', handler)
+    }
+  },
 }
 
 contextBridge.exposeInMainWorld('api', api)

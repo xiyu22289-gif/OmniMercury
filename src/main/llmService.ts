@@ -79,21 +79,32 @@ export async function translateParagraphs(request: TranslateRequest, callback: S
   // Kimi 不逐段翻译，全文一次请求避免 429 并发限制
   if (config.model.startsWith('kimi-')) {
     const prompt = buildTranslatePrompt(content, targetLang)
-    try {
-      const client = createClient(config, activeKey)
-      const stream = await client.chat.completions.create({ model: config.model, messages: [{ role: 'user', content: prompt }], temperature: temp, stream: true })
-      await consumeStream(stream,
-        (delta) => callback({ type: 'translate', articleId, delta }),
-        (fullText) => {
-          if (fullText.trim()) {
-            try { getDb().update(articlesTable).set({ contentMd: fullText.trim() }).where(eq(articlesTable.id, articleId)).run() } catch {}
-          }
-          callback({ type: 'translate', articleId, fullText: fullText.trim() })
-        },
-        (errorMsg) => callback({ type: 'translate', articleId, message: errorMsg })
-      )
-    } catch (err) {
-      callback({ type: 'translate', articleId, message: `[翻译失败] ${err instanceof Error ? err.message : String(err)}` })
+    const maxRetries = 3
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const client = createClient(config, activeKey)
+        const stream = await client.chat.completions.create({ model: config.model, messages: [{ role: 'user', content: prompt }], temperature: temp, stream: true })
+        await consumeStream(stream,
+          (delta) => callback({ type: 'translate', articleId, delta }),
+          (fullText) => {
+            if (fullText.trim()) {
+              try { getDb().update(articlesTable).set({ contentMd: fullText.trim() }).where(eq(articlesTable.id, articleId)).run() } catch {}
+            }
+            callback({ type: 'translate', articleId, fullText: fullText.trim() })
+          },
+          (errorMsg) => callback({ type: 'translate', articleId, message: errorMsg })
+        )
+        return // 成功，退出重试循环
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        if (msg.includes('429') && attempt < maxRetries - 1) {
+          console.log(`[Kimi] 429 重试 ${attempt + 1}/${maxRetries}，等待 3 秒...`)
+          await new Promise(resolve => setTimeout(resolve, 3000))
+          continue
+        }
+        callback({ type: 'translate', articleId, message: `[翻译失败] ${msg}` })
+        return
+      }
     }
     return
   }
@@ -119,14 +130,14 @@ export async function translateParagraphs(request: TranslateRequest, callback: S
   }
 }
 
-function buildSummarizePrompt(title: string, content: string): string {
+function buildSummarizePrompt(title: string, content: string, targetLang: string): string {
   const maxContentLen = 8000
   const truncated = content.length > maxContentLen ? content.slice(0, maxContentLen) + '\n\n[内容过长已截断...]' : content
-  return `请为以下文章生成一段简洁的中文摘要（约200字）：\n\n标题：${title}\n\n正文：\n${truncated}\n\n摘要：`
+  return `Please generate a concise summary (about 150 words) for the following article in ${targetLang}. Output ONLY the summary text, no explanations:\n\nTitle: ${title}\n\nContent:\n${truncated}\n\nSummary:`
 }
 
 export async function summarizeArticle(request: SummarizeRequest, callback: StreamCallback): Promise<void> {
-  const { articleId, content, title } = request
+  const { articleId, content, title, targetLang } = request
   const type = 'summarize' as const
   if (!content?.trim()) { callback({ type, articleId, message: '文章内容为空' }); return }
 
@@ -138,13 +149,12 @@ export async function summarizeArticle(request: SummarizeRequest, callback: Stre
   let client: OpenAI
   try { client = createClient(config, activeKey) } catch (err) { callback({ type, articleId, message: String(err) }); return }
 
-  const prompt = buildSummarizePrompt(title, content)
+  const prompt = buildSummarizePrompt(title, content, targetLang)
   try {
     const stream = await client.chat.completions.create({ model: config.model, messages: [{ role: 'system', content: '你是一个专业的文章摘要助手。' }, { role: 'user', content: prompt }], temperature: getTemperature(config.model), max_tokens: 800, stream: true })
     await consumeStream(stream,
       (delta) => callback({ type, articleId, delta }),
       (fullText) => {
-        if (fullText.trim()) { try { getDb().update(articlesTable).set({ summary: fullText.trim() }).where(eq(articlesTable.id, articleId)).run() } catch {} }
         callback({ type, articleId, fullText: fullText.trim() })
       },
       (errorMsg) => callback({ type, articleId, message: errorMsg })

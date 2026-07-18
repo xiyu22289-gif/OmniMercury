@@ -139,7 +139,7 @@ export default function LLMSettings() {
               API Key
             </label>
             <input
-              type="password"
+              type="text"
               value={form.apiKey}
               onChange={(e) => setForm((prev) => ({ ...prev, apiKey: e.target.value }))}
               placeholder="sk-..."

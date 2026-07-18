@@ -1,5 +1,6 @@
-import { ipcMain, BrowserWindow } from 'electron'
+import { ipcMain, BrowserWindow, dialog } from 'electron'
 import { addFeed, listFeeds, getArticles, searchArticles, getCachedArticleContent } from './feedService'
+import { parseOpmlFile, importOpmlFile } from './opmlService'
 import { getDb, getFeedById, feeds as feedsTable, articles as articlesTable } from './db'
 import { eq } from 'drizzle-orm'
 import { summarizeArticle, translateArticle, translateParagraphs } from './llmService'
@@ -84,5 +85,85 @@ export function registerIpcHandlers(): void {
     translateParagraphs(request, (chunk) => win.webContents.send('llm:stream-chunk', chunk))
       .catch(err => { console.error('[ipcHandlers] translateParagraphs 异常：', err); win.webContents.send('llm:stream-chunk', { type: 'translate', articleId: request.articleId, message: String(err) }) })
     return { success: true }
+  })
+
+  // ============================================================
+  // OPML 导入
+  // ============================================================
+
+  /** 打开文件选择对话框供用户选择 .opml 文件，返回选择的文件路径 */
+  ipcMain.handle('opml:selectFile', async (event): Promise<{ canceled: boolean; filePath?: string; error?: string }> => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return { canceled: true, error: '窗口不存在' }
+
+    const result = await dialog.showOpenDialog(win, {
+      title: '选择 OPML 文件',
+      filters: [
+        { name: 'OPML 文件', extensions: ['opml', 'xml'] },
+        { name: '所有文件', extensions: ['*'] },
+      ],
+      properties: ['openFile'],
+    })
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return { canceled: true }
+    }
+
+    return { canceled: false, filePath: result.filePaths[0] }
+  })
+
+  /** 预览 OPML 文件中的订阅源列表（仅解析，不导入） */
+  ipcMain.handle('opml:preview', async (_event, filePath: string): Promise<IpcResponse> => {
+    try {
+      const result = parseOpmlFile(filePath)
+      return {
+        type: 'opml_preview',
+        payload: {
+          error: 0,
+          message: `找到 ${result.totalFeeds} 个订阅源`,
+          feed_count: result.totalFeeds,
+          opml_title: result.title,
+        },
+      }
+    } catch (err) {
+      return {
+        type: 'opml_preview',
+        payload: {
+          error: 1,
+          message: err instanceof Error ? err.message : String(err),
+        },
+      }
+    }
+  })
+
+  /** 执行 OPML 文件导入，批量添加订阅源并抓取文章 */
+  ipcMain.handle('opml:import', async (event, filePath: string): Promise<IpcResponse> => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return { type: 'opml_import', payload: { error: 1, message: '窗口不存在' } }
+
+    try {
+      // 通过 IPC 事件发送进度给渲染进程
+      const result = await importOpmlFile(filePath, (progress) => {
+        win.webContents.send('opml:import-progress', progress)
+      })
+
+      return {
+        type: 'opml_import',
+        payload: {
+          error: 0,
+          message: `导入完成：${result.success}/${result.total} 个订阅源成功`,
+          feed_count: result.success,
+          failed_count: result.failed,
+        },
+      }
+    } catch (err) {
+      return {
+        type: 'opml_import',
+        payload: {
+          error: 1,
+          message: err instanceof Error ? err.message : String(err),
+        },
+      }
+    }
   })
 }

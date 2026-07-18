@@ -6,7 +6,7 @@ import ReaderView from './components/ReaderView'
 import SearchBar from './components/SearchBar'
 import LLMSettings from './components/LLMSettings'
 import ResizeHandle from './components/ResizeHandle'
-import { Menu as MenuIcon, Sun, Moon } from 'lucide-react'
+import { Menu as MenuIcon, Sun, Moon, X, CheckCircle, XCircle, Loader2 } from 'lucide-react'
 
 /** 默认宽度常量 */
 const DEFAULT_SIDEBAR_WIDTH = 260
@@ -19,7 +19,8 @@ const MAX_LIST_WIDTH = 600
 export default function App() {
   const {
     sidebarOpen, toggleSidebar, darkMode, toggleDarkMode,
-    setFeeds, selectFeed, setError, isLoading
+    setFeeds, selectFeed, setError, isLoading,
+    opmlImporting, opmlProgress, opmlDialogOpen, setOpmlDialogOpen
   } = useStore()
 
   // ---- 可拖拽宽度状态 ----
@@ -154,6 +155,88 @@ export default function App() {
 
       {/* LLM 设置对话框 */}
       <LLMSettings />
+
+      {/* OPML 导入进度对话框 */}
+      {opmlDialogOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-2xl w-full max-w-md mx-4 max-h-[80vh] flex flex-col">
+            {/* 标题栏 */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+              <h2 className="text-base font-semibold text-gray-800 dark:text-gray-200">
+                OPML 导入进度
+              </h2>
+              <button
+                onClick={() => setOpmlDialogOpen(false)}
+                className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                disabled={opmlImporting}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* 进度内容 */}
+            <div className="flex-1 overflow-y-auto p-4">
+              {opmlProgress ? (
+                <div className="space-y-3">
+                  {/* 进度条 */}
+                  <div>
+                    <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
+                      <span>进度</span>
+                      <span>{opmlProgress.current} / {opmlProgress.total}</span>
+                    </div>
+                    <div className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-blue-500 rounded-full transition-all duration-300"
+                        style={{
+                          width: `${opmlProgress.total > 0 ? Math.round((opmlProgress.current / opmlProgress.total) * 100) : 0}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* 当前处理 */}
+                  <div className="flex items-start gap-2 text-sm">
+                    {opmlProgress.success ? (
+                      <CheckCircle size={16} className="text-green-500 flex-shrink-0 mt-0.5" />
+                    ) : (
+                      <XCircle size={16} className="text-red-500 flex-shrink-0 mt-0.5" />
+                    )}
+                    <div className="min-w-0">
+                      <p className="text-gray-800 dark:text-gray-200 truncate font-medium">
+                        {opmlProgress.feedTitle || opmlProgress.feedUrl}
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                        {opmlProgress.feedUrl}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : opmlImporting ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 size={24} className="animate-spin text-blue-500" />
+                  <span className="ml-2 text-sm text-gray-500 dark:text-gray-400">正在准备...</span>
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-8">
+                  导入已完成，订阅源列表已更新。
+                </p>
+              )}
+            </div>
+
+            {/* 底部按钮 */}
+            {!opmlImporting && (
+              <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 flex justify-end">
+                <button
+                  onClick={() => setOpmlDialogOpen(false)}
+                  className="px-4 py-1.5 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+                >
+                  关闭
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
