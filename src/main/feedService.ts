@@ -17,6 +17,16 @@ import {
 // 类型定义
 // ============================================================
 
+/** addFeed 错误码 — 前端据此展示不同颜色的错误提示 */
+export type AddFeedErrorCode =
+  | 'INVALID_URL'
+  | 'NETWORK_ERROR'
+  | 'NOT_RSS_FEED'
+  | 'PARSE_ERROR'
+  | 'DUPLICATE'
+  | 'DB_ERROR'
+  | 'UNKNOWN'
+
 /** addFeed 成功返回值 */
 interface AddFeedSuccess {
   success: true;
@@ -28,6 +38,7 @@ interface AddFeedSuccess {
 interface AddFeedFailure {
   success: false;
   error: string;
+  errorCode: AddFeedErrorCode;
 }
 
 export type AddFeedResult = AddFeedSuccess | AddFeedFailure;
@@ -48,6 +59,7 @@ export interface ArticleSummary {
   title: string;
   isRead: number | null;
   summary: string | null;
+  translations: string | null;
   link: string | null;
   author: string | null;
   pubDate: string | null;
@@ -118,7 +130,7 @@ export async function addFeed(url: string): Promise<AddFeedResult> {
   try {
     normalizedUrl = new URL(url).href;
   } catch {
-    return { success: false, error: 'URL 格式无效，请输入完整的 RSS 链接（如 https://example.com/feed.xml）。' };
+    return { success: false, errorCode: 'INVALID_URL', error: 'URL 格式无效，请输入完整的 RSS 链接（如 https://example.com/feed.xml）。' };
   }
 
   // 2. 去重检查
@@ -126,6 +138,7 @@ export async function addFeed(url: string): Promise<AddFeedResult> {
   if (existing) {
     return {
       success: false,
+      errorCode: 'DUPLICATE',
       error: `订阅源已存在：「${existing.title}」，无需重复添加。`,
     };
   }
@@ -148,6 +161,7 @@ export async function addFeed(url: string): Promise<AddFeedResult> {
     const message = err instanceof Error ? err.message : String(err);
     return {
       success: false,
+      errorCode: 'NETWORK_ERROR',
       error: `网络请求失败：${message}。请检查链接是否可访问。`,
     };
   }
@@ -160,6 +174,7 @@ export async function addFeed(url: string): Promise<AddFeedResult> {
     const message = err instanceof Error ? err.message : String(err);
     return {
       success: false,
+      errorCode: 'NOT_RSS_FEED',
       error: `RSS 解析失败：${message}。该链接可能不是有效的 RSS/Atom 源。`,
     };
   }
@@ -180,6 +195,7 @@ export async function addFeed(url: string): Promise<AddFeedResult> {
     const message = err instanceof Error ? err.message : String(err);
     return {
       success: false,
+      errorCode: 'DB_ERROR',
       error: `订阅源入库失败：${message}。`,
     };
   }
@@ -237,6 +253,7 @@ export function getArticles(feedId: number): ArticleSummary[] {
     title: a.title,
     isRead: a.isRead,
     summary: a.summary,
+    translations: a.translations,
     link: a.link,
     author: a.author,
     pubDate: a.pubDate,
@@ -255,6 +272,7 @@ export function searchArticles(query: string, limit = 20): SearchArticleSummary[
     title: a.title,
     isRead: a.isRead,
     summary: a.summary,
+    translations: a.translations,
     link: a.link,
     author: a.author,
     pubDate: a.pubDate,

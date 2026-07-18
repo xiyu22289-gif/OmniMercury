@@ -1,13 +1,9 @@
-import { ipcMain, BrowserWindow } from 'electron'
+import { ipcMain, BrowserWindow, dialog } from 'electron'
 import { addFeed, listFeeds, getArticles, searchArticles, getCachedArticleContent } from './feedService'
-import {
-  getDb,
-  getFeedById,
-  feeds as feedsTable,
-  articles as articlesTable
-} from './db'
+import { parseOpmlFile, importOpmlFile } from './opmlService'
+import { getDb, getFeedById, feeds as feedsTable, articles as articlesTable } from './db'
 import { eq } from 'drizzle-orm'
-import { summarizeArticle, translateArticle } from './llmService'
+import { summarizeArticle, translateArticle, translateParagraphs } from './llmService'
 import { getLlmConfig, setLlmConfig, resetLlmConfig } from './configService'
 import { getOrFetchArticleContent } from './contentService'
 import type {
@@ -19,95 +15,25 @@ import type {
   TranslateRequest
 } from '../shared/types'
 
-/**
- * 注册所有 IPC 处理器。
- *
- * 三条核心通道（addFeed / listFeeds / getArticles）统一通过 feedService，
- * 其余辅助通道（removeFeed / getArticleContent / refreshFeeds / searchArticles）
- * 视复杂度选择 feedService 封装或直接 DB 调用。
- */
 export function registerIpcHandlers(): void {
-  // ================================================================
-  // backend:addFeed — 添加 RSS 订阅源（→ feedService.addFeed）
-  // ================================================================
   ipcMain.handle('backend:addFeed', async (_event, url: string): Promise<IpcResponse> => {
     const result = await addFeed(url)
-
     if (result.success) {
       const feed = getFeedById(result.feedId)
-      return {
-        type: 'import_feed',
-        payload: {
-          error: 0,
-          feed: feed
-            ? {
-                id: feed.id,
-                title: feed.title,
-                url: feed.url,
-                link: feed.link ?? undefined,
-                description: feed.description ?? undefined,
-                added_at: feed.createdAt ?? ''
-              }
-            : undefined,
-          feed_id: result.feedId,
-          message: `已添加：${result.title}`
-        }
-      }
+      return { type: 'import_feed', payload: { error: 0, errorCode: 'OK' as const, feed: feed ? { id: feed.id, title: feed.title, url: feed.url, link: feed.link ?? undefined, description: feed.description ?? undefined, added_at: feed.createdAt ?? '' } : undefined, feed_id: result.feedId, message: `已添加：${result.title}` } }
     }
-
-    return {
-      type: 'import_feed',
-      payload: { error: 1, message: result.error }
-    }
+    return { type: 'import_feed', payload: { error: 1, errorCode: result.errorCode, message: result.error } }
   })
 
-  // ================================================================
-  // backend:listFeeds — 获取全部订阅源（→ feedService.listFeeds）
-  // ================================================================
   ipcMain.handle('backend:listFeeds', async (): Promise<IpcResponse> => {
-    const feedList = listFeeds()
-
-    const feeds: Feed[] = feedList.map((f) => ({
-      id: f.id,
-      title: f.title,
-      url: f.url,
-      link: f.link ?? undefined,
-      description: f.description ?? undefined,
-      added_at: f.createdAt ?? ''
-    }))
-
-    return {
-      type: 'list_feeds',
-      payload: { error: 0, feeds }
-    }
+    const feeds: Feed[] = listFeeds().map(f => ({ id: f.id, title: f.title, url: f.url, link: f.link ?? undefined, description: f.description ?? undefined, added_at: f.createdAt ?? '' }))
+    return { type: 'list_feeds', payload: { error: 0, feeds } }
   })
 
-  // ================================================================
-  // backend:getArticles — 获取某订阅源的文章列表（→ feedService.getArticles）
-  // ================================================================
-  ipcMain.handle(
-    'backend:getArticles',
-    async (_event, feedId: number, _offset?: number, _limit?: number): Promise<IpcResponse> => {
-      const articleList = getArticles(feedId)
-
-      const articles: Article[] = articleList.map((a) => ({
-        id: a.id,
-        feed_id: feedId,
-        title: a.title,
-        url: a.link ?? '',
-        author: a.author ?? undefined,
-        summary: a.summary ?? undefined,
-        published_at: a.pubDate ?? a.createdAt ?? '',
-        fetched_at: a.createdAt ?? '',
-        is_read: a.isRead === 1
-      }))
-
-      return {
-        type: 'list_articles',
-        payload: { error: 0, articles }
-      }
-    }
-  )
+  ipcMain.handle('backend:getArticles', async (_event, feedId: number): Promise<IpcResponse> => {
+    const articles: Article[] = getArticles(feedId).map(a => ({ id: a.id, feed_id: feedId, title: a.title, url: a.link ?? '', author: a.author ?? undefined, summary: a.summary ?? undefined, translations: a.translations ?? undefined, published_at: a.pubDate ?? a.createdAt ?? '', fetched_at: a.createdAt ?? '', is_read: a.isRead === 1 }))
+    return { type: 'list_articles', payload: { error: 0, articles } }
+  })
 
   // ================================================================
   // backend:getArticleContent — 获取文章正文（含 M3 清洗流水线）
@@ -194,151 +120,135 @@ export function registerIpcHandlers(): void {
   // backend:removeFeed — 删除订阅源（级联删除其文章）
   // ================================================================
   ipcMain.handle('backend:removeFeed', async (_event, feedId: number): Promise<IpcResponse> => {
-    try {
-      getDb().delete(feedsTable).where(eq(feedsTable.id, feedId)).run()
-      return {
-        type: 'remove_feed',
-        payload: { error: 0, message: '已删除' }
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      return {
-        type: 'remove_feed',
-        payload: { error: 1, message }
-      }
-    }
+    try { getDb().delete(feedsTable).where(eq(feedsTable.id, feedId)).run(); return { type: 'remove_feed', payload: { error: 0, message: '已删除' } } }
+    catch (err) { return { type: 'remove_feed', payload: { error: 1, message: err instanceof Error ? err.message : String(err) } } }
   })
 
-  // ================================================================
-  // backend:refreshFeeds — 刷新全部订阅源
-  // TODO: Phase 2 完善 — 逐个重新拉取并更新文章
-  // ================================================================
-  ipcMain.handle('backend:refreshFeeds', async (): Promise<IpcResponse> => {
-    return {
-      type: 'refresh_feeds',
-      payload: { error: 0, message: 'Refresh not yet implemented' }
-    }
+  ipcMain.handle('backend:refreshFeeds', async (): Promise<IpcResponse> => ({ type: 'refresh_feeds', payload: { error: 0, message: 'Refresh not yet implemented' } }))
+
+  ipcMain.handle('backend:searchArticles', async (_event, query: string, _feedId?: number, _offset?: number, _limit?: number): Promise<IpcResponse> => {
+    if (!query?.trim()) return { type: 'search_articles', payload: { error: 0, articles: [] } }
+    const limit = typeof _limit === 'number' && _limit > 0 ? _limit : 20
+    const results = searchArticles(query.trim(), limit)
+    const articles: Article[] = results.map(a => ({ id: a.id, feed_id: a.feedId, title: a.title, url: a.link ?? '', author: a.author ?? undefined, summary: a.summary ?? undefined, translations: a.translations ?? undefined, published_at: a.pubDate ?? a.createdAt ?? '', fetched_at: a.createdAt ?? '', is_read: a.isRead === 1 }))
+    return { type: 'search_articles', payload: { error: 0, articles } }
   })
 
-  // ================================================================
-  // backend:searchArticles — 按标题模糊搜索文章
-  // ================================================================
-  ipcMain.handle(
-    'backend:searchArticles',
-    async (_event, query: string, _feedId?: number, _offset?: number, _limit?: number): Promise<IpcResponse> => {
-      if (!query || !query.trim()) {
-        return {
-          type: 'search_articles',
-          payload: { error: 0, articles: [] }
-        }
-      }
-
-      const limit = typeof _limit === 'number' && _limit > 0 ? _limit : 20
-      const results = searchArticles(query.trim(), limit)
-
-      const articles: Article[] = results.map((a) => ({
-        id: a.id,
-        feed_id: a.feedId,
-        title: a.title,
-        url: a.link ?? '',
-        author: a.author ?? undefined,
-        summary: a.summary ?? undefined,
-        published_at: a.pubDate ?? a.createdAt ?? '',
-        fetched_at: a.createdAt ?? '',
-        is_read: a.isRead === 1
-      }))
-
-      return {
-        type: 'search_articles',
-        payload: { error: 0, articles }
-      }
-    }
-  )
-
-  // ================================================================
-  // backend:getCachedArticleContent — 从本地 DB 获取文章离线内容
-  // ================================================================
-  ipcMain.handle(
-    'backend:getCachedArticleContent',
-    async (_event, articleId: number): Promise<IpcResponse> => {
-      const cached = getCachedArticleContent(articleId)
-
-      if (!cached) {
-        return {
-          type: 'get_cached_article_content',
-          payload: { error: 1, message: '本地无缓存内容' }
-        }
-      }
-
-      const content: ArticleContent = {
-        id: cached.id,
-        content: cached.body
-      }
-
-      return {
-        type: 'get_cached_article_content',
-        payload: { error: 0, content }
-      }
-    }
-  )
-
-  // ================================================================
-  // M4 — LLM 通用接入 IPC 通道
-  // ================================================================
-
-  // LLM 配置读写
-  ipcMain.handle('llm:getConfig', async () => {
-    return getLlmConfig()
+  ipcMain.handle('backend:getCachedArticleContent', async (_event, articleId: number): Promise<IpcResponse> => {
+    const cached = getCachedArticleContent(articleId)
+    if (!cached) return { type: 'get_cached_article_content', payload: { error: 1, message: '本地无缓存内容' } }
+    return { type: 'get_cached_article_content', payload: { error: 0, content: { id: cached.id, content: cached.body } } }
   })
 
-  ipcMain.handle('llm:setConfig', async (_event, updates: Record<string, string>) => {
-    setLlmConfig(updates)
-    return { success: true }
-  })
+  // LLM 配置
+  ipcMain.handle('llm:getConfig', async () => getLlmConfig())
+  ipcMain.handle('llm:setConfig', async (_event, updates: Record<string, string>) => { setLlmConfig(updates); return { success: true } })
+  ipcMain.handle('llm:resetConfig', async () => { resetLlmConfig(); return { success: true } })
 
-  ipcMain.handle('llm:resetConfig', async () => {
-    resetLlmConfig()
-    return { success: true }
-  })
-
-  // 流式摘要 — 主进程主动推送 chunk 到渲染进程
-  // 渲染进程调用 invoke('llm:summarize', request) 触发，
-  // 主进程通过 webContents.send('llm:stream-chunk', ...) 推送进度
+  // 流式摘要
   ipcMain.handle('llm:summarize', async (event, request: SummarizeRequest) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (!win) return { success: false, error: '窗口不存在' }
-
-    // 在后台启动流式调用，不阻塞 invoke 返回
-    summarizeArticle(request, (chunk) => {
-      win.webContents.send('llm:stream-chunk', chunk)
-    }).catch((err) => {
-      console.error('[ipcHandlers] summarizeArticle 未捕获异常：', err)
-      win.webContents.send('llm:stream-chunk', {
-        type: 'summarize',
-        articleId: request.articleId,
-        message: String(err)
-      })
-    })
-
+    summarizeArticle(request, (chunk) => win.webContents.send('llm:stream-chunk', chunk))
+      .catch(err => { console.error('[ipcHandlers] summarizeArticle 异常：', err); win.webContents.send('llm:stream-chunk', { type: 'summarize', articleId: request.articleId, message: String(err) }) })
     return { success: true }
   })
 
-  // 流式翻译 — 同上
+  // 流式翻译（全文）
   ipcMain.handle('llm:translate', async (event, request: TranslateRequest) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (!win) return { success: false, error: '窗口不存在' }
+    translateArticle(request, (chunk) => win.webContents.send('llm:stream-chunk', chunk))
+      .catch(err => { console.error('[ipcHandlers] translateArticle 异常：', err); win.webContents.send('llm:stream-chunk', { type: 'translate', articleId: request.articleId, message: String(err) }) })
+    return { success: true }
+  })
 
-    translateArticle(request, (chunk) => {
-      win.webContents.send('llm:stream-chunk', chunk)
-    }).catch((err) => {
-      console.error('[ipcHandlers] translateArticle 未捕获异常：', err)
-      win.webContents.send('llm:stream-chunk', {
-        type: 'translate',
-        articleId: request.articleId,
-        message: String(err)
-      })
+  // 段落级翻译
+  ipcMain.handle('llm:translateParagraphs', async (event, request: TranslateRequest) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return { success: false, error: '窗口不存在' }
+    translateParagraphs(request, (chunk) => win.webContents.send('llm:stream-chunk', chunk))
+      .catch(err => { console.error('[ipcHandlers] translateParagraphs 异常：', err); win.webContents.send('llm:stream-chunk', { type: 'translate', articleId: request.articleId, message: String(err) }) })
+    return { success: true }
+  })
+
+  // ============================================================
+  // OPML 导入
+  // ============================================================
+
+  /** 打开文件选择对话框供用户选择 .opml 文件，返回选择的文件路径 */
+  ipcMain.handle('opml:selectFile', async (event): Promise<{ canceled: boolean; filePath?: string; error?: string }> => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return { canceled: true, error: '窗口不存在' }
+
+    const result = await dialog.showOpenDialog(win, {
+      title: '选择 OPML 文件',
+      filters: [
+        { name: 'OPML 文件', extensions: ['opml', 'xml'] },
+        { name: '所有文件', extensions: ['*'] },
+      ],
+      properties: ['openFile'],
     })
 
-    return { success: true }
+    if (result.canceled || result.filePaths.length === 0) {
+      return { canceled: true }
+    }
+
+    return { canceled: false, filePath: result.filePaths[0] }
+  })
+
+  /** 预览 OPML 文件中的订阅源列表（仅解析，不导入） */
+  ipcMain.handle('opml:preview', async (_event, filePath: string): Promise<IpcResponse> => {
+    try {
+      const result = parseOpmlFile(filePath)
+      return {
+        type: 'opml_preview',
+        payload: {
+          error: 0,
+          message: `找到 ${result.totalFeeds} 个订阅源`,
+          feed_count: result.totalFeeds,
+          opml_title: result.title,
+        },
+      }
+    } catch (err) {
+      return {
+        type: 'opml_preview',
+        payload: {
+          error: 1,
+          message: err instanceof Error ? err.message : String(err),
+        },
+      }
+    }
+  })
+
+  /** 执行 OPML 文件导入，批量添加订阅源并抓取文章 */
+  ipcMain.handle('opml:import', async (event, filePath: string): Promise<IpcResponse> => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return { type: 'opml_import', payload: { error: 1, message: '窗口不存在' } }
+
+    try {
+      // 通过 IPC 事件发送进度给渲染进程
+      const result = await importOpmlFile(filePath, (progress) => {
+        win.webContents.send('opml:import-progress', progress)
+      })
+
+      return {
+        type: 'opml_import',
+        payload: {
+          error: 0,
+          message: `导入完成：${result.success}/${result.total} 个订阅源成功`,
+          feed_count: result.success,
+          failed_count: result.failed,
+        },
+      }
+    } catch (err) {
+      return {
+        type: 'opml_import',
+        payload: {
+          error: 1,
+          message: err instanceof Error ? err.message : String(err),
+        },
+      }
+    }
   })
 }

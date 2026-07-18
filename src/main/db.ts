@@ -27,6 +27,7 @@ export const articles = sqliteTable('articles', {
   content: text('content'),
   contentMd: text('content_md'),
   summary: text('summary'),
+  translations: text('translations'),
   isRead: integer('is_read').default(0),
   isStarred: integer('is_starred').default(0),
   author: text('author'),
@@ -76,6 +77,7 @@ export function initDatabase(dbPath: string): BetterSQLite3Database {
       content     TEXT,
       content_md  TEXT,
       summary     TEXT,
+      translations TEXT,
       is_read     INTEGER DEFAULT 0,
       is_starred  INTEGER DEFAULT 0,
       author      TEXT,
@@ -83,6 +85,13 @@ export function initDatabase(dbPath: string): BetterSQLite3Database {
       created_at  TEXT    DEFAULT (datetime('now'))
     );
   `);
+
+  // M4 兼容迁移：为已有数据库添加 translations 列（幂等，已存在则跳过）
+  try {
+    sqlite.exec('ALTER TABLE articles ADD COLUMN translations TEXT');
+  } catch {
+    // 列已存在，忽略
+  }
 
   db = drizzle(sqlite);
   return db;
@@ -136,13 +145,14 @@ export function insertFeed(feed: Omit<NewFeed, 'id' | 'createdAt'>): Feed {
 /** 按 feedId 查询文章列表（对应 getArticles IPC）。 */
 export function getArticlesByFeedId(
   feedId: number,
-): Pick<Article, 'id' | 'title' | 'isRead' | 'summary' | 'link' | 'author' | 'pubDate' | 'createdAt'>[] {
+): Pick<Article, 'id' | 'title' | 'isRead' | 'summary' | 'translations' | 'link' | 'author' | 'pubDate' | 'createdAt'>[] {
   return getDb()
     .select({
       id: articles.id,
       title: articles.title,
       isRead: articles.isRead,
       summary: articles.summary,
+      translations: articles.translations,
       link: articles.link,
       author: articles.author,
       pubDate: articles.pubDate,
@@ -215,7 +225,7 @@ export function clearAllData(): void {
 export function searchArticlesByTitle(
   query: string,
   limit = 20,
-): Pick<Article, 'id' | 'feedId' | 'title' | 'link' | 'summary' | 'author' | 'pubDate' | 'createdAt' | 'isRead'>[] {
+): Pick<Article, 'id' | 'feedId' | 'title' | 'link' | 'summary' | 'translations' | 'author' | 'pubDate' | 'createdAt' | 'isRead'>[] {
   return getDb()
     .select({
       id: articles.id,
@@ -223,6 +233,7 @@ export function searchArticlesByTitle(
       title: articles.title,
       link: articles.link,
       summary: articles.summary,
+      translations: articles.translations,
       author: articles.author,
       pubDate: articles.pubDate,
       createdAt: articles.createdAt,
@@ -239,12 +250,13 @@ export function searchArticlesByTitle(
  * 按 ID 获取文章完整内容（含 content 和 contentMd）。
  * 用于离线回退：网络不可用时，渲染进程可通过 IPC 直接从本地 DB 获取已缓存内容。
  */
-export function getArticleContentById(articleId: number): Pick<Article, 'id' | 'content' | 'contentMd'> | undefined {
+export function getArticleContentById(articleId: number): Pick<Article, 'id' | 'content' | 'contentMd' | 'translations'> | undefined {
   return getDb()
     .select({
       id: articles.id,
       content: articles.content,
       contentMd: articles.contentMd,
+      translations: articles.translations,
     })
     .from(articles)
     .where(eq(articles.id, articleId))

@@ -3,8 +3,21 @@ import type {
   LlmStreamChunk,
   LlmStreamDone,
   LlmStreamError,
-  LlmConfig
+  LlmConfig,
 } from '../shared/types'
+
+/** OPML 导入进度事件（类型定义同 preload/index.ts） */
+interface OpmlImportProgress {
+  current: number
+  total: number
+  feed: {
+    title: string
+    xmlUrl: string
+    success: boolean
+    feedId?: number
+    error?: string
+  }
+}
 
 export {}
 
@@ -27,13 +40,20 @@ declare global {
       resetLlmConfig: () => Promise<{ success: boolean }>
 
       // ---- LLM 流式操作 ----
-      summarize: (articleId: number, content: string, title: string) => Promise<{ success: boolean }>
-      translate: (articleId: number, content: string, title: string) => Promise<{ success: boolean }>
+      summarize: (articleId: number, content: string, title: string, targetLang: string) => Promise<{ success: boolean }>
+      translate: (articleId: number, content: string, title: string, targetLang: string) => Promise<{ success: boolean }>
+      translateParagraphs: (articleId: number, content: string, title: string, targetLang: string) => Promise<{ success: boolean }>
 
       /** 监听流式数据块，返回取消监听的函数 */
       onStreamChunk: (
         callback: (chunk: LlmStreamChunk | LlmStreamDone | LlmStreamError) => void
       ) => () => void
+
+      // ---- OPML 导入 ----
+      selectOpmlFile: () => Promise<{ canceled: boolean; filePath?: string; error?: string }>
+      previewOpml: (filePath: string) => Promise<IpcResponse>
+      importOpml: (filePath: string) => Promise<IpcResponse>
+      onOpmlProgress: (callback: (progress: OpmlImportProgress) => void) => () => void
     }
   }
 }

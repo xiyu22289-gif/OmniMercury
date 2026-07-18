@@ -27,9 +27,25 @@ interface AppState {
   llmConfig: LlmConfig | null
   summaryStream: string
   summaryLoading: boolean
+  /** 正在生成摘要的文章 ID，用于隔离不同文章的摘要状态 */
+  summarizingArticleId: number | null
   translateStream: string
   translateLoading: boolean
-  translateMode: 'original' | 'translation' | 'bilingual'
+  translateMode: 'original' | 'translation'
+  /** 段落翻译：每段的译文数组，索引对应段落索引 */
+  paragraphTranslations: string[]
+  /** 展示模式 */
+  displayMode: 'replace' | 'sideBySide' | 'topBottom' | 'newTab'
+  /** 翻译目标语言 */
+  translateTargetLang: string
+
+  // ---- OPML 导入状态 ----
+  opmlImporting: boolean
+  opmlProgress: { current: number; total: number; feedTitle: string; feedUrl: string; success: boolean } | null
+  opmlDialogOpen: boolean
+
+  // ---- 添加订阅源错误提示 ----
+  addFeedError: string | null
 
   // ---- 操作 ----
   setFeeds: (feeds: Feed[]) => void
@@ -46,6 +62,11 @@ interface AppState {
   toggleDarkMode: () => void
   setLoading: (loading: boolean) => void
   setError: (error: string | null) => void
+  setOpmlImporting: (importing: boolean) => void
+  setOpmlProgress: (progress: { current: number; total: number; feedTitle: string; feedUrl: string; success: boolean } | null) => void
+  setOpmlDialogOpen: (open: boolean) => void
+  setAddFeedError: (error: string | null) => void
+  clearAddFeedError: () => void
 
   // ---- M3 阅读模式操作 ----
   setReaderMode: (mode: 'reader' | 'original') => void
@@ -57,14 +78,44 @@ interface AppState {
   appendSummaryDelta: (delta: string) => void
   setSummaryLoading: (loading: boolean) => void
   resetSummary: () => void
+  setSummarizingArticleId: (id: number | null) => void
   appendTranslateDelta: (delta: string) => void
   setTranslateLoading: (loading: boolean) => void
   resetTranslate: () => void
-  setTranslateMode: (mode: 'original' | 'translation' | 'bilingual') => void
+  setTranslateMode: (mode: 'original' | 'translation') => void
+  toggleTranslateMode: () => void
+  appendParagraphTranslation: (paraIndex: number, delta: string) => void
+  resetParagraphTranslations: () => void
+  setDisplayMode: (mode: 'replace' | 'sideBySide' | 'topBottom' | 'newTab') => void
+  setTranslateTargetLang: (lang: string) => void
   loadLlmConfig: () => Promise<void>
 }
 
-export const useStore = create<AppState>((set, get) => ({
+export const useStore = create<AppState>((set, get) => {
+  /** 从文章元数据中恢复 AI 缓存（摘要 + 翻译），避免重复调用 LLM */
+  const restoreAiCache = (articles: Article[], articleId: number) => {
+    const a = articles.find(x => x.id === articleId)
+    if (!a) return
+    if (a.summary || a.translations) {
+      const updates: Partial<AppState> = {}
+      if (a.summary) {
+        updates.summaryStream = a.summary
+        updates.summarizingArticleId = articleId
+      }
+      if (a.translations) {
+        try {
+          const m: Record<string, string[]> = JSON.parse(a.translations)
+          const lang = get().translateTargetLang
+          if (m[lang] && m[lang].length > 0) {
+            updates.paragraphTranslations = m[lang]
+          }
+        } catch { /* JSON 解析失败则忽略，不阻塞正常阅读 */ }
+      }
+      set(updates)
+    }
+  }
+
+  return {
   // ---- 数据默认值 ----
   feeds: [],
   articles: [],
@@ -74,6 +125,14 @@ export const useStore = create<AppState>((set, get) => ({
   searchQuery: '',
   searchResults: [],
   searchSuggestions: [],
+
+  // ---- OPML 导入默认值 ----
+  opmlImporting: false,
+  opmlProgress: null,
+  opmlDialogOpen: false,
+
+  // ---- 添加订阅源错误提示 ----
+  addFeedError: null,
 
   // ---- UI 默认值 ----
   sidebarOpen: true,
@@ -90,9 +149,13 @@ export const useStore = create<AppState>((set, get) => ({
   llmConfig: null,
   summaryStream: '',
   summaryLoading: false,
+  summarizingArticleId: null,
   translateStream: '',
   translateLoading: false,
   translateMode: 'original',
+  paragraphTranslations: [],
+  displayMode: 'topBottom',
+  translateTargetLang: 'Chinese',
 
   // ---- RSS 操作 ----
   setFeeds: (feeds) => set({ feeds }),
@@ -124,8 +187,11 @@ export const useStore = create<AppState>((set, get) => ({
         isLoading: true,
         articleContent: null,
         summaryStream: '',
+        summaryLoading: false,
+        summarizingArticleId: null,
         translateStream: '',
-        translateMode: 'original'
+        translateMode: 'original',
+        paragraphTranslations: []
       })
 
       // 先加载新 feed 的文章列表
@@ -138,6 +204,8 @@ export const useStore = create<AppState>((set, get) => ({
             articles: newArticles,
             selectedArticleId: articleId
           })
+          // 恢复 AI 缓存（摘要 + 翻译）
+          restoreAiCache(newArticles, articleId)
         } else {
           // 加载失败也设上 selectedArticleId（ReaderView 会显示无文章但不会卡空白）
           set({ selectedArticleId: articleId })
@@ -152,9 +220,14 @@ export const useStore = create<AppState>((set, get) => ({
         isLoading: true,
         articleContent: null,
         summaryStream: '',
+        summaryLoading: false,
+        summarizingArticleId: null,
         translateStream: '',
-        translateMode: 'original'
+        translateMode: 'original',
+        paragraphTranslations: []
       })
+      // 恢复 AI 缓存
+      restoreAiCache(state.articles, articleId)
     }
 
     // 加载文章正文
@@ -188,7 +261,6 @@ export const useStore = create<AppState>((set, get) => ({
     set({ isLoading: false })
   },
   /** 从搜索结果直接跳转到文章 — 无额外 API 请求，零竞态 */
-
   jumpToArticle: async (article) => {
     const state = get()
 
@@ -205,9 +277,14 @@ export const useStore = create<AppState>((set, get) => ({
       isLoading: true,
       articleContent: null,
       summaryStream: '',
+      summaryLoading: false,
+      summarizingArticleId: null,
       translateStream: '',
-      translateMode: 'original'
+      translateMode: 'original',
+      paragraphTranslations: []
     })
+    // 恢复 AI 缓存
+    restoreAiCache([article], article.id)
 
     // 2) 加载正文
     try {
@@ -252,16 +329,39 @@ export const useStore = create<AppState>((set, get) => ({
   setReaderMode: (mode) => set({ readerMode: mode }),
   setReaderTheme: (theme) => set({ readerTheme: theme }),
 
+  // ---- OPML 操作 ----
+  setOpmlImporting: (importing) => set({ opmlImporting: importing }),
+  setOpmlProgress: (progress) => set({ opmlProgress: progress }),
+  setOpmlDialogOpen: (open) => set({ opmlDialogOpen: open }),
+
+  // ---- 添加订阅源错误 ----
+  setAddFeedError: (error) => set({ addFeedError: error }),
+  clearAddFeedError: () => set({ addFeedError: null }),
+
   // ---- LLM 操作 ----
   setShowSettings: (show) => set({ showSettings: show }),
   setLlmConfig: (config) => set({ llmConfig: config }),
   appendSummaryDelta: (delta) => set((state) => ({ summaryStream: state.summaryStream + delta })),
   setSummaryLoading: (loading) => set({ summaryLoading: loading }),
-  resetSummary: () => set({ summaryStream: '' }),
+  resetSummary: () => set({ summaryStream: '', summarizingArticleId: null }),
+  setSummarizingArticleId: (id) => set({ summarizingArticleId: id }),
   appendTranslateDelta: (delta) => set((state) => ({ translateStream: state.translateStream + delta })),
   setTranslateLoading: (loading) => set({ translateLoading: loading }),
   resetTranslate: () => set({ translateStream: '' }),
   setTranslateMode: (mode) => set({ translateMode: mode }),
+  toggleTranslateMode: () =>
+    set((state) => ({
+      translateMode: state.translateMode === 'original' ? 'translation' : 'original'
+    })),
+  appendParagraphTranslation: (paraIndex, delta) =>
+    set((state) => {
+      const arr = [...state.paragraphTranslations]
+      arr[paraIndex] = (arr[paraIndex] || '') + delta
+      return { paragraphTranslations: arr }
+    }),
+  resetParagraphTranslations: () => set({ paragraphTranslations: [] }),
+  setDisplayMode: (mode) => set({ displayMode: mode }),
+  setTranslateTargetLang: (lang) => set({ translateTargetLang: lang }),
   loadLlmConfig: async () => {
     try {
       const config = await window.api.getLlmConfig()
@@ -270,4 +370,5 @@ export const useStore = create<AppState>((set, get) => ({
       // 非 Electron 环境（浏览器 mock），忽略
     }
   }
-}))
+  }
+})
