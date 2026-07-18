@@ -74,8 +74,31 @@ export async function translateParagraphs(request: TranslateRequest, callback: S
   const activeKey = getApiKeyForModel(config.model)
   if (!activeKey) { callback({ type: 'translate', articleId, message: '未配置 API Key' }); return }
 
-  const paragraphs = splitHtmlIntoParagraphs(content)
   const temp = getTemperature(config.model)
+
+  // Kimi 不逐段翻译，全文一次请求避免 429 并发限制
+  if (config.model.startsWith('kimi-')) {
+    const prompt = buildTranslatePrompt(content, targetLang)
+    try {
+      const client = createClient(config, activeKey)
+      const stream = await client.chat.completions.create({ model: config.model, messages: [{ role: 'user', content: prompt }], temperature: temp, stream: true })
+      await consumeStream(stream,
+        (delta) => callback({ type: 'translate', articleId, delta }),
+        (fullText) => {
+          if (fullText.trim()) {
+            try { getDb().update(articlesTable).set({ contentMd: fullText.trim() }).where(eq(articlesTable.id, articleId)).run() } catch {}
+          }
+          callback({ type: 'translate', articleId, fullText: fullText.trim() })
+        },
+        (errorMsg) => callback({ type: 'translate', articleId, message: errorMsg })
+      )
+    } catch (err) {
+      callback({ type: 'translate', articleId, message: `[翻译失败] ${err instanceof Error ? err.message : String(err)}` })
+    }
+    return
+  }
+
+  const paragraphs = splitHtmlIntoParagraphs(content)
   for (let i = 0; i < paragraphs.length; i++) {
     const prompt = buildParagraphTranslatePrompt(paragraphs[i], targetLang)
     if (!prompt) { callback({ type: 'translateParagraph', articleId, paragraphIndex: i, fullText: '' }); continue }
@@ -87,7 +110,6 @@ export async function translateParagraphs(request: TranslateRequest, callback: S
         (fullText) => callback({ type: 'translateParagraph', articleId, paragraphIndex: i, fullText }),
         (errorMsg) => callback({ type: 'translateParagraph', articleId, paragraphIndex: i, message: errorMsg })
       )
-      // 段间延迟 500ms，防止短时间内大量请求触发限流
       if (i < paragraphs.length - 1) {
         await new Promise(resolve => setTimeout(resolve, 500))
       }

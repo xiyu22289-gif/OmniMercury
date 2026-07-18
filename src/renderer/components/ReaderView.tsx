@@ -63,12 +63,15 @@ export default function ReaderView() {
           else if ('fullText' in chunk) setSummaryLoading(false)
           else if ('message' in chunk) { setError(chunk.message); setSummaryLoading(false) }
         } else if (chunk.type === 'translateParagraph') {
-          if (!translatingRef.current) return // 已返回原文或取消了翻译
+          if (!translatingRef.current) return
           const idx = chunk.paragraphIndex ?? 0
           if ('delta' in chunk) appendParagraphTranslation(idx, chunk.delta)
           else if ('message' in chunk) appendParagraphTranslation(idx, `[错误] ${chunk.message}`)
         } else if (chunk.type === 'translate') {
-          if ('message' in chunk) { setError(chunk.message); setTranslateLoading(false) }
+          if (!translatingRef.current) return
+          if ('delta' in chunk) appendTranslateDelta(chunk.delta)
+          else if ('fullText' in chunk) { setTranslateLoading(false); setTranslateMode('translation') }
+          else if ('message' in chunk) { setError(chunk.message); setTranslateLoading(false) }
         }
       })
     }
