@@ -1,0 +1,59 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'          # 当你推送 v1.0.0、v2.0.0 这类标签时触发
+  workflow_dispatch:  # 允许你在 GitHub 网页上手动点击“运行”
+
+jobs:
+  # ========== Windows 打包 ==========
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: 安装依赖
+        run: npm install
+
+      - name: 打包 Windows 版本
+        run: npm run dist
+
+      - name: 上传安装包
+        uses: actions/upload-artifact@v4
+        with:
+          name: Windows-安装包
+          path: release/*.exe
+
+  # ========== macOS 打包 ==========
+  build-macos:
+    runs-on: macos-latest
+    env:
+      # 关键：跳过代码签名（因为你没有 Apple 开发者证书，不跳过会报错）
+      CSC_IDENTITY_AUTO_DISCOVERY: false
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: 安装依赖
+        run: npm install
+
+      - name: 打包 macOS 版本
+        run: npm run dist
+
+      - name: 上传 .dmg 文件
+        uses: actions/upload-artifact@v4
+        with:
+          name: macOS-安装包
+          path: release/*.dmg
