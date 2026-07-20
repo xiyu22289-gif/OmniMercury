@@ -142,7 +142,7 @@ export function insertFeed(feed: Omit<NewFeed, 'id' | 'createdAt'>): Feed {
 // Article CRUD
 // ============================================================
 
-/** 按 feedId 查询文章列表（对应 getArticles IPC）。 */
+/** 按 feedId 查询文章列表（对应 getArticles IPC），按发布日期降序排列。 */
 export function getArticlesByFeedId(
   feedId: number,
 ): Pick<Article, 'id' | 'title' | 'isRead' | 'summary' | 'translations' | 'link' | 'author' | 'pubDate' | 'createdAt'>[] {
@@ -160,6 +160,7 @@ export function getArticlesByFeedId(
     })
     .from(articles)
     .where(eq(articles.feedId, feedId))
+    .orderBy(sql`${articles.pubDate} DESC`)
     .all();
 }
 
@@ -260,5 +261,19 @@ export function getArticleContentById(articleId: number): Pick<Article, 'id' | '
     })
     .from(articles)
     .where(eq(articles.id, articleId))
+    .get();
+}
+
+/**
+ * 按 feedId + link 查找文章（用于 refreshFeeds 去重）。
+ * 返回 undefined 表示该链接的文章尚未入库。
+ */
+export function getArticleByLink(feedId: number, link: string): Article | undefined {
+  return getDb()
+    .select()
+    .from(articles)
+    .where(
+      sql`${articles.feedId} = ${feedId} AND ${articles.link} = ${link}`
+    )
     .get();
 }

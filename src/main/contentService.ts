@@ -81,6 +81,22 @@ function sanitizeHtml(html: string): string {
     .trim()
 }
 
+/** 移除文章末尾的截断标记（如 "Continue reading" 等） */
+function removeTruncationMarkers(markdown: string): string {
+  return markdown
+    // 移除 "Continue reading" 及其变体（可能带链接、省略号、箭头等）
+    .replace(/\s*Continue\s+reading[^>\n]*(?:>\s*)?$/gim, '')
+    // 移除 "Read more" 及其变体
+    .replace(/\s*Read\s+more[^>\n]*(?:>\s*)?$/gim, '')
+    // 移除中文 "阅读全文" 等
+    .replace(/\s*阅读全文[^\n]*$/gim, '')
+    // 移除 "[阅读更多]" 等
+    .replace(/\s*\[阅读更多\][^\n]*$/gim, '')
+    // 移除末尾空行
+    .replace(/\n{3,}$/g, '\n\n')
+    .trim()
+}
+
 // ============================================================
 // 核心流水线
 // ============================================================
@@ -180,6 +196,12 @@ export async function fetchAndCleanArticle(url: string): Promise<ContentResult> 
     }
 
     cleanHtml = sanitizeHtml(result.content)
+    // 在 HTML 层面也移除截断标记（有些站点在 Readability 输出中保留）
+    cleanHtml = cleanHtml
+      .replace(/<p[^>]*>\s*Continue\s+reading[^<]*<\/p>/gi, '')
+      .replace(/<p[^>]*>\s*Read\s+more[^<]*<\/p>/gi, '')
+      .replace(/<a[^>]*>\s*Continue\s+reading[^<]*<\/a>/gi, '')
+      .replace(/<a[^>]*>\s*Read\s+more[^<]*<\/a>/gi, '')
     extractedTitle = result.title?.trim() || null
     textContent = result.textContent?.trim() || null
   } catch (err) {
@@ -208,6 +230,9 @@ export async function fetchAndCleanArticle(url: string): Promise<ContentResult> 
       reason: `Markdown 转换失败：${message}`,
     }
   }
+
+  // ---- Step 4.5: 移除截断标记 ----
+  contentMd = removeTruncationMarkers(contentMd)
 
   // 空内容检查
   if (!contentMd.trim()) {

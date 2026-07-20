@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useStore } from '../store'
-import { Rss, Plus, RefreshCw, Trash2, FolderOpen, Upload, AlertCircle, Info, XCircle } from 'lucide-react'
+import { Rss, Plus, RefreshCw, Trash2, FolderOpen, Upload, Download, AlertCircle, Info, XCircle } from 'lucide-react'
 
 /** 错误码 → 图标 + 颜色映射 */
 const ERROR_CONFIG: Record<string, { icon: typeof AlertCircle; color: string; bg: string }> = {
@@ -64,6 +64,18 @@ export default function Sidebar() {
     }
   }
 
+  /** OPML 导出 */
+  const handleOpmlExport = async () => {
+    try {
+      const result = await window.api.exportOpml()
+      if (!result.success && result.error !== '用户取消') {
+        setError(result.error || '导出失败')
+      }
+    } catch (err) {
+      setError(String(err))
+    }
+  }
+
   const handleAddFeed = async () => {
     const url = addUrl.trim()
     if (!url) {
@@ -101,10 +113,14 @@ export default function Sidebar() {
     setLoading(true)
     try {
       await window.api.refreshFeeds()
-      // 重新加载数据
+      // 重新加载订阅源列表
       const listResp = await window.api.listFeeds()
       if (listResp.payload.error === 0 && listResp.payload.feeds) {
         setFeeds(listResp.payload.feeds)
+      }
+      // 如果当前有选中的订阅源，刷新其文章列表
+      if (selectedFeedId !== null) {
+        selectFeed(selectedFeedId)
       }
     } catch (err) {
       setError(String(err))
@@ -121,6 +137,15 @@ export default function Sidebar() {
       const listResp = await window.api.listFeeds()
       if (listResp.payload.error === 0 && listResp.payload.feeds) {
         setFeeds(listResp.payload.feeds)
+        // 如果删除的是当前选中的订阅源，自动选择第一个剩余订阅源
+        if (feedId === selectedFeedId) {
+          if (listResp.payload.feeds.length > 0) {
+            selectFeed(listResp.payload.feeds[0].id)
+          } else {
+            // 无剩余订阅源：清空文章列表
+            useStore.setState({ articles: [], selectedFeedId: null, selectedArticleId: null, articleContent: null })
+          }
+        }
       }
     } catch (err) {
       setError(String(err))
@@ -157,6 +182,13 @@ export default function Sidebar() {
           title="Import OPML file"
         >
           <Upload size={14} />
+        </button>
+        <button
+          onClick={handleOpmlExport}
+          className="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+          title="Export OPML file"
+        >
+          <Download size={14} />
         </button>
         <button
           onClick={handleRefresh}

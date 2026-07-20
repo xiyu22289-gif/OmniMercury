@@ -19,7 +19,7 @@ const MAX_LIST_WIDTH = 600
 export default function App() {
   const {
     sidebarOpen, toggleSidebar, darkMode, toggleDarkMode,
-    setFeeds, selectFeed, setError, isLoading,
+    setFeeds, selectFeed, setError, isLoading, loadLlmConfig,
     opmlImporting, opmlProgress, opmlDialogOpen, setOpmlDialogOpen
   } = useStore()
 
@@ -60,6 +60,8 @@ export default function App() {
       }
     }
     loadFeeds()
+    // 启动时加载 LLM 配置，确保重启后 API Key 等设置仍存在
+    loadLlmConfig()
   }, [])
 
   // 暗色模式切换

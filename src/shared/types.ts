@@ -77,6 +77,8 @@ export interface SummarizeRequest {
   title: string
   /** 摘要目标语言（如 Chinese / English / Japanese 等） */
   targetLang: string
+  /** 摘要详细程度 */
+  detailLevel?: 'compact' | 'medium' | 'detailed'
 }
 
 /** 翻译请求参数 */

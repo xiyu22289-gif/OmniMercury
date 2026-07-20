@@ -40,7 +40,7 @@ declare global {
       resetLlmConfig: () => Promise<{ success: boolean }>
 
       // ---- LLM 流式操作 ----
-      summarize: (articleId: number, content: string, title: string, targetLang: string) => Promise<{ success: boolean }>
+      summarize: (articleId: number, content: string, title: string, targetLang: string, detailLevel?: string) => Promise<{ success: boolean }>
       translate: (articleId: number, content: string, title: string, targetLang: string) => Promise<{ success: boolean }>
       translateParagraphs: (articleId: number, content: string, title: string, targetLang: string) => Promise<{ success: boolean }>
 
@@ -49,10 +49,14 @@ declare global {
         callback: (chunk: LlmStreamChunk | LlmStreamDone | LlmStreamError) => void
       ) => () => void
 
+      /** 测试 LLM API 连接 */
+      testConnection: (config?: { baseUrl: string; apiKey: string; model: string }) => Promise<{ success: boolean; latencyMs: number; message: string }>
+
       // ---- OPML 导入 ----
       selectOpmlFile: () => Promise<{ canceled: boolean; filePath?: string; error?: string }>
       previewOpml: (filePath: string) => Promise<IpcResponse>
       importOpml: (filePath: string) => Promise<IpcResponse>
+      exportOpml: () => Promise<{ success: boolean; filePath?: string; error?: string }>
       onOpmlProgress: (callback: (progress: OpmlImportProgress) => void) => () => void
     }
   }

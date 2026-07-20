@@ -5,7 +5,7 @@ import { useStore } from '../store'
 import {
   Globe, ExternalLink, Sparkles, Languages, Loader, Settings,
   Check, Columns, AlignJustify, Replace, X,
-  BookOpen, Sun, Moon, Coffee, Monitor
+  BookOpen, Monitor
 } from 'lucide-react'
 import type { LlmStreamChunk, LlmStreamDone, LlmStreamError } from '../../shared/types'
 import { splitIntoParagraphs } from '../../shared/paragraphSplitter'
@@ -28,25 +28,6 @@ const DISPLAY_MODES = [
   { value: 'newTab' as const, icon: Monitor, label: '新标签' },
 ] as const
 
-/** 阅读主题对应的 CSS 类名 */
-const READER_THEME_STYLES: Record<
-  'light' | 'dark' | 'sepia',
-  { container: string; prose: string }
-> = {
-  light: {
-    container: 'bg-white',
-    prose: 'prose-gray'
-  },
-  dark: {
-    container: 'bg-gray-900',
-    prose: 'prose-invert'
-  },
-  sepia: {
-    container: 'bg-amber-50',
-    prose: 'prose-amber'
-  }
-}
-
 const LANG_LABEL_MAP: Record<string, string> = {
   Chinese: '中文',
   English: 'English',
@@ -68,7 +49,7 @@ interface NewTabTranslationProps {
   translations: string[]
   translateLoading: boolean
   targetLang: string
-  themeStyle: { container: string; prose: string }
+  darkMode: boolean
   onClose: () => void
 }
 
@@ -78,9 +59,10 @@ function NewTabTranslation({
   translations,
   translateLoading,
   targetLang,
-  themeStyle,
+  darkMode,
   onClose
 }: NewTabTranslationProps) {
+  const proseCls = darkMode ? 'prose-invert' : 'prose-gray'
   const [dividerPos, setDividerPos] = useState(50)
   const isDragging = useRef(false)
 
@@ -114,7 +96,7 @@ function NewTabTranslation({
         </div>
         <div className="space-y-4">
           {originalParagraphs.map((para, idx) => (
-            <div key={idx} className={`prose prose-sm ${themeStyle.prose} max-w-none leading-relaxed`}>
+            <div key={idx} className={`prose prose-sm ${proseCls} max-w-none leading-relaxed`}>
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{para}</ReactMarkdown>
             </div>
           ))}
@@ -150,7 +132,7 @@ function NewTabTranslation({
           {originalParagraphs.map((_para, idx) => (
             <div key={idx}>
               {translations[idx] ? (
-                <div className={`prose prose-sm ${themeStyle.prose} max-w-none leading-relaxed`}>
+                <div className={`prose prose-sm ${proseCls} max-w-none leading-relaxed`}>
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
                     {translations[idx]}
                   </ReactMarkdown>
@@ -180,9 +162,8 @@ export default function ReaderView() {
     error,
     // 阅读模式（来自 HEAD）
     readerMode,
-    readerTheme,
+    darkMode,
     setReaderMode,
-    setReaderTheme,
     // LLM 摘要（来自 HEAD）
     summaryStream,
     summaryLoading,
@@ -191,6 +172,8 @@ export default function ReaderView() {
     paragraphTranslations,
     displayMode,
     setDisplayMode,
+    translateTargetLang,
+    setTranslateTargetLang,
     // Store actions
     setShowSettings,
     setSummaryLoading,
@@ -213,6 +196,7 @@ export default function ReaderView() {
   const [showTranslateLangPicker, setShowTranslateLangPicker] = useState(false)
   const [selectedSummaryLang, setSelectedSummaryLang] = useState('Chinese')
   const [selectedTargetLang, setSelectedTargetLang] = useState('Chinese')
+  const [summaryDetailLevel, setSummaryDetailLevel] = useState<'compact' | 'medium' | 'detailed'>('medium')
 
   // 摘要面板宽度
   const [summaryPanelWidth, setSummaryPanelWidth] = useState(35)
@@ -228,22 +212,13 @@ export default function ReaderView() {
   const selectedArticle = articles.find(a => a.id === selectedArticleId)
   const originalParagraphs = articleContent ? splitContent(articleContent) : []
 
-  // 主题图标
-  const ThemeIcon = readerTheme === 'light' ? Sun : readerTheme === 'dark' ? Moon : Coffee
-  const themeLabel = readerTheme === 'light' ? '浅色' : readerTheme === 'dark' ? '深色' : '护眼'
-
-  // 主题循环切换
-  const cycleReaderTheme = () => {
-    const themes: Array<'light' | 'dark' | 'sepia'> = ['light', 'dark', 'sepia']
-    const currentIdx = themes.indexOf(readerTheme)
-    setReaderTheme(themes[(currentIdx + 1) % themes.length])
-  }
-
   // ============ 副作用 ============
 
   const translatingRef = useRef(false)
   const selectedArticleIdRef = useRef(selectedArticleId)
   const translateTargetLangRef = useRef('Chinese')
+  const summaryTargetLangRef = useRef('Chinese')
+  const summaryDetailLevelRef = useRef<'compact' | 'medium' | 'detailed'>('medium')
 
   useEffect(() => {
     selectedArticleIdRef.current = selectedArticleId
@@ -260,11 +235,21 @@ export default function ReaderView() {
           if ('delta' in chunk) appendSummaryDelta(chunk.delta)
           else if ('fullText' in chunk) {
             setSummaryLoading(false)
-            useStore.setState(state => ({
-              articles: state.articles.map(a =>
-                a.id === chunk.articleId ? { ...a, summary: chunk.fullText } : a
-              )
-            }))
+            // 同时更新 articles 数组的 summary 和 translations._summary，供缓存命中
+            useStore.setState(state => {
+              const targetArticle = state.articles.find(a => a.id === chunk.articleId)
+              const existingTrans: Record<string, unknown> = targetArticle?.translations
+                ? JSON.parse(targetArticle.translations)
+                : {}
+              existingTrans._summary = { text: chunk.fullText, lang: summaryTargetLangRef.current }
+              return {
+                articles: state.articles.map(a =>
+                  a.id === chunk.articleId
+                    ? { ...a, summary: chunk.fullText, translations: JSON.stringify(existingTrans) }
+                    : a
+                )
+              }
+            })
           }
           else if ('message' in chunk) { setError(chunk.message); setSummaryLoading(false) }
         } else if (chunk.type === 'translateParagraph') {
@@ -356,11 +341,25 @@ export default function ReaderView() {
     if (!selectedArticleId || !selectedArticle) return
     if (summaryLoading) return
 
-    // 注意：articles.summary 字段存储的是 RSS contentSnippet（原始内容片段），
-    // 而非 AI 摘要。AI 摘要通过 LLM 生成后由流式完成回调写入 articles 数组。
-    // 因此这里不检查缓存命中——每次用户主动点击"AI 摘要"都调用 LLM 生成。
-    // （同一 session 内二次点击会重复调用 LLM，但这是用户显式操作，合理。）
+    // 缓存命中检查：translations._summary 存储了已生成的 AI 摘要 + 语言
+    if (selectedArticle.translations) {
+      try {
+        const transMap: Record<string, unknown> = JSON.parse(selectedArticle.translations)
+        const cached = transMap._summary as { text: string; lang: string } | undefined
+        if (cached && cached.text && cached.lang === targetLang) {
+          // 命中缓存：直接恢复摘要，不调用 API
+          resetSummary()
+          setSummarizingArticleId(selectedArticleId)
+          setSummaryLangLabel(LANG_LABEL_MAP[targetLang] || targetLang)
+          // 逐字恢复（模拟流式，也可直接 setState）
+          useStore.setState({ summaryStream: cached.text })
+          return
+        }
+      } catch { /* JSON 解析失败，走 API 生成 */ }
+    }
 
+    summaryTargetLangRef.current = targetLang
+    summaryDetailLevelRef.current = summaryDetailLevel
     resetSummary()
     setSummarizingArticleId(selectedArticleId)
     setSummaryLoading(true)
@@ -368,12 +367,12 @@ export default function ReaderView() {
     try {
       const c = articleContent || selectedArticle.summary || ''
       if (!c) { setError('文章无内容'); setSummaryLoading(false); return }
-      await window.api.summarize(selectedArticleId, c, selectedArticle.title, targetLang)
+      await window.api.summarize(selectedArticleId, c, selectedArticle.title, targetLang, summaryDetailLevel)
     } catch (err) {
       setError(String(err))
       setSummaryLoading(false)
     }
-  }, [selectedArticleId, selectedArticle, articleContent, summaryLoading])
+  }, [selectedArticleId, selectedArticle, articleContent, summaryLoading, summaryDetailLevel])
 
   const confirmSummary = useCallback((lang: string) => {
     setShowSummaryLangPicker(false)
@@ -444,7 +443,7 @@ export default function ReaderView() {
     }
 
     return (
-      <div className={`prose prose-sm ${READER_THEME_STYLES[readerTheme].prose} max-w-none leading-relaxed`}>
+      <div className={`prose prose-sm ${darkMode ? 'prose-invert' : 'prose-gray'} max-w-none leading-relaxed`}>
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           components={{
@@ -516,18 +515,19 @@ export default function ReaderView() {
   const isTranslating = translateLoading || hasTranslation
   const hasSummary = summarizingArticleId === selectedArticleId && summaryStream.trim()
 
-  // 获取当前主题样式
-  const themeStyle = READER_THEME_STYLES[readerTheme]
+  // 翻译/阅读区样式（跟随全局 darkMode）
+  const proseCls = darkMode ? 'prose-invert' : 'prose-gray'
+  const containerBg = darkMode ? 'bg-gray-900' : 'bg-white'
 
   return (
     <div className="reader-view flex" style={{ height: '100%', overflow: 'hidden' }}>
       {/* 左侧主区域 */}
       <div
+        className={containerBg}
         style={{
           width: hasSummary ? `${100 - summaryPanelWidth}%` : '100%',
           overflowY: 'auto',
           paddingRight: hasSummary ? 12 : 0,
-          background: themeStyle.container,
         }}
       >
         <div className="max-w-3xl mx-auto">
@@ -577,21 +577,6 @@ export default function ReaderView() {
               {readerMode === 'reader' ? '阅读模式' : '原始网页'}
             </button>
 
-            {/* 主题切换（来自 HEAD） */}
-            {readerMode === 'reader' && (
-              <button
-                onClick={cycleReaderTheme}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg
-                         bg-orange-50 text-orange-600 hover:bg-orange-100
-                         dark:bg-orange-900/20 dark:text-orange-400 dark:hover:bg-orange-900/30
-                         transition-colors"
-                title={`当前主题：${themeLabel}（点击切换）`}
-              >
-                <ThemeIcon size={13} />
-                {themeLabel}
-              </button>
-            )}
-
             <div className="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1" />
 
             {/* 摘要按钮（来自远程，增强语言选择） */}
@@ -609,7 +594,7 @@ export default function ReaderView() {
               </button>
               {showSummaryLangPicker && (
                 <div
-                  className="absolute top-full left-0 mt-1 z-50 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 w-44 overflow-hidden"
+                  className="absolute top-full left-0 mt-1 z-50 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 w-52 overflow-hidden"
                   onClick={e => e.stopPropagation()}
                 >
                   <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700">
@@ -630,6 +615,25 @@ export default function ReaderView() {
                         {selectedSummaryLang === l.value && <Check size={13} className="text-purple-500" />}
                       </button>
                     ))}
+                  </div>
+                  {/* 摘要详细程度 */}
+                  <div className="border-t border-gray-100 dark:border-gray-700 px-3 py-2">
+                    <span className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase">详细程度</span>
+                    <div className="flex gap-1 mt-1.5">
+                      {(['compact', 'medium', 'detailed'] as const).map(level => (
+                        <button
+                          key={level}
+                          onClick={(e) => { e.stopPropagation(); setSummaryDetailLevel(level) }}
+                          className={`flex-1 py-1 text-[11px] rounded transition-colors
+                            ${summaryDetailLevel === level
+                              ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 font-medium'
+                              : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700'
+                            }`}
+                        >
+                          {level === 'compact' ? '精简' : level === 'medium' ? '标准' : '详细'}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               )}
@@ -715,6 +719,7 @@ export default function ReaderView() {
                           key={l.value}
                           onClick={() => {
                             setSelectedTargetLang(l.value)
+                            setTranslateTargetLang(l.value)
                             setShowTranslateLangPicker(false)
                             handleStartTranslate(l.value)
                           }}
@@ -795,7 +800,7 @@ export default function ReaderView() {
                   {paragraphTranslations.map((html, idx) => (
                     <div
                       key={idx}
-                      className={`prose prose-sm ${themeStyle.prose} max-w-none leading-relaxed`}
+                      className={`prose prose-sm ${proseCls} max-w-none leading-relaxed`}
                       dangerouslySetInnerHTML={{ __html: html || '' }}
                     />
                   ))}
@@ -808,7 +813,7 @@ export default function ReaderView() {
                   {originalParagraphs.map((para: string, idx: number) => (
                     <div key={idx} style={{ display: 'flex', gap: 0, alignItems: 'flex-start' }}>
                       <div style={{ width: `${dividerPos}%`, paddingRight: 12 }}>
-                        <div className={`prose prose-sm ${themeStyle.prose} max-w-none leading-relaxed`}>
+                        <div className={`prose prose-sm ${proseCls} max-w-none leading-relaxed`}>
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>
                             {para}
                           </ReactMarkdown>
@@ -821,7 +826,7 @@ export default function ReaderView() {
                       />
                       <div style={{ width: `${100 - dividerPos}%`, paddingLeft: 12 }}>
                         {paragraphTranslations[idx] ? (
-                          <div className={`prose prose-sm ${themeStyle.prose} max-w-none leading-relaxed`}>
+                          <div className={`prose prose-sm ${proseCls} max-w-none leading-relaxed`}>
                             <ReactMarkdown remarkPlugins={[remarkGfm]}>
                               {paragraphTranslations[idx]}
                             </ReactMarkdown>
@@ -840,7 +845,7 @@ export default function ReaderView() {
                 <div className="space-y-6">
                   {originalParagraphs.map((para: string, idx: number) => (
                     <div key={idx}>
-                      <div className={`prose prose-sm ${themeStyle.prose} max-w-none leading-relaxed`}>
+                      <div className={`prose prose-sm ${proseCls} max-w-none leading-relaxed`}>
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>
                           {para}
                         </ReactMarkdown>
@@ -854,7 +859,7 @@ export default function ReaderView() {
                             </span>
                           </div>
                           <div className="bg-blue-50/30 dark:bg-blue-900/5 px-4 py-3">
-                            <div className={`prose prose-sm ${themeStyle.prose} max-w-none leading-relaxed text-sm`}>
+                            <div className={`prose prose-sm ${proseCls} max-w-none leading-relaxed text-sm`}>
                               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                                 {paragraphTranslations[idx]}
                               </ReactMarkdown>
@@ -887,14 +892,14 @@ export default function ReaderView() {
                   translations={paragraphTranslations}
                   translateLoading={translateLoading}
                   targetLang={translateTargetLangRef.current}
-                  themeStyle={themeStyle}
+                  darkMode={darkMode}
                   onClose={handleBackToOriginal}
                 />
               )}
 
               {/* 无翻译且不在翻译中时显示原文（reader 或 original 模式） */}
               {!isTranslating && (
-                <div className={`rounded-lg p-6 ${themeStyle.container}`}>
+                <div className={`rounded-lg p-6 ${containerBg}`}>
                   {readerMode === 'reader' ? renderMarkdownContent() : renderOriginalContent()}
                 </div>
               )}
@@ -911,14 +916,23 @@ export default function ReaderView() {
             style={{ width: 6, cursor: 'col-resize', background: '#d1d5db', flexShrink: 0, borderRadius: 3, alignSelf: 'stretch' }}
             className="hover:bg-purple-400 transition-colors"
           />
-          <div style={{ width: `${summaryPanelWidth}%`, overflowY: 'auto', paddingLeft: 12, background: themeStyle.container }}>
+          <div className={containerBg} style={{ width: `${summaryPanelWidth}%`, overflowY: 'auto', paddingLeft: 12 }}>
             <div className="sticky top-0 z-10 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm pb-2 mb-3 border-b border-gray-200 dark:border-gray-700">
-              <div className="flex items-center gap-1.5">
-                <Sparkles size={13} className="text-purple-500" />
-                <span className="text-xs font-semibold text-purple-600 dark:text-purple-400 uppercase tracking-wider">
-                  AI 摘要{summaryLangLabel ? ` (${summaryLangLabel})` : ''}
-                </span>
-                {summaryLoading && <Loader size={12} className="animate-spin text-purple-400 ml-1" />}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <Sparkles size={13} className="text-purple-500" />
+                  <span className="text-xs font-semibold text-purple-600 dark:text-purple-400 uppercase tracking-wider">
+                    AI 摘要{summaryLangLabel ? ` (${summaryLangLabel}${summaryDetailLevelRef.current === 'compact' ? '·精简' : summaryDetailLevelRef.current === 'detailed' ? '·详细' : ''})` : ''}
+                  </span>
+                  {summaryLoading && <Loader size={12} className="animate-spin text-purple-400 ml-1" />}
+                </div>
+                <button
+                  onClick={resetSummary}
+                  className="flex items-center gap-1 px-1.5 py-0.5 text-xs text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+                  title="关闭摘要面板"
+                >
+                  <X size={12} />
+                </button>
               </div>
             </div>
             <div className={`text-sm text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap`}>

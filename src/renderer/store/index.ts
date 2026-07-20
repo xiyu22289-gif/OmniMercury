@@ -21,7 +21,6 @@ interface AppState {
 
   // ---- M3 阅读模式 ----
   readerMode: 'reader' | 'original'
-  readerTheme: 'light' | 'dark' | 'sepia'
 
   // ---- LLM 状态 ----
   showSettings: boolean
@@ -71,7 +70,6 @@ interface AppState {
 
   // ---- M3 阅读模式操作 ----
   setReaderMode: (mode: 'reader' | 'original') => void
-  setReaderTheme: (theme: 'light' | 'dark' | 'sepia') => void
 
   // ---- LLM 操作 ----
   setShowSettings: (show: boolean) => void
@@ -93,31 +91,34 @@ interface AppState {
 }
 
 export const useStore = create<AppState>((set, get) => {
-  /** 从文章元数据中恢复 AI 翻译缓存（仅翻译，不含摘要），避免重复调用 LLM。
-   *
-   * 注意：articles.summary 字段存储的是 RSS contentSnippet（原始内容片段），
-   * 而非 AI 摘要。AI 摘要通过 LLM 生成后单独写入 DB 并存入 articles 数组，
-   * 由 ReaderView.handleSummarize 中的缓存检查负责恢复，不在此处自动弹出。
-   */
+  /** 从文章元数据中恢复 AI 缓存（翻译 + 摘要），避免重复调用 LLM。 */
   const restoreAiCache = (articles: Article[], articleId: number) => {
     const a = articles.find(x => x.id === articleId)
     if (!a) return
     if (a.translations) {
       try {
         const m: Record<string, unknown> = JSON.parse(a.translations)
-        // ★ 版本号校验：_v !== 2 的旧缓存永不恢复（无论有多少语言条目）
-        if (m._v !== 2) return
-        const lang = get().translateTargetLang
-        const cached = m[lang]
-        if (cached && Array.isArray(cached) && cached.length > 0) {
-          const currentContent = get().articleContent || ''
-          if (!currentContent) return
-          // ★ 使用共享分段器计算段落数，保证与翻译时一致
-          const paras = splitIntoParagraphs(currentContent)
-          if (cached.length === paras.length) {
-            set({ paragraphTranslations: cached })
+
+        // 恢复 AI 摘要缓存（_summary 键独立于翻译版本号）
+        const summaryCache = m._summary as { text: string; lang: string } | undefined
+        if (summaryCache && summaryCache.text) {
+          set({ summaryStream: summaryCache.text, summarizingArticleId: articleId })
+        }
+
+        // 恢复段落翻译缓存（需要版本号匹配）
+        if (m._v === 2) {
+          const lang = get().translateTargetLang
+          const cached = m[lang]
+          if (cached && Array.isArray(cached) && cached.length > 0) {
+            const currentContent = get().articleContent || ''
+            if (!currentContent) return
+            // ★ 使用共享分段器计算段落数，保证与翻译时一致
+            const paras = splitIntoParagraphs(currentContent)
+            if (cached.length === paras.length) {
+              set({ paragraphTranslations: cached })
+            }
+            // 段落数不匹配：忽略旧缓存，不恢复
           }
-          // 段落数不匹配：忽略旧缓存，不恢复
         }
       } catch { /* JSON 解析失败则忽略，不阻塞正常阅读 */ }
     }
@@ -150,7 +151,6 @@ export const useStore = create<AppState>((set, get) => {
 
   // ---- M3 阅读模式默认值 ----
   readerMode: 'reader',
-  readerTheme: 'light',
 
   // ---- LLM 默认值 ----
   showSettings: false,
@@ -345,7 +345,6 @@ export const useStore = create<AppState>((set, get) => {
 
   // ---- M3 阅读模式操作 ----
   setReaderMode: (mode) => set({ readerMode: mode }),
-  setReaderTheme: (theme) => set({ readerTheme: theme }),
 
   // ---- OPML 操作 ----
   setOpmlImporting: (importing) => set({ opmlImporting: importing }),

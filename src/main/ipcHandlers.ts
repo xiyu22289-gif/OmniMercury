@@ -1,9 +1,9 @@
 import { ipcMain, BrowserWindow, dialog } from 'electron'
-import { addFeed, listFeeds, getArticles, searchArticles, getCachedArticleContent } from './feedService'
-import { parseOpmlFile, importOpmlFile } from './opmlService'
+import { addFeed, listFeeds, getArticles, searchArticles, getCachedArticleContent, refreshAllFeeds } from './feedService'
+import { parseOpmlFile, importOpmlFile, exportOpmlFile } from './opmlService'
 import { getDb, getFeedById, feeds as feedsTable, articles as articlesTable } from './db'
 import { eq } from 'drizzle-orm'
-import { summarizeArticle, translateArticle, translateParagraphs } from './llmService'
+import { summarizeArticle, translateArticle, translateParagraphs, testConnection } from './llmService'
 import { getLlmConfig, setLlmConfig, resetLlmConfig } from './configService'
 import { getOrFetchArticleContent } from './contentService'
 import type {
@@ -124,7 +124,14 @@ export function registerIpcHandlers(): void {
     catch (err) { return { type: 'remove_feed', payload: { error: 1, message: err instanceof Error ? err.message : String(err) } } }
   })
 
-  ipcMain.handle('backend:refreshFeeds', async (): Promise<IpcResponse> => ({ type: 'refresh_feeds', payload: { error: 0, message: 'Refresh not yet implemented' } }))
+  ipcMain.handle('backend:refreshFeeds', async (): Promise<IpcResponse> => {
+    try {
+      const result = await refreshAllFeeds()
+      return { type: 'refresh_feeds', payload: { error: 0, message: `刷新完成，新增 ${result.newCount} 篇文章`, new_count: result.newCount } }
+    } catch (err) {
+      return { type: 'refresh_feeds', payload: { error: 1, message: err instanceof Error ? err.message : String(err) } }
+    }
+  })
 
   ipcMain.handle('backend:searchArticles', async (_event, query: string, _feedId?: number, _offset?: number, _limit?: number): Promise<IpcResponse> => {
     if (!query?.trim()) return { type: 'search_articles', payload: { error: 0, articles: [] } }
@@ -144,6 +151,11 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('llm:getConfig', async () => getLlmConfig())
   ipcMain.handle('llm:setConfig', async (_event, updates: Record<string, string>) => { setLlmConfig(updates); return { success: true } })
   ipcMain.handle('llm:resetConfig', async () => { resetLlmConfig(); return { success: true } })
+
+  // 测试 API 连接
+  ipcMain.handle('llm:testConnection', async (_event, config?: { baseUrl: string; apiKey: string; model: string }) => {
+    return await testConnection(config)
+  })
 
   // 流式摘要
   ipcMain.handle('llm:summarize', async (event, request: SummarizeRequest) => {
@@ -249,6 +261,32 @@ export function registerIpcHandlers(): void {
           message: err instanceof Error ? err.message : String(err),
         },
       }
+    }
+  })
+
+  /** OPML 导出：打开保存对话框，写入 OPML 文件 */
+  ipcMain.handle('opml:export', async (event): Promise<{ success: boolean; filePath?: string; error?: string }> => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return { success: false, error: '窗口不存在' }
+
+    const result = await dialog.showSaveDialog(win, {
+      title: '导出 OPML 文件',
+      defaultPath: `summer-rss-export-${new Date().toISOString().slice(0, 10)}.opml`,
+      filters: [
+        { name: 'OPML 文件', extensions: ['opml'] },
+        { name: '所有文件', extensions: ['*'] },
+      ],
+    })
+
+    if (result.canceled || !result.filePath) {
+      return { success: false, error: '用户取消' }
+    }
+
+    try {
+      exportOpmlFile(result.filePath)
+      return { success: true, filePath: result.filePath }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
     }
   })
 }

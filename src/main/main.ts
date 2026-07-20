@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'path'
 import { initDatabase } from './db'
 import { registerIpcHandlers } from './ipcHandlers'
@@ -24,6 +24,22 @@ function createWindow(): void {
       sandbox: false,
       nodeIntegration: false,
       contextIsolation: true
+    }
+  })
+
+  // 拦截所有导航和弹窗，统一在外部浏览器打开链接
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('http:') || url.startsWith('https:')) {
+      shell.openExternal(url)
+    }
+    return { action: 'deny' }
+  })
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    // 阻止应用内导航（非 dev server 的 URL），在外部浏览器打开
+    if (!url.startsWith('http://localhost:') && !url.startsWith('http://127.0.0.1:')) {
+      event.preventDefault()
+      shell.openExternal(url)
     }
   })
 

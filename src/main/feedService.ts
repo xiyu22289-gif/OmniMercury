@@ -4,10 +4,12 @@ import {
   getFeedByUrl,
   insertFeed,
   insertArticles,
+  insertArticle,
   getArticlesByFeedId,
   getAllFeeds,
   searchArticlesByTitle,
   getArticleContentById,
+  getArticleByLink,
   type Feed,
   type Article,
   type NewArticle,
@@ -260,6 +262,65 @@ export function getArticles(feedId: number): ArticleSummary[] {
     pubDate: a.pubDate,
     createdAt: a.createdAt,
   }));
+}
+
+/**
+ * 刷新全部订阅源：重新拉取 RSS XML，仅插入新文章（按 link 去重）。
+ * 返回新增文章总数。
+ */
+export async function refreshAllFeeds(): Promise<{ newCount: number }> {
+  const allFeeds = getAllFeeds();
+  let newCount = 0;
+
+  for (const feed of allFeeds) {
+    try {
+      const response = await axios.get(feed.url, {
+        timeout: 15_000,
+        proxy: false,
+        headers: {
+          'User-Agent': 'RSS-Reader/1.0 (Desktop)',
+          Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml',
+        },
+        responseType: 'text',
+        validateStatus: (status) => status >= 200 && status < 400,
+      });
+
+      const parsed = (await rssParser.parseString(response.data)) as ParsedFeed;
+      const items = parsed.items ?? [];
+
+      for (const item of items) {
+        const link = item.link;
+        if (!link) continue;
+
+        // 去重：已存在的文章跳过
+        const existing = getArticleByLink(feed.id, link);
+        if (existing) continue;
+
+        try {
+          insertArticle({
+            feedId: feed.id,
+            title: item.title?.trim() || '(无标题)',
+            link: link,
+            content: item.content ?? item.contentSnippet ?? null,
+            contentMd: null,
+            summary: safeSummary(item.contentSnippet ?? item.summary ?? item.content),
+            isRead: 0,
+            isStarred: 0,
+            author: item.author ?? null,
+            pubDate: item.pubDate ?? item.isoDate ?? null,
+          });
+          newCount++;
+        } catch {
+          // 单篇插入失败不影响其他文章
+        }
+      }
+    } catch (err) {
+      console.error(`[feedService] 刷新订阅源失败 (${feed.title}):`, err instanceof Error ? err.message : String(err));
+      // 单个订阅源失败不影响其他
+    }
+  }
+
+  return { newCount };
 }
 
 /**

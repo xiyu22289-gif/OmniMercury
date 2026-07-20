@@ -54,23 +54,62 @@ function isHtmlContent(content: string): boolean {
   return /<\/?(p|h[1-6]|li|blockquote|div|span|a|img|table|ul|ol|pre|code|br)[>\s]/.test(content)
 }
 
+/** 占位符替换表：翻译前替换图片/链接，翻译后还原 */
+const placeholderMap = new Map<string, string>()
+let placeholderCounter = 0
+
+/** 将图片和链接替换为不可翻译的占位符，防止 LLM 修改 */
+function protectMedia(text: string): string {
+  placeholderMap.clear()
+  placeholderCounter = 0
+  // 保护 Markdown 图片 ![alt](url)
+  text = text.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (match) => {
+    const key = `__IMG_${placeholderCounter++}__`
+    placeholderMap.set(key, match)
+    return key
+  })
+  // 保护 Markdown 链接 [text](url)
+  text = text.replace(/(?<!!)\[([^\]]*)\]\(([^)]+)\)/g, (match) => {
+    const key = `__LINK_${placeholderCounter++}__`
+    placeholderMap.set(key, match)
+    return key
+  })
+  // 保护 HTML img 标签
+  text = text.replace(/<img[^>]*\/?>/gi, (match) => {
+    const key = `__IMG_${placeholderCounter++}__`
+    placeholderMap.set(key, match)
+    return key
+  })
+  return text
+}
+
+/** 将翻译结果中的占位符还原为原始图片/链接 */
+function restoreMedia(translated: string): string {
+  let result = translated
+  for (const [key, original] of placeholderMap) {
+    result = result.replace(key, original)
+  }
+  return result
+}
+
 function buildParagraphTranslatePrompt(paragraph: string, targetLang: string): string {
-  // 只替换 HTML <img> 标签（可能含 base64），保留 Markdown ![alt](url) 语法
-  const cleaned = paragraph.replace(/<img[^>]*\/?>/gi, '[Image]')
+  // 保护图片和链接，防止 LLM 修改
+  const protectedText = protectMedia(paragraph)
 
   // 只剥离 HTML 标签来检查纯文本，不碰 Markdown 语法
-  const plainText = cleaned.replace(/<[^>]+>/g, '').trim()
+  const plainText = protectedText.replace(/<[^>]+>/g, '').replace(/__IMG_\d+__/g, '').replace(/__LINK_\d+__/g, '').trim()
   // 去掉 title/alt 文本后，真正空段落才跳过
   if (!plainText) return ''
 
-  const isHtml = isHtmlContent(cleaned)
+  const isHtml = isHtmlContent(paragraph)
   const langName = targetLang === 'Chinese' ? '简体中文' : targetLang
+  console.log(`[llmService] buildParagraphTranslatePrompt — targetLang=${targetLang}, langName=${langName}`)
 
   if (isHtml) {
-    return `Translate the following HTML fragment to ${langName}. Preserve ALL HTML tags and attributes exactly. Only translate visible text content. Keep the same HTML structure. Keep [Image] placeholders as-is. Do NOT include the original text. Output ONLY the translated HTML. No explanations:\n\n${cleaned}`
+    return `Translate the following HTML fragment to ${langName}. Preserve ALL HTML tags and attributes exactly. Only translate visible text content. Keep placeholders like __IMG_N__ and __LINK_N__ exactly as-is. Do NOT include the original text. Output ONLY the translated HTML. No explanations:\n\n${protectedText}`
   }
 
-  return `Translate the following Markdown fragment to ${langName}. Preserve ALL Markdown formatting (headings, bold, italic, links, images, code blocks, etc.) exactly. Only translate visible text content. Keep the same Markdown structure. Keep image syntax (![...](...)) unchanged. Do NOT include the original text. Output ONLY the translated Markdown. No explanations:\n\n${cleaned}`
+  return `Translate the following Markdown fragment to ${langName}. Preserve ALL Markdown formatting (headings, bold, italic, code blocks, etc.) exactly. Keep placeholders like __IMG_N__ and __LINK_N__ exactly as-is. Do NOT include the original text. Output ONLY the translated Markdown. No explanations:\n\n${protectedText}`
 }
 
 export async function translateParagraphs(request: TranslateRequest, callback: StreamCallback): Promise<void> {
@@ -104,7 +143,7 @@ export async function translateParagraphs(request: TranslateRequest, callback: S
               try {
                 const row = getDb().select({ translations: articlesTable.translations }).from(articlesTable).where(eq(articlesTable.id, articleId)).get()
                 const existingMap: Record<string, unknown> = row?.translations ? JSON.parse(row.translations) : {}
-                existingMap._v = 3
+                existingMap._v = 2
                 existingMap[targetLang] = [trimmed]
                 getDb().update(articlesTable).set({ translations: JSON.stringify(existingMap) }).where(eq(articlesTable.id, articleId)).run()
               } catch {}
@@ -146,7 +185,7 @@ export async function translateParagraphs(request: TranslateRequest, callback: S
       const stream = await client.chat.completions.create({ model: config.model, messages: [{ role: 'user', content: prompt }], temperature: temp, stream: true })
       await consumeStream(stream,
         (delta) => callback({ type: 'translateParagraph', articleId, paragraphIndex: i, delta }),
-        (fullText) => { allTranslations[i] = fullText; callback({ type: 'translateParagraph', articleId, paragraphIndex: i, fullText }) },
+        (fullText) => { const restored = restoreMedia(fullText); allTranslations[i] = restored; callback({ type: 'translateParagraph', articleId, paragraphIndex: i, fullText: restored }) },
         (errorMsg) => { allTranslations[i] = `[错误] ${errorMsg}`; callback({ type: 'translateParagraph', articleId, paragraphIndex: i, message: errorMsg }) }
       )
       if (i < paragraphs.length - 1) {
@@ -164,7 +203,7 @@ export async function translateParagraphs(request: TranslateRequest, callback: S
   try {
     const row = getDb().select({ translations: articlesTable.translations }).from(articlesTable).where(eq(articlesTable.id, articleId)).get()
     const existingMap: Record<string, unknown> = row?.translations ? JSON.parse(row.translations) : {}
-    existingMap._v = 3
+    existingMap._v = 2
     existingMap[targetLang] = allTranslations
     getDb().update(articlesTable).set({ translations: JSON.stringify(existingMap) }).where(eq(articlesTable.id, articleId)).run()
   } catch { /* DB 写入失败不阻塞 */ }
@@ -173,14 +212,24 @@ export async function translateParagraphs(request: TranslateRequest, callback: S
   callback({ type: 'translateComplete', articleId, fullText: '' })
 }
 
-function buildSummarizePrompt(title: string, content: string, targetLang: string): string {
-  const maxContentLen = 8000
+function buildSummarizePrompt(title: string, content: string, targetLang: string, detailLevel: 'compact' | 'medium' | 'detailed' = 'medium'): string {
+  const maxContentLen = detailLevel === 'detailed' ? 12000 : detailLevel === 'compact' ? 4000 : 8000
   const truncated = content.length > maxContentLen ? content.slice(0, maxContentLen) + '\n\n[内容过长已截断...]' : content
-  return `Please generate a concise summary (about 150 words) for the following article in ${targetLang}. Output ONLY the summary text, no explanations:\n\nTitle: ${title}\n\nContent:\n${truncated}\n\nSummary:`
+  const langName = targetLang === 'Chinese' ? '简体中文' : targetLang
+
+  const lengthGuide = detailLevel === 'compact'
+    ? 'a very concise summary (about 50-80 words)'
+    : detailLevel === 'detailed'
+      ? 'a detailed summary (about 300-400 words) covering key points, supporting arguments, and conclusions'
+      : 'a concise summary (about 150 words)'
+
+  console.log(`[llmService] buildSummarizePrompt — targetLang=${targetLang}, langName=${langName}, detailLevel=${detailLevel}`)
+  return `Please generate ${lengthGuide} for the following article in ${langName}. Output ONLY the summary text, no explanations:\n\nTitle: ${title}\n\nContent:\n${truncated}\n\nSummary:`
 }
 
 export async function summarizeArticle(request: SummarizeRequest, callback: StreamCallback): Promise<void> {
-  const { articleId, content, title, targetLang } = request
+  const { articleId, content, title, targetLang, detailLevel } = request
+  console.log(`[llmService] summarizeArticle — articleId=${articleId}, targetLang=${targetLang}, detailLevel=${detailLevel}`)
   const type = 'summarize' as const
   if (!content?.trim()) { callback({ type, articleId, message: '文章内容为空' }); return }
 
@@ -192,21 +241,49 @@ export async function summarizeArticle(request: SummarizeRequest, callback: Stre
   let client: OpenAI
   try { client = createClient(config, activeKey) } catch (err) { callback({ type, articleId, message: String(err) }); return }
 
-  const prompt = buildSummarizePrompt(title, content, targetLang)
+  const prompt = buildSummarizePrompt(title, content, targetLang, detailLevel)
   try {
-    const stream = await client.chat.completions.create({ model: config.model, messages: [{ role: 'system', content: '你是一个专业的文章摘要助手。' }, { role: 'user', content: prompt }], temperature: getTemperature(config.model), max_tokens: 800, stream: true })
+    const maxTokens = detailLevel === 'compact' ? 300 : detailLevel === 'detailed' ? 1500 : 800
+    const stream = await client.chat.completions.create({ model: config.model, messages: [{ role: 'system', content: '你是一个专业的文章摘要助手。' }, { role: 'user', content: prompt }], temperature: getTemperature(config.model), max_tokens: maxTokens, stream: true })
     await consumeStream(stream,
       (delta) => callback({ type, articleId, delta }),
       (fullText) => {
         const trimmed = fullText.trim()
         if (trimmed) {
-          try { getDb().update(articlesTable).set({ summary: trimmed }).where(eq(articlesTable.id, articleId)).run() } catch {}
+          try {
+            getDb().update(articlesTable).set({ summary: trimmed }).where(eq(articlesTable.id, articleId)).run()
+            // 同时写入 translations JSON，缓存摘要 + 语言，供前端缓存命中检查
+            const row = getDb().select({ translations: articlesTable.translations }).from(articlesTable).where(eq(articlesTable.id, articleId)).get()
+            const existingMap: Record<string, unknown> = row?.translations ? JSON.parse(row.translations) : {}
+            existingMap._summary = { text: trimmed, lang: targetLang }
+            getDb().update(articlesTable).set({ translations: JSON.stringify(existingMap) }).where(eq(articlesTable.id, articleId)).run()
+          } catch {}
         }
         callback({ type, articleId, fullText: trimmed })
       },
       (errorMsg) => callback({ type, articleId, message: errorMsg })
     )
   } catch (err) { callback({ type, articleId, message: `LLM 调用失败：${err}` }) }
+}
+
+/** 测试 LLM API 连通性：调用 /v1/models 端点测量延迟 */
+export async function testConnection(config?: { baseUrl: string; apiKey: string; model: string }): Promise<{ success: boolean; latencyMs: number; message: string }> {
+  const cfg = config || getLlmConfig()
+  const apiKey = config?.apiKey || getApiKeyForModel(cfg.model)
+  if (!apiKey) return { success: false, latencyMs: 0, message: '未配置 API Key' }
+
+  const client = new OpenAI({ apiKey, baseURL: cfg.baseUrl, timeout: 15_000 })
+  const start = Date.now()
+  try {
+    const response = await client.models.list()
+    const latencyMs = Date.now() - start
+    const modelCount = response.data?.length ?? 0
+    return { success: true, latencyMs, message: `连接成功，延迟 ${latencyMs}ms，可用模型 ${modelCount} 个` }
+  } catch (err) {
+    const latencyMs = Date.now() - start
+    const msg = err instanceof Error ? err.message : String(err)
+    return { success: false, latencyMs, message: `连接失败 (${latencyMs}ms)：${msg}` }
+  }
 }
 
 function buildTranslatePrompt(content: string, targetLang: string): string {
@@ -242,7 +319,8 @@ export async function translateArticle(request: TranslateRequest, callback: Stre
         if (trimmed) {
           try {
             const row = getDb().select({ translations: articlesTable.translations }).from(articlesTable).where(eq(articlesTable.id, articleId)).get()
-            const existingMap: Record<string, string[]> = row?.translations ? JSON.parse(row.translations) : {}
+            const existingMap: Record<string, unknown> = row?.translations ? JSON.parse(row.translations) : {}
+            existingMap._v = 2
             existingMap[targetLang] = [trimmed]
             getDb().update(articlesTable).set({ translations: JSON.stringify(existingMap) }).where(eq(articlesTable.id, articleId)).run()
           } catch {}

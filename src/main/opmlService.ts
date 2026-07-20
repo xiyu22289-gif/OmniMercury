@@ -1,5 +1,5 @@
 import fs from 'fs';
-import { addFeed } from './feedService';
+import { addFeed, listFeeds } from './feedService';
 import type { AddFeedResult } from './feedService';
 
 // ============================================================
@@ -272,4 +272,49 @@ export async function importOpmlFile(
     failed: failedCount,
     results,
   };
+}
+
+// ============================================================
+// OPML 导出
+// ============================================================
+
+/** XML 实体编码 */
+function encodeXmlEntities(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;')
+}
+
+/** 生成 OPML 2.0 XML 字符串 */
+export function generateOpmlXml(): string {
+  const feeds = listFeeds()
+  const now = new Date().toISOString()
+
+  const outlines = feeds.map(f => {
+    const title = encodeXmlEntities(f.title)
+    const xmlUrl = encodeXmlEntities(f.url)
+    const htmlUrl = encodeXmlEntities(f.link || f.url)
+    return `      <outline type="rss" text="${title}" title="${title}" xmlUrl="${xmlUrl}" htmlUrl="${htmlUrl}" />`
+  }).join('\n')
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0">
+  <head>
+    <title>Summer RSS Reader — 订阅源导出</title>
+    <dateCreated>${now}</dateCreated>
+  </head>
+  <body>
+${outlines}
+  </body>
+</opml>`
+}
+
+/** 导出 OPML 到文件，返回保存路径 */
+export function exportOpmlFile(filePath: string): string {
+  const xml = generateOpmlXml()
+  fs.writeFileSync(filePath, xml, 'utf-8')
+  return filePath
 }

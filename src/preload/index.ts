@@ -48,10 +48,12 @@ const api = {
     ipcRenderer.invoke('llm:setConfig', updates),
   resetLlmConfig: (): Promise<{ success: boolean }> =>
     ipcRenderer.invoke('llm:resetConfig'),
+  testConnection: (config?: { baseUrl: string; apiKey: string; model: string }): Promise<{ success: boolean; latencyMs: number; message: string }> =>
+    ipcRenderer.invoke('llm:testConnection', config),
 
   // ---- LLM 流式操作（invoke 触发，on 接收进度） ----
-  summarize: (articleId: number, content: string, title: string, targetLang: string) =>
-    ipcRenderer.invoke('llm:summarize', { articleId, content, title, targetLang }),
+  summarize: (articleId: number, content: string, title: string, targetLang: string, detailLevel?: string) =>
+    ipcRenderer.invoke('llm:summarize', { articleId, content, title, targetLang, detailLevel }),
   translate: (articleId: number, content: string, title: string, targetLang: string) =>
     ipcRenderer.invoke('llm:translate', { articleId, content, title, targetLang }),
   translateParagraphs: (articleId: number, content: string, title: string, targetLang: string) =>
@@ -83,6 +85,10 @@ const api = {
   /** 执行 OPML 批量导入 */
   importOpml: (filePath: string): Promise<IpcResponse> =>
     ipcRenderer.invoke('opml:import', filePath),
+
+  /** 导出 OPML 文件 */
+  exportOpml: (): Promise<{ success: boolean; filePath?: string; error?: string }> =>
+    ipcRenderer.invoke('opml:export'),
 
   /** 监听 OPML 导入进度 */
   onOpmlProgress: (callback: (progress: OpmlImportProgress) => void) => {

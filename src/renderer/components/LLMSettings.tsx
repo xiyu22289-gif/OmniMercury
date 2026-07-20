@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useStore } from '../store'
-import { Settings, X, RotateCcw, Check } from 'lucide-react'
+import { Settings, X, RotateCcw, Check, Zap, Loader2, Eye, EyeOff } from 'lucide-react'
 
 interface FormData {
   baseUrl: string
@@ -25,6 +25,9 @@ export default function LLMSettings() {
     model: 'deepseek-chat'
   })
   const [saved, setSaved] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<{ success: boolean; latencyMs: number; message: string } | null>(null)
+  const [showKey, setShowKey] = useState(false)
 
   // 弹窗打开时从 store 同步配置到表单
   useEffect(() => {
@@ -62,6 +65,23 @@ export default function LLMSettings() {
       setSaved(false)
       setShowSettings(false)
     }, 400)
+  }
+
+  const handleTestConnection = async () => {
+    setTesting(true)
+    setTestResult(null)
+    try {
+      const result = await window.api.testConnection({
+        baseUrl: form.baseUrl,
+        apiKey: form.apiKey,
+        model: form.model,
+      })
+      setTestResult(result)
+    } catch (err) {
+      setTestResult({ success: false, latencyMs: 0, message: String(err) })
+    } finally {
+      setTesting(false)
+    }
   }
 
   const handleReset = async () => {
@@ -138,15 +158,25 @@ export default function LLMSettings() {
             <label className="block text-xs font-medium text-gray-700 dark:text-gray-200 mb-1">
               API Key
             </label>
-            <input
-              type="text"
-              value={form.apiKey}
-              onChange={(e) => setForm((prev) => ({ ...prev, apiKey: e.target.value }))}
-              placeholder="sk-..."
-              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-500
-                       bg-white dark:bg-gray-700 dark:text-gray-100 rounded-lg focus:outline-none
-                       focus:ring-2 focus:ring-blue-500/50 placeholder:text-gray-400 dark:placeholder:text-gray-500"
-            />
+            <div className="relative">
+              <input
+                type={showKey ? 'text' : 'password'}
+                value={form.apiKey}
+                onChange={(e) => setForm((prev) => ({ ...prev, apiKey: e.target.value }))}
+                placeholder="sk-..."
+                className="w-full px-3 py-2 pr-9 text-sm border border-gray-300 dark:border-gray-500
+                         bg-white dark:bg-gray-700 dark:text-gray-100 rounded-lg focus:outline-none
+                         focus:ring-2 focus:ring-blue-500/50 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+              />
+              <button
+                type="button"
+                onClick={() => setShowKey(!showKey)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                title={showKey ? '隐藏 API Key' : '显示 API Key'}
+              >
+                {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
+              </button>
+            </div>
             <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">
               密钥仅存储在本地，绝不联网上传
             </p>
@@ -166,6 +196,28 @@ export default function LLMSettings() {
                        bg-white dark:bg-gray-700 dark:text-gray-100 rounded-lg focus:outline-none
                        focus:ring-2 focus:ring-blue-500/50 placeholder:text-gray-400 dark:placeholder:text-gray-500"
             />
+          </div>
+
+          {/* 测试连接 */}
+          <div className="pt-1 border-t border-gray-100 dark:border-gray-700">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleTestConnection}
+                disabled={testing || !form.apiKey.trim()}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg
+                         bg-green-50 text-green-600 hover:bg-green-100
+                         dark:bg-green-900/20 dark:text-green-400 dark:hover:bg-green-900/30
+                         disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {testing ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
+                {testing ? '测试中...' : '测试连接'}
+              </button>
+              {testResult && (
+                <span className={`text-xs ${testResult.success ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+                  {testResult.success ? '✓' : '✗'} {testResult.latencyMs > 0 ? `${testResult.latencyMs}ms` : ''} {testResult.message}
+                </span>
+              )}
+            </div>
           </div>
 
         </div>
