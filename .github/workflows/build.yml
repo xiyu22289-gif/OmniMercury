@@ -9,23 +9,24 @@ on:
 jobs:
   # ========== Windows 打包 ==========
   build-windows:
-    runs-on: windows-latest
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
-
-      # 关键：安装 Visual Studio C++ 构建工具，解决 better-sqlite3 编译问题
-      - uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
 
       - uses: actions/setup-node@v4
         with:
           node-version: 20
 
+      - name: Configure node-gyp
+        run: |
+          npm config set msvs_version 2022
+          npm config set python python3
+
       - name: Install dependencies
         run: npm install
         env:
-          npm_config_vs_version: 2022   # 强制 node-gyp 使用 VS2022
+          npm_config_vs_version: 2022
+          npm_config_msvs_version: 2022
 
       - name: Build app
         run: npm run build
