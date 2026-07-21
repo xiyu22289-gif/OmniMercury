@@ -1,13 +1,17 @@
 {
   "name": "summer-rss-reader",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "Summer RSS Reader - Cross-platform desktop RSS reader",
   "main": "dist/main/main.js",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux",
+    "postinstall": "electron-rebuild"
   },
   "build": {
     "appId": "com.summer.rss.reader",
@@ -27,6 +31,19 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true
+    },
+    "mac": {
+      "target": ["dmg", "zip"],
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "category": "public.app-category.news"
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "category": "Network"
+    },
+    "appImage": {
+      "artifactName": "${productName}-${version}-${arch}.AppImage"
     }
   },
   "dependencies": {
@@ -69,3 +86,4 @@
     "vite": "^5.3.0"
   }
 }
+
