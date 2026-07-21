@@ -15,12 +15,19 @@ interface AppState {
 
   // ---- UI 状态 ----
   sidebarOpen: boolean
-  darkMode: boolean
+  /** 主题模式：light=日间, dark=夜间, system=跟随系统 */
+  themeMode: 'light' | 'dark' | 'system'
+  /** 系统当前是否为暗色模式（仅在 themeMode === 'system' 时生效） */
+  systemPrefersDark: boolean
   isLoading: boolean
   error: string | null
 
   // ---- M3 阅读模式 ----
   readerMode: 'reader' | 'original'
+
+  // ---- 字体设置 ----
+  readerFontFamily: string
+  readerFontSize: number
 
   // ---- LLM 状态 ----
   showSettings: boolean
@@ -59,7 +66,8 @@ interface AppState {
   setSearchResults: (articles: Article[]) => void
   setSearchSuggestions: (articles: Article[]) => void
   toggleSidebar: () => void
-  toggleDarkMode: () => void
+  setThemeMode: (mode: 'light' | 'dark' | 'system') => void
+  setSystemPrefersDark: (isDark: boolean) => void
   setLoading: (loading: boolean) => void
   setError: (error: string | null) => void
   setOpmlImporting: (importing: boolean) => void
@@ -70,6 +78,10 @@ interface AppState {
 
   // ---- M3 阅读模式操作 ----
   setReaderMode: (mode: 'reader' | 'original') => void
+
+  // ---- 字体设置操作 ----
+  setReaderFontFamily: (font: string) => void
+  setReaderFontSize: (size: number) => void
 
   // ---- LLM 操作 ----
   setShowSettings: (show: boolean) => void
@@ -145,12 +157,17 @@ export const useStore = create<AppState>((set, get) => {
 
   // ---- UI 默认值 ----
   sidebarOpen: true,
-  darkMode: false,
+  themeMode: 'light',
+  systemPrefersDark: false,
   isLoading: false,
   error: null,
 
   // ---- M3 阅读模式默认值 ----
   readerMode: 'reader',
+
+  // ---- 字体设置默认值 ----
+  readerFontFamily: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
+  readerFontSize: 16,
 
   // ---- LLM 默认值 ----
   showSettings: false,
@@ -339,12 +356,17 @@ export const useStore = create<AppState>((set, get) => {
   setSearchResults: (articles) => set({ searchResults: articles }),
   setSearchSuggestions: (articles) => set({ searchSuggestions: articles }),
   toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
-  toggleDarkMode: () => set((state) => ({ darkMode: !state.darkMode })),
+  setThemeMode: (mode) => set({ themeMode: mode }),
+  setSystemPrefersDark: (isDark) => set({ systemPrefersDark: isDark }),
   setLoading: (loading) => set({ isLoading: loading }),
   setError: (error) => set({ error }),
 
   // ---- M3 阅读模式操作 ----
   setReaderMode: (mode) => set({ readerMode: mode }),
+
+  // ---- 字体设置操作 ----
+  setReaderFontFamily: (font) => set({ readerFontFamily: font }),
+  setReaderFontSize: (size) => set({ readerFontSize: size }),
 
   // ---- OPML 操作 ----
   setOpmlImporting: (importing) => set({ opmlImporting: importing }),

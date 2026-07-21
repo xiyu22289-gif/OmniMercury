@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useStore } from './store'
 import Sidebar from './components/Sidebar'
 import ArticleList from './components/ArticleList'
@@ -6,7 +6,7 @@ import ReaderView from './components/ReaderView'
 import SearchBar from './components/SearchBar'
 import LLMSettings from './components/LLMSettings'
 import ResizeHandle from './components/ResizeHandle'
-import { Menu as MenuIcon, Sun, Moon, X, CheckCircle, XCircle, Loader2 } from 'lucide-react'
+import { Menu as MenuIcon, Sun, Moon, Monitor, X, CheckCircle, XCircle, Loader2, ChevronDown } from 'lucide-react'
 
 /** 默认宽度常量 */
 const DEFAULT_SIDEBAR_WIDTH = 260
@@ -18,14 +18,32 @@ const MAX_LIST_WIDTH = 600
 
 export default function App() {
   const {
-    sidebarOpen, toggleSidebar, darkMode, toggleDarkMode,
+    sidebarOpen, toggleSidebar,
+    themeMode, systemPrefersDark, setThemeMode, setSystemPrefersDark,
     setFeeds, selectFeed, setError, isLoading, loadLlmConfig,
     opmlImporting, opmlProgress, opmlDialogOpen, setOpmlDialogOpen
   } = useStore()
 
+  /** 推导实际暗色状态 */
+  const darkMode = useMemo(() => {
+    if (themeMode === 'dark') return true
+    if (themeMode === 'light') return false
+    // system: 跟随操作系统
+    return systemPrefersDark
+  }, [themeMode, systemPrefersDark])
+
   // ---- 可拖拽宽度状态 ----
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH)
   const [listWidth, setListWidth] = useState(DEFAULT_LIST_WIDTH)
+
+  // 主题选择器
+  const [showThemePicker, setShowThemePicker] = useState(false)
+
+  const THEME_OPTIONS = [
+    { value: 'light' as const, icon: Sun, label: '日间模式' },
+    { value: 'dark' as const, icon: Moon, label: '夜间模式' },
+    { value: 'system' as const, icon: Monitor, label: '跟随系统' },
+  ]
 
   // 侧边栏收起/展开
   const handleToggleSidebar = useCallback(() => {
@@ -64,7 +82,7 @@ export default function App() {
     loadLlmConfig()
   }, [])
 
-  // 暗色模式切换
+  // 暗色模式跟随
   useEffect(() => {
     if (darkMode) {
       document.documentElement.classList.add('dark')
@@ -72,6 +90,16 @@ export default function App() {
       document.documentElement.classList.remove('dark')
     }
   }, [darkMode])
+
+  // 监听系统主题变化（仅在 themeMode === 'system' 时读取）
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    // 初始值
+    setSystemPrefersDark(mq.matches)
+    const handler = (e: MediaQueryListEvent) => setSystemPrefersDark(e.matches)
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [])
 
   return (
     <div className="app-layout">
@@ -89,13 +117,41 @@ export default function App() {
         </h1>
         <div className="flex-1" />
         <SearchBar />
-        <button
-          onClick={toggleDarkMode}
-          className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
-          title="Toggle dark mode"
-        >
-          {darkMode ? <Sun size={16} /> : <Moon size={16} />}
-        </button>
+        <div className="relative">
+          <button
+            onClick={() => setShowThemePicker(!showThemePicker)}
+            className="flex items-center gap-0.5 p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+            title={`主题：${THEME_OPTIONS.find(o => o.value === themeMode)?.label}`}
+          >
+            {themeMode === 'light' ? <Sun size={16} /> : themeMode === 'dark' ? <Moon size={16} /> : <Monitor size={16} />}
+            <ChevronDown size={10} />
+          </button>
+          {showThemePicker && (
+            <div
+              className="absolute top-full right-0 mt-1 z-50 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 w-36 overflow-hidden"
+              onClick={e => e.stopPropagation()}
+            >
+              {THEME_OPTIONS.map(o => (
+                <button
+                  key={o.value}
+                  onClick={() => { setThemeMode(o.value); setShowThemePicker(false) }}
+                  className={`w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 transition-colors
+                    ${themeMode === o.value
+                      ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                      : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 text-gray-700 dark:text-gray-200'
+                    }`}
+                >
+                  <o.icon size={14} />
+                  <span>{o.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        {/* 主题选择器遮罩 */}
+        {showThemePicker && (
+          <div className="fixed inset-0 z-40" onClick={() => setShowThemePicker(false)} />
+        )}
       </div>
 
       {/* 主内容区 — 三栏 + 拖拽分隔条 */}

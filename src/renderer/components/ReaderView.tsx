@@ -1,14 +1,29 @@
-import { useEffect, useCallback, useState, useRef } from 'react'
+import { useEffect, useCallback, useState, useRef, useMemo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useStore } from '../store'
 import {
   Globe, ExternalLink, Sparkles, Languages, Loader, Settings,
   Check, Columns, AlignJustify, Replace, X,
-  BookOpen, Monitor
+  BookOpen, Monitor, Type, Minus, Plus, ChevronDown
 } from 'lucide-react'
 import type { LlmStreamChunk, LlmStreamDone, LlmStreamError } from '../../shared/types'
 import { splitIntoParagraphs } from '../../shared/paragraphSplitter'
+
+// ============ 字体选项 ============
+
+const FONT_FAMILIES = [
+  { value: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif', label: '系统默认' },
+  { value: 'Georgia, "Times New Roman", serif', label: '宋体/衬线' },
+  { value: '"PingFang SC", "Microsoft YaHei", "Hiragino Sans GB", sans-serif', label: '黑体/雅黑' },
+  { value: '"KaiTi", "STKaiti", "Kai", serif', label: '楷体' },
+  { value: '"LXGW WenKai", "Noto Serif SC", serif', label: '霞鹜文楷' },
+  { value: 'Consolas, "SF Mono", "Fira Code", monospace', label: '等宽字体' },
+]
+
+const FONT_SIZE_MIN = 12
+const FONT_SIZE_MAX = 28
+const FONT_SIZE_STEP = 2
 
 // ============ 常量 ============
 
@@ -162,7 +177,8 @@ export default function ReaderView() {
     error,
     // 阅读模式（来自 HEAD）
     readerMode,
-    darkMode,
+    themeMode,
+    systemPrefersDark,
     setReaderMode,
     // LLM 摘要（来自 HEAD）
     summaryStream,
@@ -187,10 +203,17 @@ export default function ReaderView() {
     appendParagraphTranslation,
     resetParagraphTranslations,
     appendTranslateDelta,
-    setError
+    setError,
+    // 字体设置
+    readerFontFamily,
+    readerFontSize,
+    setReaderFontFamily,
+    setReaderFontSize
   } = useStore()
 
   // ============ 本地状态 ============
+
+  const [showFontPicker, setShowFontPicker] = useState(false)
 
   const [showSummaryLangPicker, setShowSummaryLangPicker] = useState(false)
   const [showTranslateLangPicker, setShowTranslateLangPicker] = useState(false)
@@ -211,6 +234,13 @@ export default function ReaderView() {
 
   const selectedArticle = articles.find(a => a.id === selectedArticleId)
   const originalParagraphs = articleContent ? splitContent(articleContent) : []
+
+  /** 推导实际暗色状态（与 App.tsx 同步） */
+  const darkMode = useMemo(() => {
+    if (themeMode === 'dark') return true
+    if (themeMode === 'light') return false
+    return systemPrefersDark
+  }, [themeMode, systemPrefersDark])
 
   // ============ 副作用 ============
 
@@ -739,6 +769,77 @@ export default function ReaderView() {
               </div>
             )}
 
+            <div className="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1" />
+
+            {/* ===== 字体控制 ===== */}
+            {/* 字号缩小 */}
+            <button
+              onClick={() => setReaderFontSize(Math.max(FONT_SIZE_MIN, readerFontSize - FONT_SIZE_STEP))}
+              disabled={readerFontSize <= FONT_SIZE_MIN}
+              className="flex items-center justify-center w-7 h-7 rounded text-xs text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              title="缩小字号"
+            >
+              <Minus size={12} />
+            </button>
+
+            {/* 当前字号显示 */}
+            <span
+              className="text-xs font-medium text-gray-600 dark:text-gray-300 min-w-[28px] text-center select-none cursor-default"
+              title="阅读字号"
+            >
+              {readerFontSize}
+            </span>
+
+            {/* 字号放大 */}
+            <button
+              onClick={() => setReaderFontSize(Math.min(FONT_SIZE_MAX, readerFontSize + FONT_SIZE_STEP))}
+              disabled={readerFontSize >= FONT_SIZE_MAX}
+              className="flex items-center justify-center w-7 h-7 rounded text-xs text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              title="放大字号"
+            >
+              <Plus size={12} />
+            </button>
+
+            {/* 字体选择 */}
+            <div className="relative">
+              <button
+                onClick={() => setShowFontPicker(!showFontPicker)}
+                className="flex items-center gap-1 px-2 py-1.5 text-xs rounded-lg text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700 transition-colors"
+                title="选择字体"
+              >
+                <Type size={13} />
+                {FONT_FAMILIES.find(f => f.value === readerFontFamily)?.label || '字体'}
+                <ChevronDown size={10} />
+              </button>
+              {showFontPicker && (
+                <div
+                  className="absolute bottom-full right-0 mb-1 z-50 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 w-40 overflow-hidden"
+                  onClick={e => e.stopPropagation()}
+                >
+                  <div className="px-3 py-1.5 border-b border-gray-200 dark:border-gray-700">
+                    <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">选择字体</span>
+                  </div>
+                  <div className="py-1">
+                    {FONT_FAMILIES.map(f => (
+                      <button
+                        key={f.value}
+                        onClick={() => { setReaderFontFamily(f.value); setShowFontPicker(false) }}
+                        className={`w-full text-left px-3 py-1.5 text-sm flex items-center justify-between transition-colors
+                          ${readerFontFamily === f.value
+                            ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                            : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 text-gray-700 dark:text-gray-200'
+                          }`}
+                        style={{ fontFamily: f.value }}
+                      >
+                        <span>{f.label}</span>
+                        {readerFontFamily === f.value && <Check size={12} className="text-amber-500 flex-shrink-0" />}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="flex-1" />
 
             {/* 设置按钮 */}
@@ -751,11 +852,11 @@ export default function ReaderView() {
             </button>
           </div>
 
-          {/* 关闭语言选择器的遮罩 */}
-          {(showSummaryLangPicker || showTranslateLangPicker) && (
+          {/* 关闭弹出选择器的遮罩 */}
+          {(showSummaryLangPicker || showTranslateLangPicker || showFontPicker) && (
             <div
               className="fixed inset-0 z-40"
-              onClick={() => { setShowSummaryLangPicker(false); setShowTranslateLangPicker(false) }}
+              onClick={() => { setShowSummaryLangPicker(false); setShowTranslateLangPicker(false); setShowFontPicker(false) }}
             />
           )}
 
@@ -793,7 +894,12 @@ export default function ReaderView() {
 
           {/* ===== 内容主体 ===== */}
           {!isLoading && (
-            <>
+            <div
+              style={{
+                fontFamily: readerFontFamily,
+                fontSize: `${readerFontSize}px`,
+              }}
+            >
               {/* 覆盖模式 */}
               {displayMode === 'replace' && isTranslating && (
                 <div className="space-y-4">
@@ -903,7 +1009,7 @@ export default function ReaderView() {
                   {readerMode === 'reader' ? renderMarkdownContent() : renderOriginalContent()}
                 </div>
               )}
-            </>
+            </div>
           )}
         </div>
       </div>
