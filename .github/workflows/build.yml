@@ -13,6 +13,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 关键：安装 Visual Studio C++ 构建工具，解决 better-sqlite3 编译问题
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -24,7 +29,7 @@ jobs:
         run: npm run build
 
       - name: Package Windows
-        run: npm run dist:win -- --publish never
+        run: npm run dist -- --win --publish never
 
       - uses: actions/upload-artifact@v4
         with:
@@ -55,7 +60,7 @@ jobs:
         run: npm run build
 
       - name: Package macOS
-        run: npm run dist:mac -- --publish never
+        run: npm run dist -- --mac --publish never
 
       - uses: actions/upload-artifact@v4
         with:
@@ -85,7 +90,7 @@ jobs:
             libxcb1-dev \
             libxcb-keysyms1-dev \
             libxcb-shm0-dev \
-            libxcb-util1-dev \
+            libxcb-util-dev \
             libxcb-xfixes0-dev \
             libxcb-xkb-dev \
             libxcomposite-dev \
@@ -108,7 +113,7 @@ jobs:
         run: npm run build
 
       - name: Package Linux
-        run: npm run dist:linux -- --publish never
+        run: npm run dist -- --linux --publish never
 
       - uses: actions/upload-artifact@v4
         with:
