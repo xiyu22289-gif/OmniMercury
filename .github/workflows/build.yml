@@ -24,6 +24,8 @@ jobs:
 
       - name: Install dependencies
         run: npm install
+        env:
+          npm_config_vs_version: 2022   # 强制 node-gyp 使用 VS2022
 
       - name: Build app
         run: npm run build
