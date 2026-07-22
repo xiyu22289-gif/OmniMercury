@@ -5,8 +5,10 @@ import { useStore } from '../store'
 import {
   Globe, ExternalLink, Sparkles, Languages, Loader, Settings,
   Check, Columns, AlignJustify, Replace, X,
-  BookOpen, Monitor, Type, Minus, Plus, ChevronDown
+  BookOpen, Monitor, Type, Minus, Plus, ChevronDown, PenLine, Download
 } from 'lucide-react'
+import NotesPanel from './NotesPanel'
+import ResizeHandle from './ResizeHandle'
 import type { LlmStreamChunk, LlmStreamDone, LlmStreamError } from '../../shared/types'
 import { splitIntoParagraphs } from '../../shared/paragraphSplitter'
 
@@ -190,6 +192,10 @@ export default function ReaderView() {
     setDisplayMode,
     translateTargetLang,
     setTranslateTargetLang,
+    // 侧边栏
+    sidebarOpen,
+    // 笔记
+    notePanelOpen,
     // Store actions
     setShowSettings,
     setSummaryLoading,
@@ -229,6 +235,9 @@ export default function ReaderView() {
   // 翻译分界线
   const [dividerPos, setDividerPos] = useState(50)
   const isDragging = useRef(false)
+
+  // 笔记面板宽度（拖拽使用 ResizeHandle 组件处理）
+  const [notePanelWidth, setNotePanelWidth] = useState(35)
 
   // ============ 计算属性 ============
 
@@ -555,9 +564,13 @@ export default function ReaderView() {
       <div
         className={containerBg}
         style={{
-          width: hasSummary ? `${100 - summaryPanelWidth}%` : '100%',
+          width: hasSummary
+            ? `${100 - summaryPanelWidth}%`
+            : notePanelOpen
+              ? `${100 - notePanelWidth}%`
+              : '100%',
           overflowY: 'auto',
-          paddingRight: hasSummary ? 12 : 0,
+          paddingRight: (hasSummary || notePanelOpen) ? 12 : 0,
         }}
       >
         <div className="max-w-3xl mx-auto">
@@ -771,6 +784,22 @@ export default function ReaderView() {
 
             <div className="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1" />
 
+            {/* 笔记按钮 */}
+            <button
+              onClick={() => useStore.setState({ notePanelOpen: !notePanelOpen })}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors
+                ${notePanelOpen
+                  ? 'bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400'
+                  : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                }`}
+              title="笔记"
+            >
+              <PenLine size={13} />
+              笔记
+            </button>
+
+            <div className="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1" />
+
             {/* ===== 字体控制 ===== */}
             {/* 字号缩小 */}
             <button
@@ -813,13 +842,13 @@ export default function ReaderView() {
               </button>
               {showFontPicker && (
                 <div
-                  className="absolute bottom-full right-0 mb-1 z-50 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 w-40 overflow-hidden"
+                  className="absolute top-full right-0 mt-1 z-50 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 w-44 overflow-hidden"
                   onClick={e => e.stopPropagation()}
                 >
                   <div className="px-3 py-1.5 border-b border-gray-200 dark:border-gray-700">
                     <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">选择字体</span>
                   </div>
-                  <div className="py-1">
+                  <div className="py-1 max-h-56 overflow-y-auto">
                     {FONT_FAMILIES.map(f => (
                       <button
                         key={f.value}
@@ -1032,18 +1061,53 @@ export default function ReaderView() {
                   </span>
                   {summaryLoading && <Loader size={12} className="animate-spin text-purple-400 ml-1" />}
                 </div>
-                <button
-                  onClick={resetSummary}
-                  className="flex items-center gap-1 px-1.5 py-0.5 text-xs text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
-                  title="关闭摘要面板"
-                >
-                  <X size={12} />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => {
+                      const title = selectedArticle?.title || 'Untitled'
+                      window.api.exportSummaryMd(title, summaryStream).catch(err => {
+                        setError('导出摘要失败: ' + String(err))
+                      })
+                    }}
+                    className="flex items-center gap-1 px-1.5 py-0.5 text-xs text-gray-400 hover:text-purple-500 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded transition-colors"
+                    title="导出摘要为 Markdown"
+                  >
+                    <Download size={12} />
+                    导出
+                  </button>
+                  <button
+                    onClick={resetSummary}
+                    className="flex items-center gap-1 px-1.5 py-0.5 text-xs text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+                    title="关闭摘要面板"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
               </div>
             </div>
             <div className={`text-sm text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap`}>
               {summaryStream}
             </div>
+          </div>
+        </>
+      )}
+
+      {/* ===== 右侧笔记面板 ===== */}
+      {notePanelOpen && !hasSummary && (
+        <>
+          <ResizeHandle
+            direction="horizontal"
+            onResize={(delta) => {
+              // delta 是像素位移量，需转换为百分比
+              const containerWidth = window.innerWidth - (sidebarOpen ? 260 : 0) - 360 // 减去侧边栏和文章列表宽度（近似）
+              const deltaPct = (delta / (containerWidth || 1)) * 100
+              setNotePanelWidth((prev) =>
+                Math.min(60, Math.max(20, prev - deltaPct))
+              )
+            }}
+          />
+          <div className={containerBg} style={{ width: `${notePanelWidth}%`, overflowY: 'auto' }}>
+            <NotesPanel darkMode={darkMode} />
           </div>
         </>
       )}

@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { sqliteTable, integer, text } from 'drizzle-orm/sqlite-core';
-import { eq, like, sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import path from 'path';
 
 // ============================================================
@@ -35,6 +35,26 @@ export const articles = sqliteTable('articles', {
   createdAt: text('created_at'),
 });
 
+export const tokenUsage = sqliteTable('token_usage', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  model: text('model').notNull(),
+  operation: text('operation').notNull(), // 'summarize' | 'translate' | 'translateParagraphs'
+  promptTokens: integer('prompt_tokens').notNull(),
+  completionTokens: integer('completion_tokens').notNull(),
+  source: text('source').notNull().default('api'), // 'api' | 'estimate'
+  createdAt: text('created_at').default(sql`(datetime('now'))`),
+});
+
+export const articleNotes = sqliteTable('article_notes', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  articleId: integer('article_id')
+    .notNull()
+    .references(() => articles.id, { onDelete: 'cascade' }),
+  content: text('content').default(''), // 富文本 HTML
+  createdAt: text('created_at').default(sql`(datetime('now'))`),
+  updatedAt: text('updated_at').default(sql`(datetime('now'))`),
+});
+
 // ============================================================
 // 类型导出（供 feedService / ipcHandlers 使用）
 // ============================================================
@@ -43,6 +63,10 @@ export type Feed = typeof feeds.$inferSelect;
 export type NewFeed = typeof feeds.$inferInsert;
 export type Article = typeof articles.$inferSelect;
 export type NewArticle = typeof articles.$inferInsert;
+export type TokenUsage = typeof tokenUsage.$inferSelect;
+export type NewTokenUsage = typeof tokenUsage.$inferInsert;
+export type ArticleNote = typeof articleNotes.$inferSelect;
+export type NewArticleNote = typeof articleNotes.$inferInsert;
 
 // ============================================================
 // 数据库初始化
@@ -83,6 +107,24 @@ export function initDatabase(dbPath: string): BetterSQLite3Database {
       author      TEXT,
       pub_date    TEXT,
       created_at  TEXT    DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS token_usage (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      model           TEXT    NOT NULL,
+      operation       TEXT    NOT NULL,
+      prompt_tokens   INTEGER NOT NULL,
+      completion_tokens INTEGER NOT NULL,
+      source          TEXT    NOT NULL DEFAULT 'api',
+      created_at      TEXT    DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS article_notes (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      article_id  INTEGER NOT NULL UNIQUE REFERENCES articles(id) ON DELETE CASCADE,
+      content     TEXT    DEFAULT '',
+      created_at  TEXT    DEFAULT (datetime('now')),
+      updated_at  TEXT    DEFAULT (datetime('now'))
     );
   `);
 
@@ -241,7 +283,7 @@ export function searchArticlesByTitle(
       isRead: articles.isRead,
     })
     .from(articles)
-    .where(like(articles.title, `%${query}%`))
+    .where(sql`LOWER(${articles.title}) LIKE LOWER(${'%' + query + '%'})`)
     .orderBy(sql`LOWER(${articles.title}) ASC`)
     .limit(limit)
     .all();
@@ -276,4 +318,131 @@ export function getArticleByLink(feedId: number, link: string): Article | undefi
       sql`${articles.feedId} = ${feedId} AND ${articles.link} = ${link}`
     )
     .get();
+}
+
+// ============================================================
+// Token 用量统计
+// ============================================================
+
+/** 记录一次 LLM 调用的 Token 用量 */
+export function insertTokenUsage(record: { model: string; operation: string; promptTokens: number; completionTokens: number; source: string }): TokenUsage {
+  return getDb()
+    .insert(tokenUsage)
+    .values({
+      model: record.model,
+      operation: record.operation,
+      promptTokens: record.promptTokens,
+      completionTokens: record.completionTokens,
+      source: record.source,
+    })
+    .returning()
+    .get();
+}
+
+/** 按模型聚合 Token 用量统计 */
+export interface TokenStats {
+  model: string;
+  totalPromptTokens: number;
+  totalCompletionTokens: number;
+  totalTokens: number;
+  callCount: number;
+  /** 按操作类型细分 */
+  byOperation: { operation: string; prompt: number; completion: number }[];
+}
+
+export function getTokenStats(days: number = 30): TokenStats[] {
+  const cutoff = new Date(Date.now() - days * 86400_000).toISOString();
+  const rows = getDb()
+    .select()
+    .from(tokenUsage)
+    .where(sql`${tokenUsage.createdAt} >= ${cutoff}`)
+    .orderBy(sql`${tokenUsage.model} ASC, ${tokenUsage.createdAt} DESC`)
+    .all();
+
+  // 手动聚合（比 SQL GROUP BY 更灵活）
+  const map = new Map<string, {
+    totalPrompt: number;
+    totalCompletion: number;
+    count: number;
+    ops: Map<string, { prompt: number; completion: number }>;
+  }>();
+
+  for (const r of rows) {
+    let entry = map.get(r.model);
+    if (!entry) {
+      entry = { totalPrompt: 0, totalCompletion: 0, count: 0, ops: new Map() };
+      map.set(r.model, entry);
+    }
+    entry.totalPrompt += r.promptTokens;
+    entry.totalCompletion += r.completionTokens;
+    entry.count++;
+
+    let opEntry = entry.ops.get(r.operation);
+    if (!opEntry) {
+      opEntry = { prompt: 0, completion: 0 };
+      entry.ops.set(r.operation, opEntry);
+    }
+    opEntry.prompt += r.promptTokens;
+    opEntry.completion += r.completionTokens;
+  }
+
+  return Array.from(map.entries()).map(([model, v]) => ({
+    model,
+    totalPromptTokens: v.totalPrompt,
+    totalCompletionTokens: v.totalCompletion,
+    totalTokens: v.totalPrompt + v.totalCompletion,
+    callCount: v.count,
+    byOperation: Array.from(v.ops.entries()).map(([op, o]) => ({
+      operation: op,
+      prompt: o.prompt,
+      completion: o.completion,
+    })),
+  }));
+}
+
+// ============================================================
+// Article Notes CRUD
+// ============================================================
+
+/** 按 articleId 获取笔记（每篇文章最多一条笔记）。未找到返回 undefined。 */
+export function getNoteByArticleId(articleId: number): ArticleNote | undefined {
+  return getDb()
+    .select()
+    .from(articleNotes)
+    .where(eq(articleNotes.articleId, articleId))
+    .get();
+}
+
+/** 创建或更新笔记（UPSERT: article_id 唯一约束）。返回笔记记录。 */
+export function upsertNote(articleId: number, content: string): ArticleNote {
+  const existing = getNoteByArticleId(articleId);
+  if (existing) {
+    return getDb()
+      .update(articleNotes)
+      .set({ content, updatedAt: new Date().toISOString() })
+      .where(eq(articleNotes.articleId, articleId))
+      .returning()
+      .get() as ArticleNote;
+  }
+  return getDb()
+    .insert(articleNotes)
+    .values({ articleId, content })
+    .returning()
+    .get() as ArticleNote;
+}
+
+/** 删除某文章的笔记。 */
+export function deleteNoteByArticleId(articleId: number): void {
+  getDb()
+    .delete(articleNotes)
+    .where(eq(articleNotes.articleId, articleId))
+    .run();
+}
+
+/** 获取所有有笔记的 articleId 列表（用于批量导出）。 */
+export function getAllNoteArticleIds(): { articleId: number }[] {
+  return getDb()
+    .select({ articleId: articleNotes.articleId })
+    .from(articleNotes)
+    .all();
 }

@@ -1,7 +1,7 @@
 import { ipcMain, BrowserWindow, dialog } from 'electron'
 import { addFeed, listFeeds, getArticles, searchArticles, getCachedArticleContent, refreshAllFeeds } from './feedService'
 import { parseOpmlFile, importOpmlFile, exportOpmlFile } from './opmlService'
-import { getDb, getFeedById, feeds as feedsTable, articles as articlesTable } from './db'
+import { getDb, getFeedById, feeds as feedsTable, articles as articlesTable, getTokenStats } from './db'
 import { eq } from 'drizzle-orm'
 import { summarizeArticle, translateArticle, translateParagraphs, testConnection } from './llmService'
 import { getLlmConfig, setLlmConfig, resetLlmConfig } from './configService'
@@ -35,102 +35,32 @@ export function registerIpcHandlers(): void {
     return { type: 'list_articles', payload: { error: 0, articles } }
   })
 
-  // ================================================================
-  // backend:getArticleContent — 获取文章正文（含 M3 清洗流水线）
-  // ================================================================
-  ipcMain.handle(
-    'backend:getArticleContent',
-    async (_event, articleId: number): Promise<IpcResponse> => {
-      // 1. 查询文章基本信息（含 link 用于清洗流水线）
-      const article = getDb()
-        .select({
-          id: articlesTable.id,
-          content: articlesTable.content,
-          contentMd: articlesTable.contentMd,
-          link: articlesTable.link,
-        })
-        .from(articlesTable)
-        .where(eq(articlesTable.id, articleId))
-        .get()
-
-      if (!article) {
-        return {
-          type: 'get_article_content',
-          payload: { error: 1, message: '文章不存在' }
-        }
-      }
-
-      // 2. 如果已有缓存的 contentMd，直接返回（快速路径）
-      if (article.contentMd) {
-        const content: ArticleContent = {
-          id: article.id,
-          content: article.contentMd
-        }
-        return {
-          type: 'get_article_content',
-          payload: { error: 0, content }
-        }
-      }
-
-      // 3. 如果文章有原始链接，走清洗流水线
-      if (article.link) {
-        try {
-          const result = await getOrFetchArticleContent(articleId, article.link)
-
-          const content: ArticleContent = {
-            id: articleId,
-            content: result.content
-          }
-
-          return {
-            type: 'get_article_content',
-            payload: { error: 0, content }
-          }
-        } catch (err) {
-          console.error('[ipcHandlers] getOrFetchArticleContent 异常：', err)
-          // 降级：尝试返回原始 content
-          const fallback = article.content ?? '(暂无正文内容)'
-          const content: ArticleContent = {
-            id: articleId,
-            content: fallback
-          }
-          return {
-            type: 'get_article_content',
-            payload: { error: 0, content }
-          }
-        }
-      }
-
-      // 4. 没有链接也没有缓存 contentMd，返回原始 content
-      const body = article.content ?? '(暂无正文内容)'
-
-      const content: ArticleContent = {
-        id: article.id,
-        content: body
-      }
-
-      return {
-        type: 'get_article_content',
-        payload: { error: 0, content }
+  ipcMain.handle('backend:getArticleContent', async (_event, articleId: number): Promise<IpcResponse> => {
+    const article = getDb()
+      .select({ id: articlesTable.id, content: articlesTable.content, contentMd: articlesTable.contentMd, link: articlesTable.link })
+      .from(articlesTable).where(eq(articlesTable.id, articleId)).get()
+    if (!article) return { type: 'get_article_content', payload: { error: 1, message: '文章不存在' } }
+    if (article.contentMd) return { type: 'get_article_content', payload: { error: 0, content: { id: article.id, content: article.contentMd } } }
+    if (article.link) {
+      try {
+        const result = await getOrFetchArticleContent(articleId, article.link)
+        return { type: 'get_article_content', payload: { error: 0, content: { id: articleId, content: result.content } } }
+      } catch (err) {
+        console.error('[ipcHandlers] getOrFetchArticleContent 异常：', err)
+        return { type: 'get_article_content', payload: { error: 0, content: { id: articleId, content: article.content ?? '(暂无正文内容)' } } }
       }
     }
-  )
+    return { type: 'get_article_content', payload: { error: 0, content: { id: article.id, content: article.content ?? '(暂无正文内容)' } } }
+  })
 
-  // ================================================================
-  // backend:removeFeed — 删除订阅源（级联删除其文章）
-  // ================================================================
   ipcMain.handle('backend:removeFeed', async (_event, feedId: number): Promise<IpcResponse> => {
     try { getDb().delete(feedsTable).where(eq(feedsTable.id, feedId)).run(); return { type: 'remove_feed', payload: { error: 0, message: '已删除' } } }
     catch (err) { return { type: 'remove_feed', payload: { error: 1, message: err instanceof Error ? err.message : String(err) } } }
   })
 
   ipcMain.handle('backend:refreshFeeds', async (): Promise<IpcResponse> => {
-    try {
-      const result = await refreshAllFeeds()
-      return { type: 'refresh_feeds', payload: { error: 0, message: `刷新完成，新增 ${result.newCount} 篇文章`, new_count: result.newCount } }
-    } catch (err) {
-      return { type: 'refresh_feeds', payload: { error: 1, message: err instanceof Error ? err.message : String(err) } }
-    }
+    try { const result = await refreshAllFeeds(); return { type: 'refresh_feeds', payload: { error: 0, message: `刷新完成，新增 ${result.newCount} 篇文章`, new_count: result.newCount } } }
+    catch (err) { return { type: 'refresh_feeds', payload: { error: 1, message: err instanceof Error ? err.message : String(err) } } }
   })
 
   ipcMain.handle('backend:searchArticles', async (_event, query: string, _feedId?: number, _offset?: number, _limit?: number): Promise<IpcResponse> => {
@@ -151,13 +81,9 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('llm:getConfig', async () => getLlmConfig())
   ipcMain.handle('llm:setConfig', async (_event, updates: Record<string, string>) => { setLlmConfig(updates); return { success: true } })
   ipcMain.handle('llm:resetConfig', async () => { resetLlmConfig(); return { success: true } })
+  ipcMain.handle('llm:testConnection', async (_event, config?: { baseUrl: string; apiKey: string; model: string }) => await testConnection(config))
 
-  // 测试 API 连接
-  ipcMain.handle('llm:testConnection', async (_event, config?: { baseUrl: string; apiKey: string; model: string }) => {
-    return await testConnection(config)
-  })
-
-  // 流式摘要
+  // 流式 LLM
   ipcMain.handle('llm:summarize', async (event, request: SummarizeRequest) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (!win) return { success: false, error: '窗口不存在' }
@@ -166,7 +92,6 @@ export function registerIpcHandlers(): void {
     return { success: true }
   })
 
-  // 流式翻译（全文）
   ipcMain.handle('llm:translate', async (event, request: TranslateRequest) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (!win) return { success: false, error: '窗口不存在' }
@@ -175,7 +100,6 @@ export function registerIpcHandlers(): void {
     return { success: true }
   })
 
-  // 段落级翻译
   ipcMain.handle('llm:translateParagraphs', async (event, request: TranslateRequest) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (!win) return { success: false, error: '窗口不存在' }
@@ -185,105 +109,110 @@ export function registerIpcHandlers(): void {
   })
 
   // ============================================================
-  // OPML 导入
+  // Token 用量统计
   // ============================================================
 
-  /** 打开文件选择对话框供用户选择 .opml 文件，返回选择的文件路径 */
+  ipcMain.handle('llm:getTokenStats', async (): Promise<{ error: number; stats?: import('../shared/types').TokenStats[]; message?: string }> => {
+    try {
+      const stats = getTokenStats(30)
+      return { error: 0, stats }
+    } catch (err) {
+      return { error: 1, message: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // ============================================================
+  // OPML
+  // ============================================================
+
   ipcMain.handle('opml:selectFile', async (event): Promise<{ canceled: boolean; filePath?: string; error?: string }> => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (!win) return { canceled: true, error: '窗口不存在' }
-
-    const result = await dialog.showOpenDialog(win, {
-      title: '选择 OPML 文件',
-      filters: [
-        { name: 'OPML 文件', extensions: ['opml', 'xml'] },
-        { name: '所有文件', extensions: ['*'] },
-      ],
-      properties: ['openFile'],
-    })
-
-    if (result.canceled || result.filePaths.length === 0) {
-      return { canceled: true }
-    }
-
+    const result = await dialog.showOpenDialog(win, { title: '选择 OPML 文件', filters: [{ name: 'OPML 文件', extensions: ['opml', 'xml'] }, { name: '所有文件', extensions: ['*'] }], properties: ['openFile'] })
+    if (result.canceled || result.filePaths.length === 0) return { canceled: true }
     return { canceled: false, filePath: result.filePaths[0] }
   })
 
-  /** 预览 OPML 文件中的订阅源列表（仅解析，不导入） */
   ipcMain.handle('opml:preview', async (_event, filePath: string): Promise<IpcResponse> => {
-    try {
-      const result = parseOpmlFile(filePath)
-      return {
-        type: 'opml_preview',
-        payload: {
-          error: 0,
-          message: `找到 ${result.totalFeeds} 个订阅源`,
-          feed_count: result.totalFeeds,
-          opml_title: result.title,
-        },
-      }
-    } catch (err) {
-      return {
-        type: 'opml_preview',
-        payload: {
-          error: 1,
-          message: err instanceof Error ? err.message : String(err),
-        },
-      }
-    }
+    try { const r = parseOpmlFile(filePath); return { type: 'opml_preview', payload: { error: 0, message: `找到 ${r.totalFeeds} 个订阅源`, feed_count: r.totalFeeds, opml_title: r.title } } }
+    catch (err) { return { type: 'opml_preview', payload: { error: 1, message: err instanceof Error ? err.message : String(err) } } }
   })
 
-  /** 执行 OPML 文件导入，批量添加订阅源并抓取文章 */
   ipcMain.handle('opml:import', async (event, filePath: string): Promise<IpcResponse> => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (!win) return { type: 'opml_import', payload: { error: 1, message: '窗口不存在' } }
-
     try {
-      // 通过 IPC 事件发送进度给渲染进程
-      const result = await importOpmlFile(filePath, (progress) => {
-        win.webContents.send('opml:import-progress', progress)
-      })
-
-      return {
-        type: 'opml_import',
-        payload: {
-          error: 0,
-          message: `导入完成：${result.success}/${result.total} 个订阅源成功`,
-          feed_count: result.success,
-          failed_count: result.failed,
-        },
-      }
-    } catch (err) {
-      return {
-        type: 'opml_import',
-        payload: {
-          error: 1,
-          message: err instanceof Error ? err.message : String(err),
-        },
-      }
-    }
+      const result = await importOpmlFile(filePath, (progress) => { win.webContents.send('opml:import-progress', progress) })
+      return { type: 'opml_import', payload: { error: 0, message: `导入完成：${result.success}/${result.total} 个订阅源成功`, feed_count: result.success, failed_count: result.failed } }
+    } catch (err) { return { type: 'opml_import', payload: { error: 1, message: err instanceof Error ? err.message : String(err) } } }
   })
 
-  /** OPML 导出：打开保存对话框，写入 OPML 文件 */
   ipcMain.handle('opml:export', async (event): Promise<{ success: boolean; filePath?: string; error?: string }> => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (!win) return { success: false, error: '窗口不存在' }
+    const result = await dialog.showSaveDialog(win, { title: '导出 OPML 文件', defaultPath: `summer-rss-export-${new Date().toISOString().slice(0, 10)}.opml`, filters: [{ name: 'OPML 文件', extensions: ['opml'] }, { name: '所有文件', extensions: ['*'] }] })
+    if (result.canceled || !result.filePath) return { success: false, error: '用户取消' }
+    try { exportOpmlFile(result.filePath); return { success: true, filePath: result.filePath } }
+    catch (err) { return { success: false, error: err instanceof Error ? err.message : String(err) } }
+  })
 
+  // ============================================================
+  // Summary Export
+  // ============================================================
+
+  ipcMain.handle('summary:exportMd', async (event, articleTitle: string, summaryText: string): Promise<{ success: boolean; filePath?: string; error?: string }> => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return { success: false, error: '窗口不存在' }
+    const safeName = articleTitle.replace(/[\\/:*?"<>|]/g, '_').slice(0, 60) || 'summary'
     const result = await dialog.showSaveDialog(win, {
-      title: '导出 OPML 文件',
-      defaultPath: `summer-rss-export-${new Date().toISOString().slice(0, 10)}.opml`,
-      filters: [
-        { name: 'OPML 文件', extensions: ['opml'] },
-        { name: '所有文件', extensions: ['*'] },
-      ],
+      title: '导出摘要 Markdown',
+      defaultPath: `summary-${safeName}-${new Date().toISOString().slice(0, 10)}.md`,
+      filters: [{ name: 'Markdown 文件', extensions: ['md'] }, { name: '所有文件', extensions: ['*'] }],
     })
-
-    if (result.canceled || !result.filePath) {
-      return { success: false, error: '用户取消' }
-    }
-
+    if (result.canceled || !result.filePath) return { success: false, error: '用户取消' }
     try {
-      exportOpmlFile(result.filePath)
+      const fs = await import('fs')
+      const parts = [
+        '# ' + articleTitle,
+        '',
+        '**摘要：**',
+        '',
+        summaryText,
+      ]
+      fs.writeFileSync(result.filePath, parts.join('\n'), 'utf-8')
+      return { success: true, filePath: result.filePath }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // ============================================================
+  // Notes
+  // ============================================================
+
+  ipcMain.handle('note:get', async (_event, articleId: number) => {
+    const { getNoteByArticleId } = await import('./db')
+    return getNoteByArticleId(articleId) ?? null
+  })
+
+  ipcMain.handle('note:save', async (_event, articleId: number, content: string) => {
+    const { upsertNote } = await import('./db')
+    return upsertNote(articleId, content)
+  })
+
+  ipcMain.handle('note:delete', async (_event, articleId: number) => {
+    const { deleteNoteByArticleId } = await import('./db')
+    deleteNoteByArticleId(articleId)
+  })
+
+  ipcMain.handle('note:exportOpml', async (event): Promise<{ success: boolean; filePath?: string; error?: string }> => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return { success: false, error: '窗口不存在' }
+    const result = await dialog.showSaveDialog(win, { title: '导出笔记 Markdown', defaultPath: `notes-export-${new Date().toISOString().slice(0, 10)}.md`, filters: [{ name: 'Markdown 文件', extensions: ['md'] }, { name: '所有文件', extensions: ['*'] }] })
+    if (result.canceled || !result.filePath) return { success: false, error: '用户取消' }
+    try {
+      const { exportNotesToOpml } = await import('./notesExportService')
+      exportNotesToOpml(result.filePath)
       return { success: true, filePath: result.filePath }
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) }

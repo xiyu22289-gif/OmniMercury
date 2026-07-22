@@ -6,7 +6,7 @@ import ReaderView from './components/ReaderView'
 import SearchBar from './components/SearchBar'
 import LLMSettings from './components/LLMSettings'
 import ResizeHandle from './components/ResizeHandle'
-import { Menu as MenuIcon, Sun, Moon, Monitor, X, CheckCircle, XCircle, Loader2, ChevronDown } from 'lucide-react'
+import { Menu as MenuIcon, Sun, Moon, Monitor, Eye, X, CheckCircle, XCircle, Loader2, ChevronDown } from 'lucide-react'
 
 /** 默认宽度常量 */
 const DEFAULT_SIDEBAR_WIDTH = 260
@@ -24,11 +24,11 @@ export default function App() {
     opmlImporting, opmlProgress, opmlDialogOpen, setOpmlDialogOpen
   } = useStore()
 
-  /** 推导实际暗色状态 */
+  /** 是否暗色背景（dark 或 system+系统暗色），护眼模式返回 false */
   const darkMode = useMemo(() => {
     if (themeMode === 'dark') return true
+    if (themeMode === 'eyeCare') return false
     if (themeMode === 'light') return false
-    // system: 跟随操作系统
     return systemPrefersDark
   }, [themeMode, systemPrefersDark])
 
@@ -43,20 +43,16 @@ export default function App() {
     { value: 'light' as const, icon: Sun, label: '日间模式' },
     { value: 'dark' as const, icon: Moon, label: '夜间模式' },
     { value: 'system' as const, icon: Monitor, label: '跟随系统' },
+    { value: 'eyeCare' as const, icon: Eye, label: '护眼模式' },
   ]
 
   // 侧边栏收起/展开
   const handleToggleSidebar = useCallback(() => {
     if (sidebarOpen) {
-      // 收起前记住当前宽度
-      setSidebarWidth((prev) => {
-        // 仅当不是已收起状态时才存记忆值
-        return prev
-      })
+      setSidebarWidth((prev) => prev)
       toggleSidebar()
     } else {
       toggleSidebar()
-      // 恢复默认宽度（如果上次宽度 < 最小值则用默认）
       setSidebarWidth((prev) => (prev < MIN_SIDEBAR_WIDTH ? DEFAULT_SIDEBAR_WIDTH : prev))
     }
   }, [sidebarOpen, toggleSidebar])
@@ -68,7 +64,6 @@ export default function App() {
         const response = await window.api.listFeeds()
         if (response.payload.error === 0 && response.payload.feeds) {
           setFeeds(response.payload.feeds)
-          // 自动选中第一个订阅源
           if (response.payload.feeds.length > 0) {
             selectFeed(response.payload.feeds[0].id)
           }
@@ -78,7 +73,6 @@ export default function App() {
       }
     }
     loadFeeds()
-    // 启动时加载 LLM 配置，确保重启后 API Key 等设置仍存在
     loadLlmConfig()
   }, [])
 
@@ -91,10 +85,18 @@ export default function App() {
     }
   }, [darkMode])
 
-  // 监听系统主题变化（仅在 themeMode === 'system' 时读取）
+  // 护眼模式 class（与 dark 互斥）
+  useEffect(() => {
+    if (themeMode === 'eyeCare') {
+      document.body.classList.add('eye-care')
+    } else {
+      document.body.classList.remove('eye-care')
+    }
+  }, [themeMode])
+
+  // 监听系统主题变化
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
-    // 初始值
     setSystemPrefersDark(mq.matches)
     const handler = (e: MediaQueryListEvent) => setSystemPrefersDark(e.matches)
     mq.addEventListener('change', handler)
@@ -117,13 +119,15 @@ export default function App() {
         </h1>
         <div className="flex-1" />
         <SearchBar />
+
+        {/* 主题选择器 */}
         <div className="relative">
           <button
             onClick={() => setShowThemePicker(!showThemePicker)}
             className="flex items-center gap-0.5 p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
             title={`主题：${THEME_OPTIONS.find(o => o.value === themeMode)?.label}`}
           >
-            {themeMode === 'light' ? <Sun size={16} /> : themeMode === 'dark' ? <Moon size={16} /> : <Monitor size={16} />}
+            {themeMode === 'light' ? <Sun size={16} /> : themeMode === 'dark' ? <Moon size={16} /> : themeMode === 'eyeCare' ? <Eye size={16} /> : <Monitor size={16} />}
             <ChevronDown size={10} />
           </button>
           {showThemePicker && (
@@ -156,7 +160,6 @@ export default function App() {
 
       {/* 主内容区 — 三栏 + 拖拽分隔条 */}
       <div className="flex flex-1 min-h-0">
-        {/* 侧边栏 */}
         <div
           className={sidebarOpen ? '' : 'sidebar collapsed'}
           style={{
@@ -167,7 +170,6 @@ export default function App() {
           <Sidebar />
         </div>
 
-        {/* 分隔条 1：侧边栏 ↔ 文章列表 */}
         {sidebarOpen && (
           <ResizeHandle
             direction="horizontal"
@@ -179,7 +181,6 @@ export default function App() {
           />
         )}
 
-        {/* 文章列表 */}
         <div
           className="article-list"
           style={{
@@ -190,7 +191,6 @@ export default function App() {
           <ArticleList />
         </div>
 
-        {/* 分隔条 2：文章列表 ↔ 阅读区 */}
         <ResizeHandle
           direction="horizontal"
           onResize={(delta) => {
@@ -200,25 +200,20 @@ export default function App() {
           }}
         />
 
-        {/* 阅读区 */}
         <ReaderView />
       </div>
 
-      {/* 加载指示器 */}
       {isLoading && (
         <div className="fixed bottom-4 right-4 bg-blue-500 text-white px-4 py-2 rounded-full shadow-lg text-sm">
           Loading...
         </div>
       )}
 
-      {/* LLM 设置对话框 */}
       <LLMSettings />
 
-      {/* OPML 导入进度对话框 */}
       {opmlDialogOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-2xl w-full max-w-md mx-4 max-h-[80vh] flex flex-col">
-            {/* 标题栏 */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
               <h2 className="text-base font-semibold text-gray-800 dark:text-gray-200">
                 OPML 导入进度
@@ -232,11 +227,9 @@ export default function App() {
               </button>
             </div>
 
-            {/* 进度内容 */}
             <div className="flex-1 overflow-y-auto p-4">
               {opmlProgress ? (
                 <div className="space-y-3">
-                  {/* 进度条 */}
                   <div>
                     <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
                       <span>进度</span>
@@ -252,7 +245,6 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* 当前处理 */}
                   <div className="flex items-start gap-2 text-sm">
                     {opmlProgress.success ? (
                       <CheckCircle size={16} className="text-green-500 flex-shrink-0 mt-0.5" />
@@ -281,7 +273,6 @@ export default function App() {
               )}
             </div>
 
-            {/* 底部按钮 */}
             {!opmlImporting && (
               <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 flex justify-end">
                 <button
