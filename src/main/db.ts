@@ -35,6 +35,7 @@ export const articles = sqliteTable('articles', {
   createdAt: text('created_at'),
 });
 
+// ===== M5: 标签系统 =====
 export const tags = sqliteTable('tags', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   name: text('name').notNull().unique(),
@@ -51,12 +52,34 @@ export const articleTags = sqliteTable('article_tags', {
     .notNull()
     .references(() => tags.id, { onDelete: 'cascade' }),
 }, (table) => ({
-  // 联合唯一约束：同一篇文章不能重复打同一标签
   uniqueArticleTag: sql`UNIQUE(${table.articleId}, ${table.tagId})`,
 }));
 
+// ===== M6: 笔记系统 =====
+export const articleNotes = sqliteTable('article_notes', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  articleId: integer('article_id')
+    .notNull()
+    .unique()
+    .references(() => articles.id, { onDelete: 'cascade' }),
+  content: text('content').default(''),
+  createdAt: text('created_at').default(sql`(datetime('now'))`),
+  updatedAt: text('updated_at').default(sql`(datetime('now'))`),
+});
+
+// ===== M7: Token 用量统计 =====
+export const tokenUsage = sqliteTable('token_usage', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  model: text('model').notNull(),
+  operation: text('operation').notNull(),
+  promptTokens: integer('prompt_tokens').notNull(),
+  completionTokens: integer('completion_tokens').notNull(),
+  source: text('source').notNull().default('api'),
+  createdAt: text('created_at').default(sql`(datetime('now'))`),
+});
+
 // ============================================================
-// 类型导出（供 feedService / ipcHandlers 使用）
+// 类型导出
 // ============================================================
 
 export type Feed = typeof feeds.$inferSelect;
@@ -67,6 +90,10 @@ export type Tag = typeof tags.$inferSelect;
 export type NewTag = typeof tags.$inferInsert;
 export type ArticleTag = typeof articleTags.$inferSelect;
 export type NewArticleTag = typeof articleTags.$inferInsert;
+export type ArticleNote = typeof articleNotes.$inferSelect;
+export type NewArticleNote = typeof articleNotes.$inferInsert;
+export type TokenUsage = typeof tokenUsage.$inferSelect;
+export type NewTokenUsage = typeof tokenUsage.$inferInsert;
 
 // ============================================================
 // 数据库初始化
@@ -74,15 +101,12 @@ export type NewArticleTag = typeof articleTags.$inferInsert;
 
 let db: BetterSQLite3Database | null = null;
 
-/** 初始化数据库连接 + 建表。dbPath 由主进程入口传入（通常为 app.getPath('userData') 下的路径）。 */
 export function initDatabase(dbPath: string): BetterSQLite3Database {
   const sqlite = new Database(dbPath);
 
-  // 性能与安全 pragma
   sqlite.pragma('journal_mode = WAL');
   sqlite.pragma('foreign_keys = ON');
 
-  // 手写原生 SQL 建表 — 符合 AGENTS.md "优先手写原生SQL" 原则
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS feeds (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -122,16 +146,34 @@ export function initDatabase(dbPath: string): BetterSQLite3Database {
       tag_id      INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
       UNIQUE(article_id, tag_id)
     );
+
+    CREATE TABLE IF NOT EXISTS article_notes (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      article_id  INTEGER NOT NULL UNIQUE REFERENCES articles(id) ON DELETE CASCADE,
+      content     TEXT    DEFAULT '',
+      created_at  TEXT    DEFAULT (datetime('now')),
+      updated_at  TEXT    DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS token_usage (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      model           TEXT    NOT NULL,
+      operation       TEXT    NOT NULL,
+      prompt_tokens   INTEGER NOT NULL,
+      completion_tokens INTEGER NOT NULL,
+      source          TEXT    NOT NULL DEFAULT 'api',
+      created_at      TEXT    DEFAULT (datetime('now'))
+    );
   `);
 
-  // M4 兼容迁移：为已有数据库添加 translations 列（幂等，已存在则跳过）
+  // M4 兼容迁移：translations 列
   try {
     sqlite.exec('ALTER TABLE articles ADD COLUMN translations TEXT');
   } catch {
     // 列已存在，忽略
   }
 
-  // M5 兼容迁移：为已有数据库创建 tags / article_tags 表（幂等，已存在则跳过）
+  // M5 兼容迁移：tags / article_tags 表
   try {
     sqlite.exec(`
       CREATE TABLE IF NOT EXISTS tags (
@@ -155,7 +197,6 @@ export function initDatabase(dbPath: string): BetterSQLite3Database {
   return db;
 }
 
-/** 获取已初始化的数据库实例。未初始化时抛出明确错误。 */
 export function getDb(): BetterSQLite3Database {
   if (!db) {
     throw new Error('[db] 数据库未初始化，请先调用 initDatabase()。');
@@ -167,22 +208,18 @@ export function getDb(): BetterSQLite3Database {
 // Feed CRUD
 // ============================================================
 
-/** 按 URL 查找订阅源（用于去重）。未找到返回 undefined。 */
 export function getFeedByUrl(url: string): Feed | undefined {
   return getDb().select().from(feeds).where(eq(feeds.url, url)).get();
 }
 
-/** 按 ID 查找订阅源。 */
 export function getFeedById(id: number): Feed | undefined {
   return getDb().select().from(feeds).where(eq(feeds.id, id)).get();
 }
 
-/** 获取全部订阅源列表（对应 listFeeds IPC）。 */
 export function getAllFeeds(): Feed[] {
   return getDb().select().from(feeds).all();
 }
 
-/** 插入新订阅源，返回完整记录。 */
 export function insertFeed(feed: Omit<NewFeed, 'id' | 'createdAt'>): Feed {
   return getDb()
     .insert(feeds)
@@ -200,7 +237,6 @@ export function insertFeed(feed: Omit<NewFeed, 'id' | 'createdAt'>): Feed {
 // Article CRUD
 // ============================================================
 
-/** 按 feedId 查询文章列表（对应 getArticles IPC），按发布日期降序排列。 */
 export function getArticlesByFeedId(
   feedId: number,
 ): Pick<Article, 'id' | 'title' | 'isRead' | 'summary' | 'translations' | 'link' | 'author' | 'pubDate' | 'createdAt'>[] {
@@ -222,7 +258,6 @@ export function getArticlesByFeedId(
     .all();
 }
 
-/** 插入单篇文章，返回完整记录。 */
 export function insertArticle(
   article: Omit<NewArticle, 'id' | 'createdAt'>,
 ): Article {
@@ -244,14 +279,12 @@ export function insertArticle(
     .get();
 }
 
-/** 批量插入文章（订阅源首次解析时使用）。 */
 export function insertArticles(
   articlesList: Array<Omit<NewArticle, 'id' | 'createdAt'>>,
 ): Article[] {
   return articlesList.map((a) => insertArticle(a));
 }
 
-/** 将文章标记为已读。 */
 export function markArticleRead(articleId: number): void {
   getDb()
     .update(articles)
@@ -260,7 +293,6 @@ export function markArticleRead(articleId: number): void {
     .run();
 }
 
-/** 清空 feeds 和 articles 表的所有数据，保留表结构和自增计数器（AUTOINCREMENT 从 1 重新开始）。 */
 export function clearAllData(): void {
   const sqlite = getDb();
   sqlite.delete(articles).run();
@@ -271,16 +303,6 @@ export function clearAllData(): void {
 // 搜索 & 离线缓存
 // ============================================================
 
-/**
- * 按标题模糊搜索文章。
- *
- * 使用 LIKE '%query%' 实现输入即搜索（如 "you are" 可匹配 "You Are Great"）。
- * 返回结果按 title 首字母大小写排序：使用 SQLite COLLATE NOCASE 实现 case-insensitive
- * 排序（例如 "excellent" 的 e 早于 "great" 的 g，所以 excellent 先出现）。
- *
- * @param query - 搜索关键词
- * @param limit - 最大返回条数（默认 20，用于 suggestions 下拉）
- */
 export function searchArticlesByTitle(
   query: string,
   limit = 20,
@@ -305,10 +327,6 @@ export function searchArticlesByTitle(
     .all();
 }
 
-/**
- * 按 ID 获取文章完整内容（含 content 和 contentMd）。
- * 用于离线回退：网络不可用时，渲染进程可通过 IPC 直接从本地 DB 获取已缓存内容。
- */
 export function getArticleContentById(articleId: number): Pick<Article, 'id' | 'content' | 'contentMd' | 'translations'> | undefined {
   return getDb()
     .select({
@@ -322,10 +340,6 @@ export function getArticleContentById(articleId: number): Pick<Article, 'id' | '
     .get();
 }
 
-/**
- * 按 link + feedId 查找文章（用于 refreshFeeds 去重）。
- * 返回 undefined 表示该链接的文章尚未入库。
- */
 export function getArticleByLink(feedId: number, link: string): Article | undefined {
   return getDb()
     .select()
@@ -336,10 +350,7 @@ export function getArticleByLink(feedId: number, link: string): Article | undefi
     .get();
 }
 
-/**
- * 按 ID 数组批量获取文章摘要（跨订阅源），用于标签筛选。
- * 按 pub_date DESC 排序。空数组返回 []。
- */
+// ===== M5: 标签筛选 =====
 export function getArticlesByIds(
   ids: number[],
 ): Pick<Article, 'id' | 'feedId' | 'title' | 'isRead' | 'summary' | 'translations' | 'link' | 'author' | 'pubDate' | 'createdAt'>[] {
@@ -361,4 +372,123 @@ export function getArticlesByIds(
     .where(inArray(articles.id, ids))
     .orderBy(sql`${articles.pubDate} DESC`)
     .all();
+}
+
+// ============================================================
+// M6: Article Notes CRUD
+// ============================================================
+
+export function getNoteByArticleId(articleId: number): ArticleNote | undefined {
+  return getDb()
+    .select()
+    .from(articleNotes)
+    .where(eq(articleNotes.articleId, articleId))
+    .get();
+}
+
+export function upsertNote(articleId: number, content: string): ArticleNote {
+  const existing = getNoteByArticleId(articleId);
+  if (existing) {
+    return getDb()
+      .update(articleNotes)
+      .set({ content, updatedAt: new Date().toISOString() })
+      .where(eq(articleNotes.articleId, articleId))
+      .returning()
+      .get() as ArticleNote;
+  }
+  return getDb()
+    .insert(articleNotes)
+    .values({ articleId, content })
+    .returning()
+    .get() as ArticleNote;
+}
+
+export function deleteNoteByArticleId(articleId: number): void {
+  getDb()
+    .delete(articleNotes)
+    .where(eq(articleNotes.articleId, articleId))
+    .run();
+}
+
+export function getAllNoteArticleIds(): { articleId: number }[] {
+  return getDb()
+    .select({ articleId: articleNotes.articleId })
+    .from(articleNotes)
+    .all();
+}
+
+// ============================================================
+// M7: Token 用量统计
+// ============================================================
+
+export function insertTokenUsage(record: { model: string; operation: string; promptTokens: number; completionTokens: number; source: string }): TokenUsage {
+  return getDb()
+    .insert(tokenUsage)
+    .values({
+      model: record.model,
+      operation: record.operation,
+      promptTokens: record.promptTokens,
+      completionTokens: record.completionTokens,
+      source: record.source,
+    })
+    .returning()
+    .get();
+}
+
+export interface TokenStats {
+  model: string;
+  totalPromptTokens: number;
+  totalCompletionTokens: number;
+  totalTokens: number;
+  callCount: number;
+  byOperation: { operation: string; prompt: number; completion: number }[];
+}
+
+export function getTokenStats(days: number = 30): TokenStats[] {
+  const cutoff = new Date(Date.now() - days * 86400_000).toISOString();
+  const rows = getDb()
+    .select()
+    .from(tokenUsage)
+    .where(sql`${tokenUsage.createdAt} >= ${cutoff}`)
+    .orderBy(sql`${tokenUsage.model} ASC, ${tokenUsage.createdAt} DESC`)
+    .all();
+
+  const map = new Map<string, {
+    totalPrompt: number;
+    totalCompletion: number;
+    count: number;
+    ops: Map<string, { prompt: number; completion: number }>;
+  }>();
+
+  for (const r of rows) {
+    let entry = map.get(r.model);
+    if (!entry) {
+      entry = { totalPrompt: 0, totalCompletion: 0, count: 0, ops: new Map() };
+      map.set(r.model, entry);
+    }
+    entry.totalPrompt += r.promptTokens;
+    entry.totalCompletion += r.completionTokens;
+    entry.count++;
+
+    let opEntry = entry.ops.get(r.operation);
+    if (!opEntry) {
+      opEntry = { prompt: 0, completion: 0 };
+      entry.ops.set(r.operation, opEntry);
+    }
+    opEntry.prompt += r.promptTokens;
+    opEntry.completion += r.completionTokens;
+  }
+
+  return Array.from(map.entries()).map(([model, v]) => ({
+    model,
+    totalPromptTokens: v.totalPrompt,
+    totalCompletionTokens: v.totalCompletion,
+    totalTokens: v.totalPrompt + v.totalCompletion,
+    callCount: v.count,
+    byOperation: Array.from(v.ops.entries()).map(([op, o]) => ({
+      operation: op,
+      prompt: o.prompt,
+      completion: o.completion,
+    })),
+  }));
 }

@@ -115,7 +115,17 @@
     "testConnection": "测试连接",
     "testing": "测试中...",
     "showKey": "显示 API Key",
-    "hideKey": "隐藏 API Key"
+    "hideKey": "隐藏 API Key",
+    "showStats": "用量统计",
+    "tokenStatsTitle": "Token 用量统计（近30天）",
+    "noTokenData": "暂无用量数据",
+    "calls": "次调用",
+    "inputTokens": "输入",
+    "outputTokens": "输出",
+    "totalTokens": "合计",
+    "operationSummarize": "摘要",
+    "operationTranslate": "翻译",
+    "refreshStats": "刷新统计"
   },
   "opml": {
     "importProgress": "OPML 导入进度",
@@ -130,6 +140,7 @@
     "label": "主题",
     "light": "日间模式",
     "dark": "夜间模式",
-    "system": "跟随系统"
+    "system": "跟随系统",
+    "eyeCare": "护眼模式"
   }
 }

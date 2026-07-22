@@ -24,7 +24,7 @@ interface TagManagerProps {
 
 export default function TagManager({ open, onClose }: TagManagerProps) {
   const { t } = useTranslation()
-  const { tags, fetchTags, createTag, deleteTag } = useStore()
+  const { tags, fetchTags, createTag, updateTag, deleteTag } = useStore()
 
   const [newName, setNewName] = useState('')
   const [newColor, setNewColor] = useState(PRESET_COLORS[5]) // 默认蓝色
@@ -67,6 +67,18 @@ export default function TagManager({ open, onClose }: TagManagerProps) {
     setEditingId(null)
     setEditName('')
     setEditColor('')
+  }
+
+  const handleUpdate = async () => {
+    const name = editName.trim()
+    if (!name || editingId === null) return
+    setCreating(true)
+    try {
+      await updateTag(editingId, name, editColor)
+      cancelEdit()
+    } finally {
+      setCreating(false)
+    }
   }
 
   const handleDelete = async (id: number) => {
@@ -172,6 +184,7 @@ export default function TagManager({ open, onClose }: TagManagerProps) {
                         type="text"
                         value={editName}
                         onChange={(e) => setEditName(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') handleUpdate() }}
                         className="flex-1 px-2 py-0.5 text-sm border border-gray-300 dark:border-gray-500
                                  bg-white dark:bg-gray-700 dark:text-gray-100 rounded focus:outline-none
                                  focus:ring-1 focus:ring-blue-500"
@@ -184,8 +197,9 @@ export default function TagManager({ open, onClose }: TagManagerProps) {
                         <X size={13} />
                       </button>
                       <button
-                        onClick={cancelEdit}
-                        className="p-1 text-green-500 hover:text-green-600"
+                        onClick={handleUpdate}
+                        disabled={creating || !editName.trim()}
+                        className="p-1 text-green-500 hover:text-green-600 disabled:opacity-40 transition-colors"
                       >
                         <Check size={13} />
                       </button>

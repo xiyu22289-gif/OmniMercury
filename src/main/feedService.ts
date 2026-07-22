@@ -151,13 +151,12 @@ export async function addFeed(url: string): Promise<AddFeedResult> {
   try {
     const response = await axios.get(normalizedUrl, {
       timeout: 15_000,
-      proxy: false, // 禁用代理，避免受 WSL 环境变量 HTTP_PROXY 影响
+      proxy: false,
       headers: {
         'User-Agent': 'RSS-Reader/1.0 (Desktop)',
         Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml',
       },
       responseType: 'text',
-      // 仅接受 XML 类型响应；部分服务器返回错误 Content-Type 也放行
       validateStatus: (status) => status >= 200 && status < 400,
     });
     xml = response.data;
@@ -212,7 +211,7 @@ export async function addFeed(url: string): Promise<AddFeedResult> {
         title: item.title?.trim() || '(无标题)',
         link: item.link ?? null,
         content: item.content ?? item.contentSnippet ?? null,
-        contentMd: null,    // Phase 3 正文清洗后再填充
+        contentMd: null,
         summary: safeSummary(item.contentSnippet ?? item.summary ?? item.content),
         isRead: 0,
         isStarred: 0,
@@ -224,7 +223,6 @@ export async function addFeed(url: string): Promise<AddFeedResult> {
     try {
       insertArticles(articleRows);
     } catch (err) {
-      // 文章入库失败不阻塞：订阅源已成功添加，仅记录
       console.error(`[feedService] 文章入库部分失败（feedId=${feed.id}）：`, err);
     }
   }
@@ -293,7 +291,6 @@ export async function refreshAllFeeds(): Promise<{ newCount: number }> {
         const link = item.link;
         if (!link) continue;
 
-        // 去重：已存在的文章跳过
         const existing = getArticleByLink(feed.id, link);
         if (existing) continue;
 
@@ -317,7 +314,6 @@ export async function refreshAllFeeds(): Promise<{ newCount: number }> {
       }
     } catch (err) {
       console.error(`[feedService] 刷新订阅源失败 (${feed.title}):`, err instanceof Error ? err.message : String(err));
-      // 单个订阅源失败不影响其他
     }
   }
 

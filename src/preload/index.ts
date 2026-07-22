@@ -6,6 +6,8 @@ import type {
   LlmConfig,
   IpcResponse,
   Tag,
+  TokenStats,
+  ArticleNote,
 } from '../shared/types'
 
 /** OPML 导入进度事件 */
@@ -41,6 +43,10 @@ const api = {
     ipcRenderer.invoke('backend:searchArticles', query, feedId, offset, limit),
   getCachedArticleContent: (articleId: number) =>
     ipcRenderer.invoke('backend:getCachedArticleContent', articleId),
+
+  // ============================================================
+  // M5: 标签筛选（跨订阅源批量获取文章）
+  // ============================================================
   getArticlesByIds: (ids: number[]): Promise<IpcResponse> =>
     ipcRenderer.invoke('backend:getArticlesByIds', ids),
 
@@ -53,6 +59,12 @@ const api = {
     ipcRenderer.invoke('llm:resetConfig'),
   testConnection: (config?: { baseUrl: string; apiKey: string; model: string }): Promise<{ success: boolean; latencyMs: number; message: string }> =>
     ipcRenderer.invoke('llm:testConnection', config),
+
+  // ============================================================
+  // M7: Token 用量统计
+  // ============================================================
+  getTokenStats: (): Promise<{ error: number; stats?: TokenStats[]; message?: string }> =>
+    ipcRenderer.invoke('llm:getTokenStats'),
 
   // ---- LLM 流式操作（invoke 触发，on 接收进度） ----
   summarize: (articleId: number, content: string, title: string, targetLang: string, detailLevel?: string) =>
@@ -70,13 +82,14 @@ const api = {
       callback(chunk)
     }
     ipcRenderer.on('llm:stream-chunk', handler)
-    // 返回取消监听的函数
     return () => {
       ipcRenderer.removeListener('llm:stream-chunk', handler)
     }
   },
 
-  // ---- M5 标签系统 ----
+  // ============================================================
+  // M5 标签系统
+  // ============================================================
   getTags: (): Promise<{ success: boolean; data?: Tag[]; error?: string }> =>
     ipcRenderer.invoke('tag:getAll'),
   getTagById: (id: number): Promise<{ success: boolean; data?: Tag; error?: string }> =>
@@ -99,6 +112,24 @@ const api = {
     ipcRenderer.invoke('tag:suggestFromAI', title, content, existingTagNames),
   getTagArticleCounts: (): Promise<{ success: boolean; data?: Record<number, number>; error?: string }> =>
     ipcRenderer.invoke('tag:getArticleCounts'),
+
+  // ============================================================
+  // M6: 笔记系统
+  // ============================================================
+  getNote: (articleId: number): Promise<ArticleNote | null> =>
+    ipcRenderer.invoke('note:get', articleId),
+  saveNote: (articleId: number, content: string): Promise<ArticleNote> =>
+    ipcRenderer.invoke('note:save', articleId, content),
+  deleteNote: (articleId: number): Promise<void> =>
+    ipcRenderer.invoke('note:delete', articleId),
+  exportNotesOpml: (): Promise<{ success: boolean; filePath?: string; error?: string }> =>
+    ipcRenderer.invoke('note:exportOpml'),
+
+  // ============================================================
+  // M6: 摘要导出
+  // ============================================================
+  exportSummaryMd: (articleTitle: string, summaryText: string): Promise<{ success: boolean; filePath?: string; error?: string }> =>
+    ipcRenderer.invoke('summary:exportMd', articleTitle, summaryText),
 
   // ---- OPML 导入 ----
   /** 打开文件选择对话框选择 OPML 文件 */

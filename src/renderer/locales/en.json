@@ -115,7 +115,17 @@
     "testConnection": "Test connection",
     "testing": "Testing...",
     "showKey": "Show API Key",
-    "hideKey": "Hide API Key"
+    "hideKey": "Hide API Key",
+    "showStats": "Usage stats",
+    "tokenStatsTitle": "Token Usage (last 30 days)",
+    "noTokenData": "No usage data yet",
+    "calls": "calls",
+    "inputTokens": "Input",
+    "outputTokens": "Output",
+    "totalTokens": "Total",
+    "operationSummarize": "Summarize",
+    "operationTranslate": "Translate",
+    "refreshStats": "Refresh stats"
   },
   "opml": {
     "importProgress": "OPML Import Progress",
@@ -130,6 +140,7 @@
     "label": "Theme",
     "light": "Light mode",
     "dark": "Dark mode",
-    "system": "Follow system"
+    "system": "Follow system",
+    "eyeCare": "Eye care"
   }
 }

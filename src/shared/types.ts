@@ -51,6 +51,8 @@ export interface IpcResponse {
     failed_count?: number
     /** OPML 导入：OPML 文件标题 */
     opml_title?: string
+    /** Token 用量统计 */
+    stats?: TokenStats[]
   }
 }
 
@@ -79,6 +81,16 @@ export interface LlmConfig {
   model: string
   /** 每个模型独立的 API Key 映射（如 { 'deepseek-chat': 'sk-xxx', 'ecnu-chat': 'sk-yyy' }） */
   apiKeys: Record<string, string>
+}
+
+/** Token 用量统计 */
+export interface TokenStats {
+  model: string
+  totalPromptTokens: number
+  totalCompletionTokens: number
+  totalTokens: number
+  callCount: number
+  byOperation: { operation: string; prompt: number; completion: number }[]
 }
 
 /** 摘要请求参数 */
@@ -130,4 +142,27 @@ export interface LlmStreamError {
   /** 段落索引（仅 translateParagraph 使用） */
   paragraphIndex?: number
   message: string
+}
+
+// ============================================================
+// 笔记相关类型
+// ============================================================
+
+/** 文章笔记（DB → renderer） */
+export interface ArticleNote {
+  id: number
+  articleId: number
+  content: string
+  createdAt: string
+  updatedAt: string
+}
+
+/** OPML 导出笔记时附加的数据结构 */
+export interface NoteExportItem {
+  articleId: number
+  articleTitle: string
+  articleUrl: string
+  feedTitle: string
+  noteHtml: string
+  updatedAt: string
 }

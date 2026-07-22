@@ -7,30 +7,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  # ========== Windows 打包 ==========
-  build-windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Build app
-        run: npm run build
-
-      - name: Package Windows
-        run: npm run dist:win -- --publish never
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: Windows-安装包
-          path: release/*.exe
-
   # ========== macOS 打包 ==========
   build-macos:
     runs-on: macos-latest
@@ -55,7 +31,7 @@ jobs:
         run: npm run build
 
       - name: Package macOS
-        run: npm run dist:mac -- --publish never
+        run: npm run dist -- --mac --publish never
 
       - uses: actions/upload-artifact@v4
         with:
@@ -85,7 +61,7 @@ jobs:
             libxcb1-dev \
             libxcb-keysyms1-dev \
             libxcb-shm0-dev \
-            libxcb-util1-dev \
+            libxcb-util-dev \
             libxcb-xfixes0-dev \
             libxcb-xkb-dev \
             libxcomposite-dev \
@@ -108,7 +84,7 @@ jobs:
         run: npm run build
 
       - name: Package Linux
-        run: npm run dist:linux -- --publish never
+        run: npm run dist -- --linux --publish never
 
       - uses: actions/upload-artifact@v4
         with:

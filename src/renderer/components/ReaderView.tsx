@@ -6,8 +6,10 @@ import { useStore } from '../store'
 import {
   Globe, ExternalLink, Sparkles, Languages, Loader, Settings,
   Check, Columns, AlignJustify, Replace, X,
-  BookOpen, Monitor, Type, Minus, Plus, ChevronDown, Tag, Zap, Square, CheckSquare, Loader2
+  BookOpen, Monitor, Type, Minus, Plus, ChevronDown, Tag, Zap, Square, CheckSquare, Loader2, PenLine, Download
 } from 'lucide-react'
+import NotesPanel from './NotesPanel'
+import ResizeHandle from './ResizeHandle'
 import type { LlmStreamChunk, LlmStreamDone, LlmStreamError } from '../../shared/types'
 import { splitIntoParagraphs } from '../../shared/paragraphSplitter'
 
@@ -182,6 +184,7 @@ export default function ReaderView() {
     articles,
     isLoading,
     error,
+    sidebarOpen,
     // 阅读模式（来自 HEAD）
     readerMode,
     themeMode,
@@ -222,7 +225,9 @@ export default function ReaderView() {
     fetchArticleTags,
     fetchTags,
     toggleArticleTag,
-    batchAddTagsToArticle
+    batchAddTagsToArticle,
+    // 笔记
+    notePanelOpen
   } = useStore()
 
   // ============ 本地状态 ============
@@ -250,6 +255,9 @@ export default function ReaderView() {
   const [summaryPanelWidth, setSummaryPanelWidth] = useState(35)
   const [summaryLangLabel, setSummaryLangLabel] = useState('')
   const isSummaryDragging = useRef(false)
+
+  // 笔记面板宽度
+  const [notePanelWidth, setNotePanelWidth] = useState(30)
 
   // 翻译分界线
   const [dividerPos, setDividerPos] = useState(50)
@@ -736,9 +744,13 @@ export default function ReaderView() {
       <div
         className={containerBg}
         style={{
-          width: hasSummary ? `${100 - summaryPanelWidth}%` : '100%',
+          width: hasSummary
+            ? `${100 - summaryPanelWidth}%`
+            : notePanelOpen
+              ? `${100 - notePanelWidth}%`
+              : '100%',
           overflowY: 'auto',
-          paddingRight: hasSummary ? 12 : 0,
+          paddingRight: (hasSummary || notePanelOpen) ? 12 : 0,
         }}
       >
         <div className="max-w-3xl mx-auto">
@@ -1138,6 +1150,22 @@ export default function ReaderView() {
 
             <div className="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1" />
 
+            {/* ===== 笔记按钮 ===== */}
+            <button
+              onClick={() => useStore.setState({ notePanelOpen: !notePanelOpen })}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors
+                ${notePanelOpen
+                  ? 'bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400'
+                  : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                }`}
+              title="笔记"
+            >
+              <PenLine size={13} />
+              笔记
+            </button>
+
+            <div className="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1" />
+
             {/* ===== 字体控制 ===== */}
             {/* 字号缩小 */}
             <button
@@ -1411,6 +1439,25 @@ export default function ReaderView() {
             <div className={`text-sm text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap`}>
               {summaryStream}
             </div>
+          </div>
+        </>
+      )}
+
+      {/* ===== 右侧笔记面板 ===== */}
+      {notePanelOpen && !hasSummary && (
+        <>
+          <ResizeHandle
+            direction="horizontal"
+            onResize={(delta) => {
+              const containerWidth = window.innerWidth - (sidebarOpen ? 260 : 0) - 360
+              const deltaPct = (delta / (containerWidth || 1)) * 100
+              setNotePanelWidth((prev) =>
+                Math.min(60, Math.max(20, prev - deltaPct))
+              )
+            }}
+          />
+          <div className={containerBg} style={{ width: `${notePanelWidth}%`, overflowY: 'auto' }}>
+            <NotesPanel darkMode={darkMode} />
           </div>
         </>
       )}

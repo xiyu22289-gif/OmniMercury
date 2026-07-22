@@ -5,6 +5,8 @@ import type {
   LlmStreamError,
   LlmConfig,
   Tag,
+  TokenStats,
+  ArticleNote,
 } from '../shared/types'
 
 /** OPML 导入进度事件（类型定义同 preload/index.ts） */
@@ -54,6 +56,9 @@ declare global {
       /** 测试 LLM API 连接 */
       testConnection: (config?: { baseUrl: string; apiKey: string; model: string }) => Promise<{ success: boolean; latencyMs: number; message: string }>
 
+      /** Token 用量统计 */
+      getTokenStats: () => Promise<{ error: number; stats?: TokenStats[]; message?: string }>
+
       // ---- M5 标签系统 ----
       getTags: () => Promise<{ success: boolean; data?: Tag[]; error?: string }>
       getTagById: (id: number) => Promise<{ success: boolean; data?: Tag; error?: string }>
@@ -66,6 +71,15 @@ declare global {
       batchAddTagsToArticle: (articleId: number, tagIds: number[]) => Promise<{ success: boolean; error?: string }>
       suggestTagsFromAI: (title: string, content: string, existingTagNames: string[]) => Promise<{ success: boolean; data?: string[]; error?: string }>
       getTagArticleCounts: () => Promise<{ success: boolean; data?: Record<number, number>; error?: string }>
+
+      // ---- 笔记系统 ----
+      getNote: (articleId: number) => Promise<ArticleNote | null>
+      saveNote: (articleId: number, content: string) => Promise<ArticleNote>
+      deleteNote: (articleId: number) => Promise<void>
+      exportNotesOpml: () => Promise<{ success: boolean; filePath?: string; error?: string }>
+
+      // ---- 导出 ----
+      exportSummaryMd: (articleTitle: string, summaryText: string) => Promise<{ success: boolean; filePath?: string; error?: string }>
 
       // ---- OPML 导入 ----
       selectOpmlFile: () => Promise<{ canceled: boolean; filePath?: string; error?: string }>

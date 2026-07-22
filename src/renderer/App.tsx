@@ -7,7 +7,7 @@ import ReaderView from './components/ReaderView'
 import SearchBar from './components/SearchBar'
 import LLMSettings from './components/LLMSettings'
 import ResizeHandle from './components/ResizeHandle'
-import { Menu as MenuIcon, Sun, Moon, Monitor, X, CheckCircle, XCircle, Loader2, ChevronDown } from 'lucide-react'
+import { Menu as MenuIcon, Sun, Moon, Monitor, Eye, X, CheckCircle, XCircle, Loader2, ChevronDown } from 'lucide-react'
 
 /** 默认宽度常量 */
 const DEFAULT_SIDEBAR_WIDTH = 260
@@ -29,6 +29,7 @@ export default function App() {
   /** 推导实际暗色状态 */
   const darkMode = useMemo(() => {
     if (themeMode === 'dark') return true
+    if (themeMode === 'eyeCare') return false
     if (themeMode === 'light') return false
     // system: 跟随操作系统
     return systemPrefersDark
@@ -45,6 +46,7 @@ export default function App() {
     { value: 'light' as const, icon: Sun, label: t('theme.light') },
     { value: 'dark' as const, icon: Moon, label: t('theme.dark') },
     { value: 'system' as const, icon: Monitor, label: t('theme.system') },
+    { value: 'eyeCare' as const, icon: Eye, label: t('theme.eyeCare') },
   ], [t])
 
   // 侧边栏收起/展开
@@ -52,7 +54,6 @@ export default function App() {
     if (sidebarOpen) {
       // 收起前记住当前宽度
       setSidebarWidth((prev) => {
-        // 仅当不是已收起状态时才存记忆值
         return prev
       })
       toggleSidebar()
@@ -93,6 +94,15 @@ export default function App() {
     }
   }, [darkMode])
 
+  // 护眼模式 class（与 dark 互斥）
+  useEffect(() => {
+    if (themeMode === 'eyeCare') {
+      document.body.classList.add('eye-care')
+    } else {
+      document.body.classList.remove('eye-care')
+    }
+  }, [themeMode])
+
   // 监听系统主题变化（仅在 themeMode === 'system' 时读取）
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
@@ -125,7 +135,7 @@ export default function App() {
             className="flex items-center gap-0.5 p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
             title={`${t('theme.label')}：${THEME_OPTIONS.find(o => o.value === themeMode)?.label}`}
           >
-            {themeMode === 'light' ? <Sun size={16} /> : themeMode === 'dark' ? <Moon size={16} /> : <Monitor size={16} />}
+            {themeMode === 'light' ? <Sun size={16} /> : themeMode === 'dark' ? <Moon size={16} /> : themeMode === 'eyeCare' ? <Eye size={16} /> : <Monitor size={16} />}
             <ChevronDown size={10} />
           </button>
           {showThemePicker && (
