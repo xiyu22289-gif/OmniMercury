@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useStore } from '../store'
 import { Settings, X, RotateCcw, Check, Zap, Loader2, Eye, EyeOff } from 'lucide-react'
 
@@ -17,6 +18,7 @@ const PRESET_MODELS = [
 ]
 
 export default function LLMSettings() {
+  const { t } = useTranslation()
   const { showSettings, setShowSettings, llmConfig, setLlmConfig, loadLlmConfig } = useStore()
 
   const [form, setForm] = useState<FormData>({
@@ -99,7 +101,7 @@ export default function LLMSettings() {
           <div className="flex items-center gap-2">
             <Settings size={18} className="text-blue-500" />
             <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">
-              LLM 通用设置
+              {t('llmSettings.title')}
             </h2>
           </div>
           <button
@@ -115,7 +117,7 @@ export default function LLMSettings() {
           {/* 快捷预设 */}
           <div>
             <label className="block text-xs font-medium text-gray-700 dark:text-gray-200 mb-2">
-              快捷预设
+              {t('llmSettings.presets')}
             </label>
             <div className="flex flex-wrap gap-1.5">
               {PRESET_MODELS.map((preset) => {
@@ -140,7 +142,7 @@ export default function LLMSettings() {
           {/* Base URL */}
           <div>
             <label className="block text-xs font-medium text-gray-700 dark:text-gray-200 mb-1">
-              Base URL
+              {t('llmSettings.baseUrl')}
             </label>
             <input
               type="url"
@@ -156,7 +158,7 @@ export default function LLMSettings() {
           {/* API Key */}
           <div>
             <label className="block text-xs font-medium text-gray-700 dark:text-gray-200 mb-1">
-              API Key
+              {t('llmSettings.apiKey')}
             </label>
             <div className="relative">
               <input
@@ -172,20 +174,20 @@ export default function LLMSettings() {
                 type="button"
                 onClick={() => setShowKey(!showKey)}
                 className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-                title={showKey ? '隐藏 API Key' : '显示 API Key'}
+                title={showKey ? t('llmSettings.hideKey') : t('llmSettings.showKey')}
               >
                 {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
               </button>
             </div>
             <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">
-              密钥仅存储在本地，绝不联网上传
+              {t('llmSettings.apiKeyHint')}
             </p>
           </div>
 
           {/* 模型名称 */}
           <div>
             <label className="block text-xs font-medium text-gray-700 dark:text-gray-200 mb-1">
-              模型名称
+              {t('llmSettings.model')}
             </label>
             <input
               type="text"
@@ -210,7 +212,7 @@ export default function LLMSettings() {
                          disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 {testing ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
-                {testing ? '测试中...' : '测试连接'}
+                {testing ? t('llmSettings.testing') : t('llmSettings.testConnection')}
               </button>
               {testResult && (
                 <span className={`text-xs ${testResult.success ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
@@ -230,7 +232,7 @@ export default function LLMSettings() {
                      dark:hover:text-red-400 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors"
           >
             <RotateCcw size={13} />
-            重置
+            {t('llmSettings.reset')}
           </button>
           <button
             onClick={handleSave}
@@ -242,10 +244,10 @@ export default function LLMSettings() {
             {saved ? (
               <>
                 <Check size={14} />
-                已保存
+                {t('llmSettings.saved')}
               </>
             ) : (
-              '保存配置'
+              t('llmSettings.save')
             )}
           </button>
         </div>

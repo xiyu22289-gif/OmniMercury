@@ -331,3 +331,60 @@ export async function translateArticle(request: TranslateRequest, callback: Stre
     )
   } catch (err) { callback({ type, articleId, message: `LLM 调用失败：${err}` }) }
 }
+
+/**
+ * AI 标签推荐：基于文章标题和内容，调用 LLM 建议 3-5 个标签名。
+ * 返回标签名数组（纯文本，不含颜色）。
+ */
+export async function suggestTagsForArticle(title: string, content: string, existingTags: string[]): Promise<string[]> {
+  console.log(`[llmService] suggestTagsForArticle — title="${title}", existingTags=${JSON.stringify(existingTags)}, contentLen=${content.length}`)
+  let config: LlmConfig
+  try { config = getLlmConfig() } catch (err) { console.error('[llmService] suggestTagsForArticle 读配置失败:', err); return [] }
+  const activeKey = getApiKeyForModel(config.model)
+  if (!activeKey) { console.warn('[llmService] suggestTagsForArticle — 无 API Key'); return [] }
+
+  const client = new OpenAI({ apiKey: activeKey, baseURL: config.baseUrl, timeout: 30_000 })
+  const maxLen = 3000
+  const truncated = content.length > maxLen ? content.slice(0, maxLen) + '...' : content
+
+  const existingHint = existingTags.length > 0
+    ? `\n\n已有的标签（请不要重复推荐）：${existingTags.join('、')}`
+    : ''
+
+  const prompt = `你是一个专业的内容分类助手。阅读以下文章，建议 3-5 个简洁的标签（每个标签 2-6 个字，如"技术""AI""前端开发""效率工具"等），用于分类和检索。
+
+要求：
+- 标签应该准确反映文章主题
+- 标签应该是通用的分类词汇，不是文章标题的复制
+- 每个标签 2-6 个汉字或英文单词
+- 输出格式：每行一个标签，不要序号，不要解释${existingHint}
+
+文章标题：${title}
+
+文章内容：
+${truncated}
+
+请输出标签（每行一个）：`
+
+  try {
+    const response = await client.chat.completions.create({
+      model: config.model,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.3,
+      max_tokens: 120,
+    })
+
+    const text = response.choices?.[0]?.message?.content || ''
+    const suggestions = text
+      .split('\n')
+      .map(line => line.replace(/^[\d.\-•·\s]+/, '').trim())
+      .filter(s => s.length >= 1 && s.length <= 20)
+      .slice(0, 6)
+
+    console.log('[llmService] AI 推荐标签：', suggestions)
+    return suggestions
+  } catch (err) {
+    console.error('[llmService] suggestTagsForArticle 失败：', err)
+    return []
+  }
+}

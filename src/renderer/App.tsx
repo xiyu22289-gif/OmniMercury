@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useStore } from './store'
 import Sidebar from './components/Sidebar'
 import ArticleList from './components/ArticleList'
@@ -17,6 +18,7 @@ const MAX_SIDEBAR_WIDTH = 500
 const MAX_LIST_WIDTH = 600
 
 export default function App() {
+  const { t } = useTranslation()
   const {
     sidebarOpen, toggleSidebar,
     themeMode, systemPrefersDark, setThemeMode, setSystemPrefersDark,
@@ -39,11 +41,11 @@ export default function App() {
   // 主题选择器
   const [showThemePicker, setShowThemePicker] = useState(false)
 
-  const THEME_OPTIONS = [
-    { value: 'light' as const, icon: Sun, label: '日间模式' },
-    { value: 'dark' as const, icon: Moon, label: '夜间模式' },
-    { value: 'system' as const, icon: Monitor, label: '跟随系统' },
-  ]
+  const THEME_OPTIONS = useMemo(() => [
+    { value: 'light' as const, icon: Sun, label: t('theme.light') },
+    { value: 'dark' as const, icon: Moon, label: t('theme.dark') },
+    { value: 'system' as const, icon: Monitor, label: t('theme.system') },
+  ], [t])
 
   // 侧边栏收起/展开
   const handleToggleSidebar = useCallback(() => {
@@ -113,7 +115,7 @@ export default function App() {
           <MenuIcon size={18} />
         </button>
         <h1 className="text-sm font-semibold text-gray-700 dark:text-gray-200 select-none">
-          Summer RSS
+          {t('app.title')}
         </h1>
         <div className="flex-1" />
         <SearchBar />
@@ -121,7 +123,7 @@ export default function App() {
           <button
             onClick={() => setShowThemePicker(!showThemePicker)}
             className="flex items-center gap-0.5 p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
-            title={`主题：${THEME_OPTIONS.find(o => o.value === themeMode)?.label}`}
+            title={`${t('theme.label')}：${THEME_OPTIONS.find(o => o.value === themeMode)?.label}`}
           >
             {themeMode === 'light' ? <Sun size={16} /> : themeMode === 'dark' ? <Moon size={16} /> : <Monitor size={16} />}
             <ChevronDown size={10} />
@@ -207,7 +209,7 @@ export default function App() {
       {/* 加载指示器 */}
       {isLoading && (
         <div className="fixed bottom-4 right-4 bg-blue-500 text-white px-4 py-2 rounded-full shadow-lg text-sm">
-          Loading...
+          {t('app.loading')}
         </div>
       )}
 
@@ -221,7 +223,7 @@ export default function App() {
             {/* 标题栏 */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
               <h2 className="text-base font-semibold text-gray-800 dark:text-gray-200">
-                OPML 导入进度
+                {t('opml.importProgress')}
               </h2>
               <button
                 onClick={() => setOpmlDialogOpen(false)}
@@ -239,7 +241,7 @@ export default function App() {
                   {/* 进度条 */}
                   <div>
                     <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
-                      <span>进度</span>
+                      <span>{t('opml.progress')}</span>
                       <span>{opmlProgress.current} / {opmlProgress.total}</span>
                     </div>
                     <div className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
@@ -272,11 +274,11 @@ export default function App() {
               ) : opmlImporting ? (
                 <div className="flex items-center justify-center py-8">
                   <Loader2 size={24} className="animate-spin text-blue-500" />
-                  <span className="ml-2 text-sm text-gray-500 dark:text-gray-400">正在准备...</span>
+                  <span className="ml-2 text-sm text-gray-500 dark:text-gray-400">{t('opml.preparing')}</span>
                 </div>
               ) : (
                 <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-8">
-                  导入已完成，订阅源列表已更新。
+                  {t('opml.completed')}
                 </p>
               )}
             </div>
@@ -288,7 +290,7 @@ export default function App() {
                   onClick={() => setOpmlDialogOpen(false)}
                   className="px-4 py-1.5 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
                 >
-                  关闭
+                  {t('tagManager.close')}
                 </button>
               </div>
             )}

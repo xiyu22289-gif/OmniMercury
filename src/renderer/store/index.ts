@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Feed, Article, LlmConfig } from '../../shared/types'
+import type { Feed, Article, LlmConfig, Tag } from '../../shared/types'
 import { splitIntoParagraphs } from '../../shared/paragraphSplitter'
 
 interface AppState {
@@ -54,6 +54,12 @@ interface AppState {
   // ---- 添加订阅源错误提示 ----
   addFeedError: string | null
 
+  // ---- M5 标签系统 ----
+  tags: Tag[]
+  articleTagsMap: Record<number, Tag[]>
+  currentFilterTagId: number | null
+  tagArticleCounts: Record<number, number>
+
   // ---- 操作 ----
   setFeeds: (feeds: Feed[]) => void
   setArticles: (articles: Article[]) => void
@@ -100,6 +106,18 @@ interface AppState {
   setDisplayMode: (mode: 'replace' | 'sideBySide' | 'topBottom' | 'newTab') => void
   setTranslateTargetLang: (lang: string) => void
   loadLlmConfig: () => Promise<void>
+
+  // ---- M5 标签操作 ----
+  fetchTags: () => Promise<void>
+  fetchArticleTags: (articleId: number) => Promise<void>
+  toggleArticleTag: (articleId: number, tagId: number) => Promise<void>
+  batchAddTagsToArticle: (articleId: number, tagIds: number[]) => Promise<void>
+  setFilterTag: (tagId: number | null) => void
+  loadArticlesByTag: (tagId: number) => Promise<void>
+  createTag: (name: string, color?: string) => Promise<void>
+  deleteTag: (id: number) => Promise<void>
+  clearArticleTagsCache: () => void
+  fetchTagArticleCounts: () => Promise<void>
 }
 
 export const useStore = create<AppState>((set, get) => {
@@ -155,6 +173,12 @@ export const useStore = create<AppState>((set, get) => {
   // ---- 添加订阅源错误提示 ----
   addFeedError: null,
 
+  // ---- M5 标签系统默认值 ----
+  tags: [],
+  articleTagsMap: {},
+  currentFilterTagId: null,
+  tagArticleCounts: {},
+
   // ---- UI 默认值 ----
   sidebarOpen: true,
   themeMode: 'light',
@@ -186,7 +210,7 @@ export const useStore = create<AppState>((set, get) => {
   setFeeds: (feeds) => set({ feeds }),
   setArticles: (articles) => set({ articles }),
   selectFeed: async (feedId) => {
-    set({ selectedFeedId: feedId, selectedArticleId: null, articleContent: null, isLoading: true })
+    set({ selectedFeedId: feedId, selectedArticleId: null, articleContent: null, isLoading: true, currentFilterTagId: null })
     try {
       const response = await window.api.getArticles(feedId)
       if (response.payload.error === 0) {
@@ -199,6 +223,8 @@ export const useStore = create<AppState>((set, get) => {
     } finally {
       set({ isLoading: false })
     }
+    // 刷新标签计数
+    get().fetchTagArticleCounts()
   },
   selectArticle: async (articleId, feedId) => {
     const state = get()
@@ -407,6 +433,180 @@ export const useStore = create<AppState>((set, get) => {
       set({ llmConfig: config })
     } catch {
       // 非 Electron 环境（浏览器 mock），忽略
+    }
+  },
+
+  // ---- M5 标签操作 ----
+
+  fetchTags: async () => {
+    try {
+      const res = await window.api.getTags()
+      if (res.success && res.data) {
+        set({ tags: res.data })
+      } else {
+        console.error('[store] fetchTags 失败：', res.error)
+      }
+    } catch (err) {
+      console.error('[store] fetchTags 异常：', err)
+    }
+    // 同时刷新标签文章计数
+    get().fetchTagArticleCounts()
+  },
+
+  fetchArticleTags: async (articleId) => {
+    try {
+      const res = await window.api.getTagsForArticle(articleId)
+      if (res.success && res.data) {
+        set(state => ({
+          articleTagsMap: { ...state.articleTagsMap, [articleId]: res.data! }
+        }))
+      } else {
+        console.error('[store] fetchArticleTags 失败：', res.error)
+      }
+    } catch (err) {
+      console.error('[store] fetchArticleTags 异常：', err)
+    }
+  },
+
+  toggleArticleTag: async (articleId, tagId) => {
+    console.log('[store] toggleArticleTag — articleId:', articleId, 'tagId:', tagId)
+    try {
+      const res = await window.api.toggleArticleTag(articleId, tagId)
+      console.log('[store] toggleArticleTag 响应:', res)
+      if (res.success && res.data) {
+        const { added } = res.data
+        set(state => {
+          const current = state.articleTagsMap[articleId] || []
+          const allTags = state.tags
+          const tag = allTags.find(t => t.id === tagId)
+          let updated: Tag[]
+          if (added) {
+            if (tag && !current.some(t => t.id === tagId)) {
+              updated = [...current, tag]
+            } else {
+              updated = current
+            }
+          } else {
+            updated = current.filter(t => t.id !== tagId)
+          }
+          return { articleTagsMap: { ...state.articleTagsMap, [articleId]: updated } }
+        })
+        // 刷新侧边栏标签列表（文章计数等可能需要更新）
+        get().fetchTags()
+      } else {
+        console.error('[store] toggleArticleTag 失败：', res.error)
+      }
+    } catch (err) {
+      console.error('[store] toggleArticleTag 异常：', err)
+    }
+  },
+
+  batchAddTagsToArticle: async (articleId, tagIds) => {
+    console.log('[store] batchAddTagsToArticle — articleId:', articleId, 'tagIds:', tagIds)
+    try {
+      const res = await window.api.batchAddTagsToArticle(articleId, tagIds)
+      if (res.success) {
+        await get().fetchArticleTags(articleId)
+        // 刷新侧边栏标签列表（可能新增了标签）
+        await get().fetchTags()
+      } else {
+        console.error('[store] batchAddTagsToArticle 失败：', res.error)
+      }
+    } catch (err) {
+      console.error('[store] batchAddTagsToArticle 异常：', err)
+    }
+  },
+
+  setFilterTag: async (tagId) => {
+    const prev = get().currentFilterTagId
+    // 点击同一标签 → 清除筛选
+    if (tagId !== null && tagId === prev) {
+      set({ currentFilterTagId: null })
+      // 恢复当前 feed 的文章列表
+      const feedId = get().selectedFeedId
+      if (feedId !== null) {
+        await get().selectFeed(feedId)
+      }
+      return
+    }
+    set({ currentFilterTagId: tagId })
+    if (tagId !== null) {
+      await get().loadArticlesByTag(tagId)
+    } else if (get().selectedFeedId !== null) {
+      // 清除筛选 → 恢复当前 feed
+      await get().selectFeed(get().selectedFeedId!)
+    }
+  },
+
+  loadArticlesByTag: async (tagId) => {
+    set({ isLoading: true })
+    try {
+      const idRes = await window.api.getArticlesByTag(tagId)
+      if (!idRes.success || !idRes.data || idRes.data.length === 0) {
+        set({ articles: [], isLoading: false })
+        return
+      }
+      const artRes = await window.api.getArticlesByIds(idRes.data)
+      if (artRes.payload.error === 0) {
+        set({ articles: artRes.payload.articles || [], isLoading: false })
+      } else {
+        set({ articles: [], isLoading: false })
+      }
+    } catch (err) {
+      console.error('[store] loadArticlesByTag 异常：', err)
+      set({ articles: [], isLoading: false })
+    }
+  },
+
+  createTag: async (name, color) => {
+    try {
+      const res = await window.api.createTag(name, color)
+      if (res.success) {
+        // 刷新标签列表
+        await get().fetchTags()
+      } else {
+        console.error('[store] createTag 失败：', res.error)
+      }
+    } catch (err) {
+      console.error('[store] createTag 异常：', err)
+    }
+  },
+
+  deleteTag: async (id) => {
+    try {
+      const res = await window.api.deleteTag(id)
+      if (res.success) {
+        // 刷新标签列表
+        await get().fetchTags()
+        // 清理 articleTagsMap 中包含该标签的缓存
+        set(state => {
+          const newMap: Record<number, Tag[]> = {}
+          for (const [articleId, tagList] of Object.entries(state.articleTagsMap)) {
+            const filtered = tagList.filter(t => t.id !== id)
+            if (filtered.length > 0) {
+              newMap[Number(articleId)] = filtered
+            }
+          }
+          return { articleTagsMap: newMap }
+        })
+      } else {
+        console.error('[store] deleteTag 失败：', res.error)
+      }
+    } catch (err) {
+      console.error('[store] deleteTag 异常：', err)
+    }
+  },
+
+  clearArticleTagsCache: () => set({ articleTagsMap: {} }),
+
+  fetchTagArticleCounts: async () => {
+    try {
+      const res = await window.api.getTagArticleCounts()
+      if (res.success && res.data) {
+        set({ tagArticleCounts: res.data })
+      }
+    } catch (err) {
+      console.error('[store] fetchTagArticleCounts 异常：', err)
     }
   }
   }

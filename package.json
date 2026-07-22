@@ -1,13 +1,17 @@
 {
   "name": "summer-rss-reader",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "Summer RSS Reader - Cross-platform desktop RSS reader",
+  "author": "xiyu22289 <xiyu22289@gmail.com>",
   "main": "dist/main/main.js",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux"
   },
   "build": {
     "appId": "com.summer.rss.reader",
@@ -27,6 +31,25 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "category": "public.app-category.news"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "category": "Network"
+    },
+    "appImage": {
+      "artifactName": "${productName}-${version}-${arch}.AppImage"
     }
   },
   "dependencies": {
@@ -38,9 +61,12 @@
     "drizzle-orm": "^0.45.2",
     "electron-store": "^8.2.0",
     "eventsource-parser": "^1.1.2",
+    "i18next": "^26.3.6",
+    "i18next-browser-languagedetector": "^8.2.1",
     "jsdom": "^22.1.0",
     "lucide-react": "^0.400.0",
     "openai": "^4.104.0",
+    "react-i18next": "^17.0.10",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
     "rss-parser": "^3.13.0",

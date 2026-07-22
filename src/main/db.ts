@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { sqliteTable, integer, text } from 'drizzle-orm/sqlite-core';
-import { eq, like, sql } from 'drizzle-orm';
+import { eq, like, sql, inArray } from 'drizzle-orm';
 import path from 'path';
 
 // ============================================================
@@ -35,6 +35,26 @@ export const articles = sqliteTable('articles', {
   createdAt: text('created_at'),
 });
 
+export const tags = sqliteTable('tags', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull().unique(),
+  color: text('color'),
+  createdAt: text('created_at'),
+});
+
+export const articleTags = sqliteTable('article_tags', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  articleId: integer('article_id')
+    .notNull()
+    .references(() => articles.id, { onDelete: 'cascade' }),
+  tagId: integer('tag_id')
+    .notNull()
+    .references(() => tags.id, { onDelete: 'cascade' }),
+}, (table) => ({
+  // 联合唯一约束：同一篇文章不能重复打同一标签
+  uniqueArticleTag: sql`UNIQUE(${table.articleId}, ${table.tagId})`,
+}));
+
 // ============================================================
 // 类型导出（供 feedService / ipcHandlers 使用）
 // ============================================================
@@ -43,6 +63,10 @@ export type Feed = typeof feeds.$inferSelect;
 export type NewFeed = typeof feeds.$inferInsert;
 export type Article = typeof articles.$inferSelect;
 export type NewArticle = typeof articles.$inferInsert;
+export type Tag = typeof tags.$inferSelect;
+export type NewTag = typeof tags.$inferInsert;
+export type ArticleTag = typeof articleTags.$inferSelect;
+export type NewArticleTag = typeof articleTags.$inferInsert;
 
 // ============================================================
 // 数据库初始化
@@ -84,6 +108,20 @@ export function initDatabase(dbPath: string): BetterSQLite3Database {
       pub_date    TEXT,
       created_at  TEXT    DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS tags (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      name        TEXT    NOT NULL UNIQUE,
+      color       TEXT,
+      created_at  TEXT    DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS article_tags (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      article_id  INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+      tag_id      INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+      UNIQUE(article_id, tag_id)
+    );
   `);
 
   // M4 兼容迁移：为已有数据库添加 translations 列（幂等，已存在则跳过）
@@ -91,6 +129,26 @@ export function initDatabase(dbPath: string): BetterSQLite3Database {
     sqlite.exec('ALTER TABLE articles ADD COLUMN translations TEXT');
   } catch {
     // 列已存在，忽略
+  }
+
+  // M5 兼容迁移：为已有数据库创建 tags / article_tags 表（幂等，已存在则跳过）
+  try {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS tags (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        name        TEXT    NOT NULL UNIQUE,
+        color       TEXT,
+        created_at  TEXT    DEFAULT (datetime('now'))
+      );
+      CREATE TABLE IF NOT EXISTS article_tags (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        article_id  INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+        tag_id      INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+        UNIQUE(article_id, tag_id)
+      );
+    `);
+  } catch {
+    // 表已存在，忽略
   }
 
   db = drizzle(sqlite);
@@ -265,7 +323,7 @@ export function getArticleContentById(articleId: number): Pick<Article, 'id' | '
 }
 
 /**
- * 按 feedId + link 查找文章（用于 refreshFeeds 去重）。
+ * 按 link + feedId 查找文章（用于 refreshFeeds 去重）。
  * 返回 undefined 表示该链接的文章尚未入库。
  */
 export function getArticleByLink(feedId: number, link: string): Article | undefined {
@@ -276,4 +334,31 @@ export function getArticleByLink(feedId: number, link: string): Article | undefi
       sql`${articles.feedId} = ${feedId} AND ${articles.link} = ${link}`
     )
     .get();
+}
+
+/**
+ * 按 ID 数组批量获取文章摘要（跨订阅源），用于标签筛选。
+ * 按 pub_date DESC 排序。空数组返回 []。
+ */
+export function getArticlesByIds(
+  ids: number[],
+): Pick<Article, 'id' | 'feedId' | 'title' | 'isRead' | 'summary' | 'translations' | 'link' | 'author' | 'pubDate' | 'createdAt'>[] {
+  if (ids.length === 0) return []
+  return getDb()
+    .select({
+      id: articles.id,
+      feedId: articles.feedId,
+      title: articles.title,
+      isRead: articles.isRead,
+      summary: articles.summary,
+      translations: articles.translations,
+      link: articles.link,
+      author: articles.author,
+      pubDate: articles.pubDate,
+      createdAt: articles.createdAt,
+    })
+    .from(articles)
+    .where(inArray(articles.id, ids))
+    .orderBy(sql`${articles.pubDate} DESC`)
+    .all();
 }

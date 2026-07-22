@@ -4,6 +4,7 @@ import type {
   LlmStreamDone,
   LlmStreamError,
   LlmConfig,
+  Tag,
 } from '../shared/types'
 
 /** OPML 导入进度事件（类型定义同 preload/index.ts） */
@@ -33,6 +34,7 @@ declare global {
       removeFeed: (feedId: number) => Promise<IpcResponse>
       searchArticles: (query: string, feedId?: number, offset?: number, limit?: number) => Promise<IpcResponse>
       getCachedArticleContent: (articleId: number) => Promise<IpcResponse>
+      getArticlesByIds: (ids: number[]) => Promise<IpcResponse>
 
       // ---- LLM 配置 ----
       getLlmConfig: () => Promise<LlmConfig>
@@ -51,6 +53,19 @@ declare global {
 
       /** 测试 LLM API 连接 */
       testConnection: (config?: { baseUrl: string; apiKey: string; model: string }) => Promise<{ success: boolean; latencyMs: number; message: string }>
+
+      // ---- M5 标签系统 ----
+      getTags: () => Promise<{ success: boolean; data?: Tag[]; error?: string }>
+      getTagById: (id: number) => Promise<{ success: boolean; data?: Tag; error?: string }>
+      createTag: (name: string, color?: string) => Promise<{ success: boolean; data?: Tag; error?: string }>
+      updateTag: (id: number, name: string, color?: string) => Promise<{ success: boolean; data?: Tag; error?: string }>
+      deleteTag: (id: number) => Promise<{ success: boolean; error?: string }>
+      getTagsForArticle: (articleId: number) => Promise<{ success: boolean; data?: Tag[]; error?: string }>
+      toggleArticleTag: (articleId: number, tagId: number) => Promise<{ success: boolean; data?: { added: boolean }; error?: string }>
+      getArticlesByTag: (tagId: number) => Promise<{ success: boolean; data?: number[]; error?: string }>
+      batchAddTagsToArticle: (articleId: number, tagIds: number[]) => Promise<{ success: boolean; error?: string }>
+      suggestTagsFromAI: (title: string, content: string, existingTagNames: string[]) => Promise<{ success: boolean; data?: string[]; error?: string }>
+      getTagArticleCounts: () => Promise<{ success: boolean; data?: Record<number, number>; error?: string }>
 
       // ---- OPML 导入 ----
       selectOpmlFile: () => Promise<{ canceled: boolean; filePath?: string; error?: string }>

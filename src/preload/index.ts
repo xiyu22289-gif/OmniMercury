@@ -5,6 +5,7 @@ import type {
   LlmStreamError,
   LlmConfig,
   IpcResponse,
+  Tag,
 } from '../shared/types'
 
 /** OPML 导入进度事件 */
@@ -40,6 +41,8 @@ const api = {
     ipcRenderer.invoke('backend:searchArticles', query, feedId, offset, limit),
   getCachedArticleContent: (articleId: number) =>
     ipcRenderer.invoke('backend:getCachedArticleContent', articleId),
+  getArticlesByIds: (ids: number[]): Promise<IpcResponse> =>
+    ipcRenderer.invoke('backend:getArticlesByIds', ids),
 
   // ---- LLM 配置 ----
   getLlmConfig: (): Promise<LlmConfig> =>
@@ -72,6 +75,30 @@ const api = {
       ipcRenderer.removeListener('llm:stream-chunk', handler)
     }
   },
+
+  // ---- M5 标签系统 ----
+  getTags: (): Promise<{ success: boolean; data?: Tag[]; error?: string }> =>
+    ipcRenderer.invoke('tag:getAll'),
+  getTagById: (id: number): Promise<{ success: boolean; data?: Tag; error?: string }> =>
+    ipcRenderer.invoke('tag:getById', id),
+  createTag: (name: string, color?: string): Promise<{ success: boolean; data?: Tag; error?: string }> =>
+    ipcRenderer.invoke('tag:create', name, color),
+  updateTag: (id: number, name: string, color?: string): Promise<{ success: boolean; data?: Tag; error?: string }> =>
+    ipcRenderer.invoke('tag:update', id, name, color),
+  deleteTag: (id: number): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('tag:delete', id),
+  getTagsForArticle: (articleId: number): Promise<{ success: boolean; data?: Tag[]; error?: string }> =>
+    ipcRenderer.invoke('tag:getForArticle', articleId),
+  toggleArticleTag: (articleId: number, tagId: number): Promise<{ success: boolean; data?: { added: boolean }; error?: string }> =>
+    ipcRenderer.invoke('tag:toggleArticle', articleId, tagId),
+  getArticlesByTag: (tagId: number): Promise<{ success: boolean; data?: number[]; error?: string }> =>
+    ipcRenderer.invoke('tag:getArticlesByTag', tagId),
+  batchAddTagsToArticle: (articleId: number, tagIds: number[]): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('tag:batchAddToArticle', articleId, tagIds),
+  suggestTagsFromAI: (title: string, content: string, existingTagNames: string[]): Promise<{ success: boolean; data?: string[]; error?: string }> =>
+    ipcRenderer.invoke('tag:suggestFromAI', title, content, existingTagNames),
+  getTagArticleCounts: (): Promise<{ success: boolean; data?: Record<number, number>; error?: string }> =>
+    ipcRenderer.invoke('tag:getArticleCounts'),
 
   // ---- OPML 导入 ----
   /** 打开文件选择对话框选择 OPML 文件 */

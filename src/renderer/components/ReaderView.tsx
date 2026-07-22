@@ -1,11 +1,12 @@
 import { useEffect, useCallback, useState, useRef, useMemo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { useTranslation } from 'react-i18next'
 import { useStore } from '../store'
 import {
   Globe, ExternalLink, Sparkles, Languages, Loader, Settings,
   Check, Columns, AlignJustify, Replace, X,
-  BookOpen, Monitor, Type, Minus, Plus, ChevronDown
+  BookOpen, Monitor, Type, Minus, Plus, ChevronDown, Tag, Zap, Square, CheckSquare, Loader2
 } from 'lucide-react'
 import type { LlmStreamChunk, LlmStreamDone, LlmStreamError } from '../../shared/types'
 import { splitIntoParagraphs } from '../../shared/paragraphSplitter'
@@ -42,6 +43,11 @@ const DISPLAY_MODES = [
   { value: 'topBottom' as const, icon: AlignJustify, label: '上下' },
   { value: 'newTab' as const, icon: Monitor, label: '新标签' },
 ] as const
+
+const PRESET_COLORS = [
+  '#ef4444', '#f97316', '#eab308', '#22c55e',
+  '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899',
+]
 
 const LANG_LABEL_MAP: Record<string, string> = {
   Chinese: '中文',
@@ -106,7 +112,7 @@ function NewTabTranslation({
         <div className="sticky top-0 z-10 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm pb-2 mb-3 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center gap-1.5">
             <BookOpen size={13} className="text-gray-500" />
-            <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">原文</span>
+            <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{t('reader.originalText')}</span>
           </div>
         </div>
         <div className="space-y-4">
@@ -131,7 +137,7 @@ function NewTabTranslation({
           <div className="flex items-center gap-1.5">
             <Languages size={13} className="text-blue-500" />
             <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wider">
-              {langLabel} 译文
+              {langLabel} {t('reader.translatedFrom')}
             </span>
             {translateLoading && <Loader size={12} className="animate-spin text-blue-400 ml-1" />}
           </div>
@@ -140,7 +146,7 @@ function NewTabTranslation({
             className="flex items-center gap-1 px-2 py-1 text-xs text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
           >
             <X size={12} />
-            关闭
+            {t('reader.close')}
           </button>
         </div>
         <div className="space-y-6">
@@ -153,7 +159,7 @@ function NewTabTranslation({
                   </ReactMarkdown>
                 </div>
               ) : translateLoading ? (
-                <div className="text-xs text-gray-400 py-1">翻译中...</div>
+                <div className="text-xs text-gray-400 py-1">{t('reader.translating')}</div>
               ) : (
                 <div className="text-xs text-gray-300">-</div>
               )}
@@ -168,6 +174,7 @@ function NewTabTranslation({
 // ============ 主组件 ============
 
 export default function ReaderView() {
+  const { t } = useTranslation()
   const {
     // 文章状态
     selectedArticleId,
@@ -208,12 +215,30 @@ export default function ReaderView() {
     readerFontFamily,
     readerFontSize,
     setReaderFontFamily,
-    setReaderFontSize
+    setReaderFontSize,
+    // M5 标签系统
+    tags,
+    articleTagsMap,
+    fetchArticleTags,
+    fetchTags,
+    toggleArticleTag,
+    batchAddTagsToArticle
   } = useStore()
 
   // ============ 本地状态 ============
 
   const [showFontPicker, setShowFontPicker] = useState(false)
+  const [showTagPicker, setShowTagPicker] = useState(false)
+  // 多选模式：选中的标签 ID 集合
+  const [selectedTagIds, setSelectedTagIds] = useState<Set<number>>(new Set())
+  // 快速创建标签
+  const [quickCreateName, setQuickCreateName] = useState('')
+  const [quickCreateColor, setQuickCreateColor] = useState('#3b82f6')
+  const [quickCreating, setQuickCreating] = useState(false)
+  // AI 推荐
+  const [aiSuggesting, setAiSuggesting] = useState(false)
+  const [aiSuggestions, setAiSuggestions] = useState<string[]>([])
+  const [aiCheckedNames, setAiCheckedNames] = useState<Set<string>>(new Set())
 
   const [showSummaryLangPicker, setShowSummaryLangPicker] = useState(false)
   const [showTranslateLangPicker, setShowTranslateLangPicker] = useState(false)
@@ -241,6 +266,9 @@ export default function ReaderView() {
     if (themeMode === 'light') return false
     return systemPrefersDark
   }, [themeMode, systemPrefersDark])
+
+  // 标签系统计算值
+  const articleTags = selectedArticleId ? (articleTagsMap[selectedArticleId] || []) : []
 
   // ============ 副作用 ============
 
@@ -324,13 +352,17 @@ export default function ReaderView() {
     return () => { cleanup?.() }
   }, [])
 
-  // 切换文章时重置翻译状态（包括 loading，防止旧文章翻译污染新文章）
+  // 切换文章时重置翻译状态 + 拉取文章标签
   useEffect(() => {
     translatingRef.current = false
     resetTranslate()
     resetParagraphTranslations()
     setTranslateMode('original')
     setTranslateLoading(false)
+    // 拉取当前文章的标签
+    if (selectedArticleId) {
+      fetchArticleTags(selectedArticleId)
+    }
   }, [selectedArticleId])
 
   // ============ 拖拽事件 ============
@@ -416,6 +448,155 @@ export default function ReaderView() {
     setTranslateLoading(false)
   }, [resetParagraphTranslations, setTranslateLoading])
 
+  /** 打开标签选择面板时，初始化选中状态为当前已有标签 */
+  const openTagPicker = useCallback(() => {
+    const currentIds = new Set((articleTagsMap[selectedArticleId!] || []).map(t => t.id))
+    setSelectedTagIds(currentIds)
+    setAiSuggestions([])
+    setQuickCreateName('')
+    setShowTagPicker(true)
+  }, [selectedArticleId, articleTagsMap])
+
+  /** 切换单个标签的选中状态（不提交） */
+  const toggleTagSelection = useCallback((tagId: number) => {
+    setSelectedTagIds(prev => {
+      const next = new Set(prev)
+      if (next.has(tagId)) next.delete(tagId)
+      else next.add(tagId)
+      return next
+    })
+  }, [])
+
+  /** 批量应用标签变更 */
+  const applyTagChanges = useCallback(async () => {
+    if (!selectedArticleId) return
+    const currentTags = articleTagsMap[selectedArticleId] || []
+    const currentIds = new Set(currentTags.map(t => t.id))
+    const selectedArr = [...selectedTagIds]
+
+    // 需要新增的标签
+    const toAdd = selectedArr.filter(id => !currentIds.has(id))
+    // 需要移除的标签
+    const toRemove = [...currentIds].filter(id => !selectedTagIds.has(id))
+
+    // 先移除
+    for (const id of toRemove) {
+      await toggleArticleTag(selectedArticleId, id)
+    }
+    // 再批量添加
+    if (toAdd.length > 0) {
+      await batchAddTagsToArticle(selectedArticleId, toAdd)
+    }
+
+    setShowTagPicker(false)
+  }, [selectedArticleId, articleTagsMap, selectedTagIds, toggleArticleTag, batchAddTagsToArticle])
+
+  /** 快速创建标签并加入选中列表 */
+  const handleQuickCreate = useCallback(async () => {
+    const name = quickCreateName.trim()
+    if (!name) return
+    setQuickCreating(true)
+    try {
+      const res = await window.api.createTag(name, quickCreateColor)
+      if (res.success && res.data) {
+        // 刷新标签列表
+        await fetchTags()
+        // 自动加入选中
+        setSelectedTagIds(prev => new Set([...prev, res.data!.id]))
+        // 将新标签也加入当前文章的缓存（因为还没提交，先更新本地）
+        const sid = selectedArticleId
+        if (sid) {
+          const cur = articleTagsMap[sid] || []
+          if (!cur.some(t => t.id === res.data!.id)) {
+            useStore.setState(s => ({
+              articleTagsMap: { ...s.articleTagsMap, [sid!]: [...cur, res.data!] }
+            }))
+          }
+        }
+        setQuickCreateName('')
+      }
+    } catch (err) {
+      console.error('[ReaderView] quickCreate 失败：', err)
+    } finally {
+      setQuickCreating(false)
+    }
+  }, [quickCreateName, quickCreateColor, selectedArticleId, articleTagsMap, fetchTags])
+
+  /** AI 标签推荐 */
+  const handleAiSuggest = useCallback(async () => {
+    if (!selectedArticle) {
+      console.warn('[ReaderView] handleAiSuggest — 无选中文章')
+      return
+    }
+    openTagPicker()
+    setAiSuggesting(true)
+    setAiSuggestions([])
+    setAiCheckedNames(new Set())
+    try {
+      const content = articleContent || selectedArticle.summary || ''
+      console.log('[ReaderView] AI 推荐 — 标题:', selectedArticle.title, '内容长度:', content.length)
+      const currentNames = (articleTagsMap[selectedArticle.id] || []).map(t => t.name)
+      const res = await window.api.suggestTagsFromAI(selectedArticle.title, content, currentNames)
+      console.log('[ReaderView] AI 推荐响应:', res)
+      if (res.success && res.data) {
+        setAiSuggestions(res.data)
+      } else {
+        console.error('[ReaderView] AI 推荐失败 — API error:', res.error || '未知错误')
+      }
+    } catch (err) {
+      console.error('[ReaderView] AI 推荐异常:', err)
+    } finally {
+      setAiSuggesting(false)
+    }
+  }, [selectedArticle, articleContent, articleTagsMap, openTagPicker])
+
+  /** 添加选中的 AI 推荐标签（创建不存在的标签 → 批量打标） */
+  const handleApplyAiSuggestions = useCallback(async () => {
+    if (!selectedArticleId || aiCheckedNames.size === 0) return
+    setAiSuggesting(true)
+    try {
+      const selectedNames = [...aiCheckedNames]
+      const currentTags = useStore.getState().tags
+      const toAddIds: number[] = []
+      const toCreate: string[] = []
+
+      for (const name of selectedNames) {
+        const existing = currentTags.find(t => t.name === name)
+        if (existing) {
+          toAddIds.push(existing.id)
+        } else {
+          toCreate.push(name)
+        }
+      }
+
+      // 创建不存在的标签
+      for (const name of toCreate) {
+        const colors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899']
+        const color = colors[Math.floor(Math.random() * colors.length)]
+        const res = await window.api.createTag(name, color)
+        if (res.success && res.data) {
+          toAddIds.push(res.data.id)
+        }
+      }
+
+      // 刷新 tags 列表
+      await fetchTags()
+
+      // 批量打标
+      if (toAddIds.length > 0) {
+        await batchAddTagsToArticle(selectedArticleId, toAddIds)
+      }
+
+      setAiSuggestions([])
+      setAiCheckedNames(new Set())
+      setShowTagPicker(false)
+    } catch (err) {
+      console.error('[ReaderView] AI 推荐应用失败：', err)
+    } finally {
+      setAiSuggesting(false)
+    }
+  }, [selectedArticleId, aiCheckedNames, batchAddTagsToArticle, fetchTags])
+
   const handleStartTranslate = useCallback(async (targetLang: string) => {
     if (!selectedArticleId || !selectedArticle) return
     if (translateLoading) return
@@ -467,7 +648,7 @@ export default function ReaderView() {
       return (
         <div className="text-gray-400 text-sm py-8 text-center">
           <Globe size={48} className="mx-auto mb-3 opacity-30" />
-          暂无内容
+          {t('reader.noContent')}
         </div>
       )
     }
@@ -511,7 +692,7 @@ export default function ReaderView() {
       return (
         <div className="flex flex-col items-center justify-center py-12 text-gray-400">
           <Globe size={48} className="mb-3 opacity-30" />
-          <p className="text-sm mb-4">原始网页需在外部浏览器中查看</p>
+          <p className="text-sm mb-4">{t('reader.originalNeedsBrowser')}</p>
           <a
             href={selectedArticle.url}
             target="_blank"
@@ -519,12 +700,12 @@ export default function ReaderView() {
             className="inline-flex items-center gap-2 px-4 py-2 bg-blue-500 text-white text-sm rounded-lg hover:bg-blue-600 transition-colors"
           >
             <ExternalLink size={14} />
-            在浏览器中打开原文
+            {t('reader.openInBrowser')}
           </a>
         </div>
       )
     }
-    return <div className="text-gray-400 text-sm py-8 text-center">暂无原始链接</div>
+    return <div className="text-gray-400 text-sm py-8 text-center">{t('reader.noOriginalLink')}</div>
   }
 
   // ============ 空状态 ============
@@ -532,7 +713,7 @@ export default function ReaderView() {
   if (!selectedArticleId || !selectedArticle) {
     return (
       <div className="reader-view flex items-center justify-center text-gray-400 text-sm">
-        选择一篇文章开始阅读
+        {t('reader.selectArticle')}
       </div>
     )
   }
@@ -563,7 +744,7 @@ export default function ReaderView() {
         <div className="max-w-3xl mx-auto">
           {/* 标题 */}
           <h1 className="text-2xl font-bold leading-tight mb-2 dark:text-white">
-            {selectedArticle.title || '(Untitled)'}
+            {selectedArticle.title || t('articleList.untitled')}
           </h1>
 
           {/* 元信息 */}
@@ -587,9 +768,195 @@ export default function ReaderView() {
               className="flex items-center gap-1 text-blue-500 hover:text-blue-600 transition-colors"
             >
               <ExternalLink size={14} />
-              打开原文
+              {t('reader.openOriginal')}
             </a>
           </div>
+
+          {/* ===== M5 标签区域 ===== */}
+          <div className="flex items-center gap-1.5 mb-3 flex-wrap">
+            {/* 已打标签 */}
+            {articleTags.map(tag => (
+              <span
+                key={tag.id}
+                className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-full cursor-pointer hover:opacity-80 transition-opacity group"
+                style={{
+                  backgroundColor: (tag.color || '#3b82f6') + '20',
+                  color: tag.color || '#3b82f6',
+                  border: '1px solid ' + (tag.color || '#3b82f6') + '40',
+                }}
+                onClick={() => {
+                  if (selectedArticleId) toggleArticleTag(selectedArticleId, tag.id)
+                }}
+                title={t('reader.clickToRemoveTag')}
+              >
+                <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: tag.color || '#3b82f6' }} />
+                {tag.name}
+                <X size={10} className="opacity-50 group-hover:opacity-100" />
+              </span>
+            ))}
+
+            {/* 管理标签按钮 → 弹出多选面板 */}
+            <button
+              onClick={openTagPicker}
+              className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] text-gray-400 hover:text-blue-500
+                       border border-dashed border-gray-300 dark:border-gray-600 rounded-full
+                       hover:border-blue-400 dark:hover:border-blue-500 transition-colors"
+            >
+              <Tag size={11} />
+              {articleTags.length === 0 ? t('reader.addTag') : t('reader.manageTags')}
+            </button>
+
+            {/* AI 推荐按钮 */}
+            <button
+              onClick={handleAiSuggest}
+              disabled={aiSuggesting}
+              className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] text-purple-500 hover:text-purple-600
+                       border border-dashed border-purple-300 dark:border-purple-600 rounded-full
+                       hover:border-purple-400 transition-colors disabled:opacity-50"
+            >
+              {aiSuggesting ? <Loader2 size={11} className="animate-spin" /> : <Zap size={11} />}
+              {t('reader.aiRecommend')}
+            </button>
+          </div>
+
+          {/* ===== 标签管理面板 ===== */}
+          {showTagPicker && (
+            <div
+              className="fixed inset-0 z-50 flex items-start justify-center pt-20"
+              onClick={() => setShowTagPicker(false)}
+            >
+              <div
+                className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 w-80 max-h-[70vh] flex flex-col"
+                onClick={e => e.stopPropagation()}
+              >
+                {/* 面板标题 */}
+                <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 dark:border-gray-700">
+                  <div className="flex items-center gap-2">
+                    <Tag size={14} className="text-blue-500" />
+                    <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">{t('reader.tagManagement')}</span>
+                  </div>
+                  <button onClick={() => setShowTagPicker(false)} className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700">
+                    <X size={14} />
+                  </button>
+                </div>
+
+                {/* AI 推荐区域 */}
+                {aiSuggestions.length > 0 && (
+                  <div className="px-4 py-2 border-b border-purple-200 dark:border-purple-700 bg-purple-50/50 dark:bg-purple-900/10">
+                    <div className="flex items-center gap-1.5 mb-2">
+                      <Zap size={12} className="text-purple-500" />
+                      <span className="text-xs font-medium text-purple-600 dark:text-purple-400">{t('reader.aiSuggestedTags')}</span>
+                    </div>
+                    <div className="space-y-0.5 mb-2">
+                      {aiSuggestions.map(name => {
+                        const checked = aiCheckedNames.has(name)
+                        const AiIcon = checked ? CheckSquare : Square
+                        return (
+                          <button
+                            key={name}
+                            onClick={() => {
+                              setAiCheckedNames(prev => {
+                                const next = new Set(prev)
+                                if (next.has(name)) next.delete(name)
+                                else next.add(name)
+                                return next
+                              })
+                            }}
+                            className="w-full flex items-center gap-1.5 px-1.5 py-1 rounded text-xs
+                                     hover:bg-purple-100 dark:hover:bg-purple-900/20 transition-colors
+                                     text-purple-700 dark:text-purple-300"
+                          >
+                            <AiIcon size={14} className={checked ? 'text-purple-500' : 'text-purple-400'} />
+                            <span>{name}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                    <button
+                      onClick={handleApplyAiSuggestions}
+                      disabled={aiSuggesting || aiCheckedNames.size === 0}
+                      className="w-full py-1 text-xs font-medium text-white bg-purple-500 hover:bg-purple-600 rounded-lg transition-colors disabled:opacity-50"
+                    >
+                      {aiSuggesting ? t('reader.applying') : `${t('reader.addSelected')} (${aiCheckedNames.size})`}
+                    </button>
+                  </div>
+                )}
+
+                {/* 标签列表（多选） */}
+                <div className="flex-1 overflow-y-auto px-2 py-2 max-h-52">
+                  {tags.length === 0 ? (
+                    <div className="py-4 text-center text-xs text-gray-400">{t('reader.noTagsCreateBelow')}</div>
+                  ) : (
+                    tags.map(tag => {
+                      const checked = selectedTagIds.has(tag.id)
+                      const Icon = checked ? CheckSquare : Square
+                      return (
+                        <button
+                          key={tag.id}
+                          onClick={() => toggleTagSelection(tag.id)}
+                          className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors text-sm"
+                        >
+                          <Icon size={15} className={checked ? 'text-blue-500' : 'text-gray-400'} />
+                          <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: tag.color || '#3b82f6' }} />
+                          <span className="flex-1 text-left text-gray-700 dark:text-gray-200 text-xs">{tag.name}</span>
+                        </button>
+                      )
+                    })
+                  )}
+                </div>
+
+                {/* 快速创建标签 */}
+                <div className="px-3 py-2 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+                  <span className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase">{t('reader.quickCreate')}</span>
+                  <div className="flex items-center gap-1.5 mt-1">
+                    <input
+                      type="text"
+                      value={quickCreateName}
+                      onChange={e => setQuickCreateName(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') handleQuickCreate() }}
+                      placeholder={t('reader.newTagPlaceholder')}
+                      className="flex-1 px-2 py-1 text-xs border border-gray-300 dark:border-gray-500
+                               bg-white dark:bg-gray-700 dark:text-gray-100 rounded focus:outline-none
+                               focus:ring-1 focus:ring-blue-500 placeholder:text-gray-400"
+                    />
+                    <div className="flex gap-0.5">
+                      {PRESET_COLORS.map(c => (
+                        <button
+                          key={c}
+                          onClick={() => setQuickCreateColor(c)}
+                          className={`w-4 h-4 rounded-full transition-transform hover:scale-110 ${quickCreateColor === c ? 'ring-1 ring-offset-1 ring-blue-500' : ''}`}
+                          style={{ backgroundColor: c }}
+                        />
+                      ))}
+                    </div>
+                    <button
+                      onClick={handleQuickCreate}
+                      disabled={quickCreating || !quickCreateName.trim()}
+                      className="px-2 py-1 text-xs font-medium text-white bg-blue-500 rounded hover:bg-blue-600 disabled:opacity-40 transition-colors flex-shrink-0"
+                    >
+                      <Plus size={12} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* 底部按钮 */}
+                <div className="flex gap-2 px-4 py-2.5 border-t border-gray-200 dark:border-gray-700">
+                  <button
+                    onClick={() => setShowTagPicker(false)}
+                    className="flex-1 py-1.5 text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                  >
+                    {t('reader.cancel')}
+                  </button>
+                  <button
+                    onClick={applyTagChanges}
+                    className="flex-1 py-1.5 text-xs font-medium text-white bg-blue-500 hover:bg-blue-600 rounded-lg transition-colors"
+                  >
+                    {t('reader.apply')}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* ===== 工具栏 ===== */}
           <div className="flex items-center gap-2 mb-4 pb-3 border-b border-gray-200 dark:border-gray-700 flex-wrap">
@@ -601,10 +968,10 @@ export default function ReaderView() {
                   ? 'bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400'
                   : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
                 }`}
-              title={readerMode === 'reader' ? '阅读模式（点击切换原始网页）' : '原始网页（点击切换阅读模式）'}
+              title={readerMode === 'reader' ? t('reader.readerMode') : t('reader.originalMode')}
             >
               <BookOpen size={13} />
-              {readerMode === 'reader' ? '阅读模式' : '原始网页'}
+              {readerMode === 'reader' ? t('reader.readerMode') : t('reader.originalMode')}
             </button>
 
             <div className="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1" />
@@ -620,7 +987,7 @@ export default function ReaderView() {
                          disabled:opacity-50 transition-colors"
               >
                 {summaryLoading ? <Loader size={13} className="animate-spin" /> : <Sparkles size={13} />}
-                {summaryLoading ? '生成摘要...' : 'AI 摘要'}
+                {summaryLoading ? t('reader.generatingSummary') : t('reader.aiSummary')}
               </button>
               {showSummaryLangPicker && (
                 <div
@@ -628,7 +995,7 @@ export default function ReaderView() {
                   onClick={e => e.stopPropagation()}
                 >
                   <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700">
-                    <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">摘要语言</span>
+                    <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{t('reader.summaryLanguage')}</span>
                   </div>
                   <div className="py-1">
                     {LANG_OPTIONS.map(l => (
@@ -648,7 +1015,7 @@ export default function ReaderView() {
                   </div>
                   {/* 摘要详细程度 */}
                   <div className="border-t border-gray-100 dark:border-gray-700 px-3 py-2">
-                    <span className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase">详细程度</span>
+                    <span className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase">{t('reader.detailLevel')}</span>
                     <div className="flex gap-1 mt-1.5">
                       {(['compact', 'medium', 'detailed'] as const).map(level => (
                         <button
@@ -660,7 +1027,7 @@ export default function ReaderView() {
                               : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700'
                             }`}
                         >
-                          {level === 'compact' ? '精简' : level === 'medium' ? '标准' : '详细'}
+                          {level === 'compact' ? t('reader.compact') : level === 'medium' ? t('reader.medium') : t('reader.detailed')}
                         </button>
                       ))}
                     </div>
@@ -691,7 +1058,7 @@ export default function ReaderView() {
                   className="flex items-center gap-1 px-2 py-1.5 text-xs rounded-lg text-gray-500 hover:bg-red-50 hover:text-red-500 dark:text-gray-400 dark:hover:bg-red-900/20 dark:hover:text-red-400 transition-colors"
                 >
                   <X size={12} />
-                  返回原文
+                  {t('reader.backToOriginal')}
                 </button>
               </>
             ) : translateLoading ? (
@@ -712,14 +1079,14 @@ export default function ReaderView() {
                 ))}
                 <div className="flex items-center gap-1.5 px-2 py-1.5 text-xs text-blue-500 dark:text-blue-400">
                   <Loader size={12} className="animate-spin" />
-                  翻译中...
+                  {t('reader.translating')}
                 </div>
                 <button
                   onClick={handleBackToOriginal}
                   className="flex items-center gap-1 px-2 py-1.5 text-xs rounded-lg text-gray-500 hover:bg-red-50 hover:text-red-500 dark:text-gray-400 dark:hover:bg-red-900/20 dark:hover:text-red-400 transition-colors"
                 >
                   <X size={12} />
-                  停止
+                  {t('reader.stop')}
                 </button>
               </>
             ) : (
@@ -733,7 +1100,7 @@ export default function ReaderView() {
                            disabled:opacity-50 transition-colors"
                 >
                   {translateLoading ? <Loader size={13} className="animate-spin" /> : <Languages size={13} />}
-                  {translateLoading ? '翻译中...' : '翻译'}
+                  {translateLoading ? t('reader.translating') : t('reader.translate')}
                 </button>
                 {showTranslateLangPicker && (
                   <div
@@ -741,7 +1108,7 @@ export default function ReaderView() {
                     onClick={e => e.stopPropagation()}
                   >
                     <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700">
-                      <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">翻译语言</span>
+                      <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{t('reader.translateLanguage')}</span>
                     </div>
                     <div className="py-1">
                       {LANG_OPTIONS.map(l => (
@@ -777,7 +1144,7 @@ export default function ReaderView() {
               onClick={() => setReaderFontSize(Math.max(FONT_SIZE_MIN, readerFontSize - FONT_SIZE_STEP))}
               disabled={readerFontSize <= FONT_SIZE_MIN}
               className="flex items-center justify-center w-7 h-7 rounded text-xs text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-              title="缩小字号"
+              title={t('reader.fontSizeReduce')}
             >
               <Minus size={12} />
             </button>
@@ -785,7 +1152,7 @@ export default function ReaderView() {
             {/* 当前字号显示 */}
             <span
               className="text-xs font-medium text-gray-600 dark:text-gray-300 min-w-[28px] text-center select-none cursor-default"
-              title="阅读字号"
+              title={t('reader.fontSize')}
             >
               {readerFontSize}
             </span>
@@ -795,7 +1162,7 @@ export default function ReaderView() {
               onClick={() => setReaderFontSize(Math.min(FONT_SIZE_MAX, readerFontSize + FONT_SIZE_STEP))}
               disabled={readerFontSize >= FONT_SIZE_MAX}
               className="flex items-center justify-center w-7 h-7 rounded text-xs text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-              title="放大字号"
+              title={t('reader.fontSizeIncrease')}
             >
               <Plus size={12} />
             </button>
@@ -805,10 +1172,10 @@ export default function ReaderView() {
               <button
                 onClick={() => setShowFontPicker(!showFontPicker)}
                 className="flex items-center gap-1 px-2 py-1.5 text-xs rounded-lg text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700 transition-colors"
-                title="选择字体"
+                title={t('reader.selectFont')}
               >
                 <Type size={13} />
-                {FONT_FAMILIES.find(f => f.value === readerFontFamily)?.label || '字体'}
+                {FONT_FAMILIES.find(f => f.value === readerFontFamily)?.label || t('reader.font')}
                 <ChevronDown size={10} />
               </button>
               {showFontPicker && (
@@ -817,7 +1184,7 @@ export default function ReaderView() {
                   onClick={e => e.stopPropagation()}
                 >
                   <div className="px-3 py-1.5 border-b border-gray-200 dark:border-gray-700">
-                    <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">选择字体</span>
+                    <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{t('reader.selectFont')}</span>
                   </div>
                   <div className="py-1">
                     {FONT_FAMILIES.map(f => (
@@ -846,7 +1213,7 @@ export default function ReaderView() {
             <button
               onClick={() => setShowSettings(true)}
               className="flex items-center gap-1 px-2 py-1.5 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-              title="LLM 设置"
+              title={t('reader.llmSettings')}
             >
               <Settings size={13} />
             </button>
@@ -882,10 +1249,10 @@ export default function ReaderView() {
                 <Loader size={20} className="animate-spin text-blue-500" />
                 <div>
                   <div className="text-sm font-medium text-blue-700 dark:text-blue-300">
-                    🌐 AI 翻译进行中...
+                    {t('reader.translationBanner')}
                   </div>
                   <div className="text-xs text-blue-500 dark:text-blue-400 mt-0.5">
-                    正在逐段翻译 {originalParagraphs.length} 个段落，请稍候
+                    {t('reader.translatingParagraphs', { n: originalParagraphs.length })}
                   </div>
                 </div>
               </div>
@@ -938,7 +1305,7 @@ export default function ReaderView() {
                             </ReactMarkdown>
                           </div>
                         ) : translateLoading ? (
-                          <div className="text-xs text-gray-400">翻译中...</div>
+                          <div className="text-xs text-gray-400">{t('reader.translating')}</div>
                         ) : <div className="text-xs text-gray-300">-</div>}
                       </div>
                     </div>
@@ -961,7 +1328,7 @@ export default function ReaderView() {
                           <div className="bg-blue-50 dark:bg-blue-900/20 px-3 py-1.5 flex items-center gap-1.5 border-b border-blue-200 dark:border-blue-700">
                             <span className="text-xs">🌐</span>
                             <span className="text-[11px] font-medium text-blue-600 dark:text-blue-400">
-                              {LANG_LABEL_MAP[translateTargetLangRef.current] || '译文'}
+                              {LANG_LABEL_MAP[translateTargetLangRef.current] || t('reader.translatedFrom')}
                             </span>
                           </div>
                           <div className="bg-blue-50/30 dark:bg-blue-900/5 px-4 py-3">
@@ -977,12 +1344,12 @@ export default function ReaderView() {
                           <div className="bg-blue-50 dark:bg-blue-900/10 px-3 py-1.5 flex items-center gap-1.5 border-b border-blue-100 dark:border-blue-800">
                             <span className="text-xs">🌐</span>
                             <span className="text-[11px] font-medium text-blue-400">
-                              {LANG_LABEL_MAP[translateTargetLangRef.current] || '译文'}
+                              {LANG_LABEL_MAP[translateTargetLangRef.current] || t('reader.translatedFrom')}
                             </span>
                             <Loader size={10} className="animate-spin text-blue-400 ml-1" />
                           </div>
                           <div className="bg-blue-50/20 dark:bg-blue-900/5 px-4 py-3 text-xs text-gray-400">
-                            翻译中...
+                            {t('reader.translating')}
                           </div>
                         </div>
                       ) : null}
@@ -1028,14 +1395,14 @@ export default function ReaderView() {
                 <div className="flex items-center gap-1.5">
                   <Sparkles size={13} className="text-purple-500" />
                   <span className="text-xs font-semibold text-purple-600 dark:text-purple-400 uppercase tracking-wider">
-                    AI 摘要{summaryLangLabel ? ` (${summaryLangLabel}${summaryDetailLevelRef.current === 'compact' ? '·精简' : summaryDetailLevelRef.current === 'detailed' ? '·详细' : ''})` : ''}
+                    {t('reader.aiSummary')}{summaryLangLabel ? ` (${summaryLangLabel}${summaryDetailLevelRef.current === 'compact' ? t('reader.summaryDetailCompact') : summaryDetailLevelRef.current === 'detailed' ? t('reader.summaryDetailDetailed') : ''})` : ''}
                   </span>
                   {summaryLoading && <Loader size={12} className="animate-spin text-purple-400 ml-1" />}
                 </div>
                 <button
                   onClick={resetSummary}
                   className="flex items-center gap-1 px-1.5 py-0.5 text-xs text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
-                  title="关闭摘要面板"
+                  title={t('reader.closeSummaryPanel')}
                 >
                   <X size={12} />
                 </button>

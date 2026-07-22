@@ -10,6 +10,7 @@ import {
   searchArticlesByTitle,
   getArticleContentById,
   getArticleByLink,
+  getArticlesByIds,
   type Feed,
   type Article,
   type NewArticle,
@@ -352,4 +353,21 @@ export function getCachedArticleContent(articleId: number): { id: number; body: 
   const body = row.contentMd ?? row.content ?? '';
   if (!body) return undefined;
   return { id: row.id, body };
+}
+
+/**
+ * 按 ID 数组批量获取文章摘要（跨订阅源），用于标签筛选。
+ */
+export function getArticlesByIdList(ids: number[]): ArticleSummary[] {
+  return getArticlesByIds(ids).map((a) => ({
+    id: a.id,
+    title: a.title,
+    isRead: a.isRead,
+    summary: a.summary,
+    translations: a.translations,
+    link: a.link,
+    author: a.author,
+    pubDate: a.pubDate,
+    createdAt: a.createdAt,
+  }));
 }

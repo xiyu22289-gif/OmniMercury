@@ -1,11 +1,16 @@
 import { ipcMain, BrowserWindow, dialog } from 'electron'
-import { addFeed, listFeeds, getArticles, searchArticles, getCachedArticleContent, refreshAllFeeds } from './feedService'
+import { addFeed, listFeeds, getArticles, getArticlesByIdList, searchArticles, getCachedArticleContent, refreshAllFeeds } from './feedService'
 import { parseOpmlFile, importOpmlFile, exportOpmlFile } from './opmlService'
 import { getDb, getFeedById, feeds as feedsTable, articles as articlesTable } from './db'
 import { eq } from 'drizzle-orm'
-import { summarizeArticle, translateArticle, translateParagraphs, testConnection } from './llmService'
+import { summarizeArticle, translateArticle, translateParagraphs, testConnection, suggestTagsForArticle } from './llmService'
 import { getLlmConfig, setLlmConfig, resetLlmConfig } from './configService'
 import { getOrFetchArticleContent } from './contentService'
+import {
+  getAllTags, getTagById, createTag, updateTag, deleteTag,
+  getTagsForArticle, toggleArticleTag, getArticlesByTag, batchAddTagsToArticle,
+  getTagArticleCounts,
+} from './tagService'
 import type {
   IpcResponse,
   Feed,
@@ -147,6 +152,12 @@ export function registerIpcHandlers(): void {
     return { type: 'get_cached_article_content', payload: { error: 0, content: { id: cached.id, content: cached.body } } }
   })
 
+  // 按 ID 列表获取文章（跨订阅源，用于标签筛选）
+  ipcMain.handle('backend:getArticlesByIds', async (_event, ids: number[]): Promise<IpcResponse> => {
+    const articles: Article[] = getArticlesByIdList(ids).map(a => ({ id: a.id, feed_id: 0, title: a.title, url: a.link ?? '', author: a.author ?? undefined, summary: a.summary ?? undefined, translations: a.translations ?? undefined, published_at: a.pubDate ?? a.createdAt ?? '', fetched_at: a.createdAt ?? '', is_read: a.isRead === 1 }))
+    return { type: 'list_articles', payload: { error: 0, articles } }
+  })
+
   // LLM 配置
   ipcMain.handle('llm:getConfig', async () => getLlmConfig())
   ipcMain.handle('llm:setConfig', async (_event, updates: Record<string, string>) => { setLlmConfig(updates); return { success: true } })
@@ -285,6 +296,110 @@ export function registerIpcHandlers(): void {
     try {
       exportOpmlFile(result.filePath)
       return { success: true, filePath: result.filePath }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // ============================================================
+  // M5 标签系统
+  // ============================================================
+
+  ipcMain.handle('tag:getAll', async () => {
+    try {
+      const data = getAllTags()
+      return { success: true, data }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle('tag:getById', async (_event, id: number) => {
+    try {
+      const data = getTagById(id)
+      if (!data) return { success: false, error: `标签 ID=${id} 不存在` }
+      return { success: true, data }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle('tag:create', async (_event, name: string, color?: string) => {
+    try {
+      const data = createTag(name, color)
+      return { success: true, data }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle('tag:update', async (_event, id: number, name: string, color?: string) => {
+    try {
+      const data = updateTag(id, name, color)
+      return { success: true, data }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle('tag:delete', async (_event, id: number) => {
+    try {
+      deleteTag(id)
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle('tag:getForArticle', async (_event, articleId: number) => {
+    try {
+      const data = getTagsForArticle(articleId)
+      return { success: true, data }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle('tag:toggleArticle', async (_event, articleId: number, tagId: number) => {
+    try {
+      const data = toggleArticleTag(articleId, tagId)
+      return { success: true, data }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle('tag:getArticlesByTag', async (_event, tagId: number) => {
+    try {
+      const data = getArticlesByTag(tagId)
+      return { success: true, data }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle('tag:batchAddToArticle', async (_event, articleId: number, tagIds: number[]) => {
+    try {
+      batchAddTagsToArticle(articleId, tagIds)
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle('tag:getArticleCounts', async () => {
+    try {
+      const data = getTagArticleCounts()
+      return { success: true, data }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle('tag:suggestFromAI', async (_event, title: string, content: string, existingTagNames: string[]) => {
+    try {
+      const suggestions = await suggestTagsForArticle(title, content, existingTagNames)
+      return { success: true, data: suggestions }
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) }
     }

@@ -1,6 +1,7 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
+import './i18n'
 import './index.css'
 
 // 浏览器开发模式 mock：当不在 Electron 环境中时提供空 API

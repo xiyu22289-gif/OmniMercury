@@ -1,6 +1,8 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useStore } from '../store'
-import { Rss, Plus, RefreshCw, Trash2, FolderOpen, Upload, Download, AlertCircle, Info, XCircle } from 'lucide-react'
+import { Rss, Plus, RefreshCw, Trash2, FolderOpen, Upload, Download, AlertCircle, Info, XCircle, Tag, ChevronDown, ChevronRight, Settings, Globe } from 'lucide-react'
+import TagManager from './TagManager'
 
 /** 错误码 → 图标 + 颜色映射 */
 const ERROR_CONFIG: Record<string, { icon: typeof AlertCircle; color: string; bg: string }> = {
@@ -15,15 +17,25 @@ const ERROR_CONFIG: Record<string, { icon: typeof AlertCircle; color: string; bg
 }
 
 export default function Sidebar() {
+  const { t, i18n } = useTranslation()
   const {
     feeds, selectedFeedId, sidebarOpen,
     selectFeed, setFeeds, setError, setLoading,
     addFeedError, setAddFeedError, clearAddFeedError,
-    setOpmlImporting, setOpmlProgress, setOpmlDialogOpen
+    setOpmlImporting, setOpmlProgress, setOpmlDialogOpen,
+    // M5 标签
+    tags, currentFilterTagId, setFilterTag, fetchTags, tagArticleCounts
   } = useStore()
 
   const [addUrl, setAddUrl] = useState('')
   const [showAdd, setShowAdd] = useState(false)
+  const [showTagSection, setShowTagSection] = useState(true)
+  const [showTagManager, setShowTagManager] = useState(false)
+
+  // 启动时加载标签和计数
+  useEffect(() => {
+    fetchTags()
+  }, [])
 
   /** OPML 文件导入流程 */
   const handleOpmlImport = async () => {
@@ -79,7 +91,7 @@ export default function Sidebar() {
   const handleAddFeed = async () => {
     const url = addUrl.trim()
     if (!url) {
-      setAddFeedError('请输入有效的 RSS/Atom 订阅源 URL')
+      setAddFeedError(t('sidebar.urlInvalid'))
       return
     }
 
@@ -99,7 +111,7 @@ export default function Sidebar() {
       } else {
         // 从 feedService 获取详细错误信息，映射到用户友好提示
         const code = response.payload.errorCode || 'UNKNOWN'
-        const message = response.payload.message || '添加失败，请稍后重试'
+        const message = response.payload.message || t('sidebar.feedExists')
         setAddFeedError(message)
       }
     } catch (err) {
@@ -174,26 +186,26 @@ export default function Sidebar() {
           className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
         >
           <Plus size={14} />
-          Add
+          {t('sidebar.add')}
         </button>
         <button
           onClick={handleOpmlImport}
           className="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
-          title="Import OPML file"
+          title={t('sidebar.importOpml')}
         >
           <Upload size={14} />
         </button>
         <button
           onClick={handleOpmlExport}
           className="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
-          title="Export OPML file"
+          title={t('sidebar.exportOpml')}
         >
           <Download size={14} />
         </button>
         <button
           onClick={handleRefresh}
           className="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
-          title="Refresh all feeds"
+          title={t('sidebar.refreshAll')}
         >
           <RefreshCw size={14} />
         </button>
@@ -216,7 +228,7 @@ export default function Sidebar() {
                 handleAddFeed()
               }
             }}
-            placeholder="Enter RSS/Atom URL..."
+            placeholder={t('sidebar.enterUrl')}
             className="w-full px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-800 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
             autoFocus
           />
@@ -242,7 +254,7 @@ export default function Sidebar() {
       <div className="flex-1 overflow-y-auto py-1">
         <div className="px-4 py-1.5 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
           <FolderOpen size={12} className="inline mr-1" />
-          Feeds ({feeds.length})
+          {t('sidebar.feeds')} ({feeds.length})
         </div>
         {feeds.map((feed) => (
           <div
@@ -263,10 +275,77 @@ export default function Sidebar() {
         ))}
         {feeds.length === 0 && (
           <div className="px-4 py-8 text-center text-sm text-gray-400">
-            No feeds yet. Click "Add" to subscribe to an RSS feed.
+            {t('sidebar.noFeeds')}
           </div>
         )}
+
+        {/* ===== M5 标签筛选区域 ===== */}
+        <div className="border-t border-gray-200 dark:border-gray-700 mt-1 pt-1">
+          <button
+            onClick={() => setShowTagSection(!showTagSection)}
+            className="w-full flex items-center gap-1 px-4 py-1.5 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors"
+          >
+            {showTagSection ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            <Tag size={12} className="inline" />
+            {t('sidebar.tags')} ({tags.length})
+            <div className="flex-1" />
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowTagManager(true) }}
+              className="p-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+              title={t('sidebar.manageTags')}
+            >
+              <Settings size={11} />
+            </button>
+          </button>
+
+          {showTagSection && (
+            <div className="px-2 py-1">
+              {tags.length === 0 ? (
+                <div className="px-2 py-2 text-xs text-gray-400">
+                  {t('sidebar.noTags')}
+                </div>
+              ) : (
+                tags.map(tag => (
+                  <button
+                    key={tag.id}
+                    onClick={() => setFilterTag(currentFilterTagId === tag.id ? null : tag.id)}
+                    className={`w-full flex items-center gap-2 px-2 py-1 rounded text-sm transition-colors
+                      ${currentFilterTagId === tag.id
+                        ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                        : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                      }`}
+                  >
+                    <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: tag.color || '#3b82f6' }} />
+                    <span className="flex-1 text-left truncate text-xs">{tag.name}</span>
+                    <span className="text-[10px] text-gray-400 dark:text-gray-500 min-w-[1.2rem] text-right">
+                      {tagArticleCounts[tag.id] ?? 0}
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+        </div>
       </div>
+
+      {/* 标签管理器 */}
+      <TagManager open={showTagManager} onClose={() => setShowTagManager(false)} />
+
+      {/* 语言切换 */}
+      <div className="border-t border-gray-200 dark:border-gray-700 px-3 py-2">
+        <button
+          onClick={() => {
+            const next = i18n.language === 'zh' ? 'en' : 'zh'
+            i18n.changeLanguage(next)
+          }}
+          className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+        >
+          <Globe size={13} />
+          <span className="flex-1 text-left">{i18n.language === 'zh' ? '中文' : 'English'}</span>
+          <span className="text-[10px] opacity-50">{i18n.language === 'zh' ? 'EN' : '中'}</span>
+        </button>
+      </div>
+
     </div>
   )
 }
