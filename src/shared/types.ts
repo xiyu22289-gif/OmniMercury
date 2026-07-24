@@ -113,10 +113,32 @@ export interface TranslateRequest {
   targetLang: string
 }
 
+/** 选择文本翻译请求参数 */
+export interface SelectiveTranslateRequest {
+  articleId: number
+  /** 用户选中的原始文本 */
+  selectedText: string
+  /** 翻译目标语言 */
+  targetLang: string
+}
+
+/** 选择段落摘要请求参数 */
+export interface SelectiveSummarizeRequest {
+  articleId: number
+  /** 文章标题 */
+  title: string
+  /** 用户选中的段落数组 */
+  selectedParagraphs: string[]
+  /** 摘要目标语言 */
+  targetLang: string
+  /** 摘要详细程度 */
+  detailLevel: 'compact' | 'medium' | 'detailed'
+}
+
 /** 流式数据块（主进程 → 渲染进程单向推送） */
 export interface LlmStreamChunk {
   /** 操作类型 */
-  type: 'summarize' | 'translate' | 'translateParagraph' | 'translateComplete'
+  type: 'summarize' | 'translate' | 'translateParagraph' | 'translateComplete' | 'selectiveTranslate' | 'selectiveSummarize'
   /** 文章 ID */
   articleId: number
   /** 段落索引（仅 translateParagraph 使用） */
@@ -127,7 +149,7 @@ export interface LlmStreamChunk {
 
 /** 流式结束通知 */
 export interface LlmStreamDone {
-  type: 'summarize' | 'translate' | 'translateParagraph' | 'translateComplete'
+  type: 'summarize' | 'translate' | 'translateParagraph' | 'translateComplete' | 'selectiveTranslate' | 'selectiveSummarize'
   articleId: number
   /** 段落索引（仅 translateParagraph 使用） */
   paragraphIndex?: number
@@ -137,7 +159,7 @@ export interface LlmStreamDone {
 
 /** 流式错误通知 */
 export interface LlmStreamError {
-  type: 'summarize' | 'translate' | 'translateParagraph' | 'translateComplete'
+  type: 'summarize' | 'translate' | 'translateParagraph' | 'translateComplete' | 'selectiveTranslate' | 'selectiveSummarize'
   articleId: number
   /** 段落索引（仅 translateParagraph 使用） */
   paragraphIndex?: number

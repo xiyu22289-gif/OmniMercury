@@ -7,7 +7,7 @@ import OpenAI from 'openai'
 import { getLlmConfig, getApiKeyForModel, type LlmConfig } from './configService'
 import { getDb, articles as articlesTable, insertTokenUsage } from './db'
 import { eq } from 'drizzle-orm'
-import type { LlmStreamChunk, LlmStreamDone, LlmStreamError, SummarizeRequest, TranslateRequest } from '../shared/types'
+import type { LlmStreamChunk, LlmStreamDone, LlmStreamError, SummarizeRequest, TranslateRequest, SelectiveTranslateRequest, SelectiveSummarizeRequest } from '../shared/types'
 import { splitIntoParagraphs } from '../shared/paragraphSplitter'
 
 // ============================================================
@@ -326,6 +326,49 @@ export async function summarizeArticle(request: SummarizeRequest, callback: Stre
 }
 
 // ============================================================
+// 选择段落摘要
+// ============================================================
+
+export async function summarizeSelection(request: SelectiveSummarizeRequest, callback: StreamCallback): Promise<void> {
+  const { articleId, title, selectedParagraphs, targetLang, detailLevel } = request
+  const type = 'selectiveSummarize' as const
+  const content = selectedParagraphs?.join('\n\n')?.trim()
+  if (!content) { callback({ type, articleId, message: '未选中任何段落' }); return }
+
+  let config: LlmConfig
+  try { config = getLlmConfig() } catch (err) { callback({ type, articleId, message: `配置失败：${err}` }); return }
+  const activeKey = getApiKeyForModel(config.model)
+  if (!activeKey) { callback({ type, articleId, message: '未配置 API Key' }); return }
+
+  const prompt = buildSummarizePrompt(title, content, targetLang, detailLevel)
+  const maxTokens = detailLevel === 'compact' ? 300 : detailLevel === 'detailed' ? 1500 : 800
+
+  try {
+    const client = createClient(config, activeKey)
+    const stream = await client.chat.completions.create({
+      model: config.model,
+      messages: [{ role: 'system', content: '你是一个专业的文章摘要助手。' }, { role: 'user', content: prompt }],
+      temperature: getTemperature(config.model),
+      max_tokens: maxTokens,
+      stream: true,
+    })
+
+    const { fullText } = await consumeStreamWithCallback(stream,
+      (delta) => callback({ type, articleId, delta }),
+      (errorMsg) => callback({ type, articleId, message: errorMsg })
+    )
+
+    if (fullText) {
+      const trimmed = fullText.trim()
+      if (trimmed) {
+        callback({ type, articleId, fullText: trimmed })
+        await recordTokens({ model: config.model, operation: 'selectiveSummarize', prompt, completion: trimmed })
+      }
+    }
+  } catch (err) { callback({ type, articleId, message: `LLM 调用失败：${err}` }) }
+}
+
+// ============================================================
 // 全文翻译（旧版兼容）
 // ============================================================
 
@@ -455,4 +498,55 @@ ${truncated}
     console.error('[llmService] suggestTagsForArticle 失败：', err)
     return []
   }
+}
+
+// ============================================================
+// 选择文本翻译
+// ============================================================
+
+function buildSelectiveTranslatePrompt(selectedText: string, targetLang: string): string {
+  const langName = targetLang === 'Chinese' ? '简体中文' : targetLang
+  const protectedText = protectMedia(selectedText)
+  if (!protectedText.trim()) return ''
+  return `Translate the following text to ${langName}. Preserve any Markdown formatting (bold, italic, code, etc.) exactly. Keep placeholders like __IMG_N__ and __LINK_N__ exactly as-is. Output ONLY the translated text. No explanations:\n\n${protectedText}`
+}
+
+export async function translateSelection(request: SelectiveTranslateRequest, callback: StreamCallback): Promise<void> {
+  const { articleId, selectedText, targetLang } = request
+  const type = 'selectiveTranslate' as const
+  const trimmed = selectedText?.trim()
+  if (!trimmed) { callback({ type, articleId, message: '选中文本为空' }); return }
+  if (trimmed.length > 8000) { callback({ type, articleId, message: '选中文本过长（最多 8000 字符）' }); return }
+
+  let config: LlmConfig
+  try { config = getLlmConfig() } catch (err) { callback({ type, articleId, message: `配置失败：${err}` }); return }
+  const activeKey = getApiKeyForModel(config.model)
+  if (!activeKey) { callback({ type, articleId, message: '未配置 API Key' }); return }
+
+  let client: OpenAI
+  try { client = createClient(config, activeKey) } catch (err) { callback({ type, articleId, message: String(err) }); return }
+
+  const prompt = buildSelectiveTranslatePrompt(trimmed, targetLang)
+  if (!prompt) { callback({ type, articleId, message: '无法构建翻译 Prompt' }); return }
+
+  try {
+    const stream = await client.chat.completions.create({
+      model: config.model,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: getTemperature(config.model),
+      max_tokens: 4096,
+      stream: true,
+    })
+
+    const { fullText } = await consumeStreamWithCallback(stream,
+      (delta) => callback({ type, articleId, delta }),
+      (errorMsg) => callback({ type, articleId, message: errorMsg })
+    )
+
+    if (fullText) {
+      const restored = restoreMedia(fullText.trim())
+      callback({ type, articleId, fullText: restored })
+      await recordTokens({ model: config.model, operation: 'selectiveTranslate', prompt, completion: restored })
+    }
+  } catch (err) { callback({ type, articleId, message: `LLM 调用失败：${err}` }) }
 }

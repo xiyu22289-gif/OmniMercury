@@ -3,7 +3,7 @@ import { addFeed, listFeeds, getArticles, getArticlesByIdList, searchArticles, g
 import { parseOpmlFile, importOpmlFile, exportOpmlFile } from './opmlService'
 import { getDb, getFeedById, feeds as feedsTable, articles as articlesTable, getTokenStats } from './db'
 import { eq } from 'drizzle-orm'
-import { summarizeArticle, translateArticle, translateParagraphs, testConnection, suggestTagsForArticle } from './llmService'
+import { summarizeArticle, translateArticle, translateParagraphs, testConnection, suggestTagsForArticle, translateSelection, summarizeSelection } from './llmService'
 import { getLlmConfig, setLlmConfig, resetLlmConfig } from './configService'
 import { getOrFetchArticleContent } from './contentService'
 import {
@@ -17,7 +17,8 @@ import type {
   Article,
   ArticleContent,
   SummarizeRequest,
-  TranslateRequest
+  TranslateRequest,
+  SelectiveTranslateRequest
 } from '../shared/types'
 
 export function registerIpcHandlers(): void {
@@ -169,6 +170,24 @@ export function registerIpcHandlers(): void {
     if (!win) return { success: false, error: '窗口不存在' }
     translateParagraphs(request, (chunk) => win.webContents.send('llm:stream-chunk', chunk))
       .catch(err => { console.error('[ipcHandlers] translateParagraphs 异常：', err); win.webContents.send('llm:stream-chunk', { type: 'translate', articleId: request.articleId, message: String(err) }) })
+    return { success: true }
+  })
+
+  // 选择文本翻译
+  ipcMain.handle('llm:translateSelection', async (event, request: SelectiveTranslateRequest) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return { success: false, error: '窗口不存在' }
+    translateSelection(request, (chunk) => win.webContents.send('llm:stream-chunk', chunk))
+      .catch(err => { console.error('[ipcHandlers] translateSelection 异常：', err); win.webContents.send('llm:stream-chunk', { type: 'selectiveTranslate', articleId: request.articleId, message: String(err) }) })
+    return { success: true }
+  })
+
+  // 选择段落摘要
+  ipcMain.handle('llm:summarizeSelection', async (event, request: import('../shared/types').SelectiveSummarizeRequest) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return { success: false, error: '窗口不存在' }
+    summarizeSelection(request, (chunk) => win.webContents.send('llm:stream-chunk', chunk))
+      .catch(err => { console.error('[ipcHandlers] summarizeSelection 异常：', err); win.webContents.send('llm:stream-chunk', { type: 'selectiveSummarize', articleId: request.articleId, message: String(err) }) })
     return { success: true }
   })
 

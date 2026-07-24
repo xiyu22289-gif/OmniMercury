@@ -74,6 +74,14 @@ const api = {
   translateParagraphs: (articleId: number, content: string, title: string, targetLang: string) =>
     ipcRenderer.invoke('llm:translateParagraphs', { articleId, content, title, targetLang }),
 
+  /** 选择文本翻译（流式） */
+  translateSelection: (articleId: number, selectedText: string, targetLang: string) =>
+    ipcRenderer.invoke('llm:translateSelection', { articleId, selectedText, targetLang }),
+
+  /** 选择段落摘要（流式） */
+  summarizeSelection: (articleId: number, title: string, selectedParagraphs: string[], targetLang: string, detailLevel: 'compact' | 'medium' | 'detailed') =>
+    ipcRenderer.invoke('llm:summarizeSelection', { articleId, title, selectedParagraphs, targetLang, detailLevel }),
+
   /** 监听流式数据块 */
   onStreamChunk: (
     callback: (chunk: LlmStreamChunk | LlmStreamDone | LlmStreamError) => void

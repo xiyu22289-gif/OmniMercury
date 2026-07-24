@@ -48,6 +48,12 @@ declare global {
       translate: (articleId: number, content: string, title: string, targetLang: string) => Promise<{ success: boolean }>
       translateParagraphs: (articleId: number, content: string, title: string, targetLang: string) => Promise<{ success: boolean }>
 
+      /** 选择文本翻译（流式） */
+      translateSelection: (articleId: number, selectedText: string, targetLang: string) => Promise<{ success: boolean }>
+
+      /** 选择段落摘要（流式） */
+      summarizeSelection: (articleId: number, title: string, selectedParagraphs: string[], targetLang: string, detailLevel: 'compact' | 'medium' | 'detailed') => Promise<{ success: boolean }>
+
       /** 监听流式数据块，返回取消监听的函数 */
       onStreamChunk: (
         callback: (chunk: LlmStreamChunk | LlmStreamDone | LlmStreamError) => void

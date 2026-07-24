@@ -1,4 +1,5 @@
 import { useEffect, useCallback, useState, useRef, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useTranslation } from 'react-i18next'
@@ -85,6 +86,7 @@ function NewTabTranslation({
   darkMode,
   onClose
 }: NewTabTranslationProps) {
+  const { t } = useTranslation()
   const proseCls = darkMode ? 'prose-invert' : 'prose-gray'
   const [dividerPos, setDividerPos] = useState(50)
   const isDragging = useRef(false)
@@ -227,7 +229,23 @@ export default function ReaderView() {
     toggleArticleTag,
     batchAddTagsToArticle,
     // 笔记
-    notePanelOpen
+    notePanelOpen,
+    // 选择文本翻译
+    selectionOriginal,
+    selectionTranslation,
+    selectionTranslateLoading,
+    appendSelectionDelta,
+    resetSelectionTranslation,
+    setSelectionTranslateLoading,
+    setSelectionOriginal,
+    // 选择段落摘要
+    selectedParagraphIndices,
+    selectionSummary,
+    selectionSummaryLoading,
+    toggleSelectedParagraph,
+    clearSelectedParagraphs,
+    setSelectionSummary,
+    setSelectionSummaryLoading,
   } = useStore()
 
   // ============ 本地状态 ============
@@ -264,6 +282,140 @@ export default function ReaderView() {
   // 翻译分界线
   const [dividerPos, setDividerPos] = useState(50)
   const isDragging = useRef(false)
+
+  // ============ 选择段落摘要 ============
+  const originalParagraphsIndexRef = useRef(0)
+  const selectionSummaryAnchorRef = useRef<HTMLDivElement | null>(null)
+  const [showSelectSummaryBar, setShowSelectSummaryBar] = useState(false)
+  const [selectSummaryLang, setSelectSummaryLang] = useState('Chinese')
+  const [selectSummaryDetail, setSelectSummaryDetail] = useState<'compact' | 'medium' | 'detailed'>('medium')
+
+  /** 生成选中段落摘要 */
+  const handleSelectiveSummarize = useCallback(async () => {
+    if (!selectedArticleId || selectionSummaryLoading) return
+    const c = useStore.getState().articleContent || ''
+    const paras = splitContent(c)
+    const indices = [...selectedParagraphIndices].sort((a, b) => a - b)
+    if (indices.length === 0) return
+    const selected = indices.map(i => paras[i]).filter(Boolean)
+    if (selected.length === 0) return
+    const art = useStore.getState().articles.find(a => a.id === selectedArticleId)
+    if (!art) return
+    setSelectionSummary('')
+    setSelectionSummaryLoading(true)
+    // 插入锚点到最后选中段落之后
+    const lastIdx = indices[indices.length - 1]
+    const anchor = document.createElement('div')
+    anchor.id = '__selection_summary_anchor__'
+    const paraNodes = readingAreaRef.current?.querySelectorAll('[data-para-index]') || []
+    const target = paraNodes[lastIdx] as HTMLElement | undefined
+    if (target) {
+      target.parentNode?.insertBefore(anchor, target.nextSibling)
+    } else {
+      readingAreaRef.current?.appendChild(anchor)
+    }
+    selectionSummaryAnchorRef.current = anchor
+    try {
+      await window.api.summarizeSelection(selectedArticleId, art.title, selected, selectSummaryLang, selectSummaryDetail)
+    } catch (err) {
+      setError(String(err))
+      setSelectionSummaryLoading(false)
+    }
+  }, [selectedArticleId, selectedParagraphIndices, selectionSummaryLoading, selectSummaryLang, selectSummaryDetail, setSelectionSummaryLoading, setSelectionSummary])
+
+  /** 导出选中段落摘要 */
+  const handleExportSelectSummary = useCallback(async () => {
+    const art = useStore.getState().articles.find(a => a.id === selectedArticleId)
+    if (!selectionSummary || !art) return
+    try {
+      const res = await window.api.exportSummaryMd(art.title, selectionSummary)
+      if (!res.success && res.error) setError(String(res.error))
+    } catch (err) {
+      setError(String(err))
+    }
+  }, [selectionSummary, selectedArticleId])
+
+  /** 清除选中段落和摘要 */
+  const handleClearSelectSummary = useCallback(() => {
+    clearSelectedParagraphs()
+    setSelectionSummary('')
+    setSelectionSummaryLoading(false)
+    setShowSelectSummaryBar(false)
+    if (selectionSummaryAnchorRef.current) {
+      selectionSummaryAnchorRef.current.remove()
+      selectionSummaryAnchorRef.current = null
+    }
+  }, [clearSelectedParagraphs, setSelectionSummaryLoading, setSelectionSummary])
+
+  // 监听选中段落变化
+  useEffect(() => {
+    setShowSelectSummaryBar(selectedParagraphIndices.size > 0)
+  }, [selectedParagraphIndices.size])
+
+  // ============ 选中文本翻译：React Portal 浮动按钮 ============
+  const readingAreaRef = useRef<HTMLDivElement>(null)
+  const selectionTargetLangRef = useRef('Chinese')
+  const selectedTextRef = useRef('')
+  const [floatBtnPos, setFloatBtnPos] = useState<{ top: number; left: number } | null>(null)
+  const [showFloatBtn, setShowFloatBtn] = useState(false)
+  /** ★ 翻译结果锚点：插入在选中文本正下方 */
+  const selectionResultAnchorRef = useRef<HTMLDivElement | null>(null)
+
+  /** mouseup 监听 → React state 控制浮动按钮 */
+  useEffect(() => {
+    const onMouseUp = () => {
+      const sel = window.getSelection()
+      const text = sel?.toString().trim() ?? ''
+      if (text && sel && !sel.isCollapsed) {
+        try {
+          const range = sel.getRangeAt(0)
+          const rect = range.getBoundingClientRect()
+          selectedTextRef.current = text
+          setFloatBtnPos({ top: rect.bottom + 8, left: rect.left })
+          setShowFloatBtn(true)
+          return
+        } catch { /* fall through */ }
+      }
+      setShowFloatBtn(false)
+      selectedTextRef.current = ''
+    }
+    document.addEventListener('mouseup', onMouseUp)
+    return () => document.removeEventListener('mouseup', onMouseUp)
+  }, [])
+
+  /** 触发翻译 */
+  const triggerSelectiveTranslate = useCallback((targetLang: string) => {
+    const currentId = selectedArticleIdRef.current
+    const text = selectedTextRef.current.trim()
+    if (!currentId || !text || selectionTranslateLoading) return
+    setShowFloatBtn(false)
+    selectedTextRef.current = ''
+    // 插入锚点
+    const sel = window.getSelection()
+    if (sel && !sel.isCollapsed) {
+      try {
+        const r = sel.getRangeAt(0)
+        const anchor = document.createElement('div')
+        anchor.id = '__selection_result_anchor__'
+        r.collapse(false)
+        r.insertNode(anchor)
+        selectionResultAnchorRef.current = anchor
+      } catch { /* ignore */ }
+    }
+    selectionTargetLangRef.current = targetLang
+    setSelectionOriginal(text)
+    resetSelectionTranslation()
+    setSelectionTranslateLoading(true)
+    window.api.translateSelection(currentId, text, targetLang).catch(err => {
+      setError(String(err))
+      setSelectionTranslateLoading(false)
+    })
+  }, [selectionTranslateLoading])
+
+  const handleDismissSelectionTranslate = useCallback(() => {
+    resetSelectionTranslation()
+    setSelectionTranslateLoading(false)
+  }, [resetSelectionTranslation, setSelectionTranslateLoading])
 
   // ============ 计算属性 ============
 
@@ -355,6 +507,21 @@ export default function ReaderView() {
           if ('delta' in chunk) appendTranslateDelta(chunk.delta)
           else if ('fullText' in chunk) { setTranslateLoading(false); setTranslateMode('translation') }
           else if ('message' in chunk) { setError(chunk.message); setTranslateLoading(false) }
+        } else if (chunk.type === 'selectiveTranslate') {
+          if (chunk.articleId !== selectedArticleIdRef.current) return
+          if ('delta' in chunk) appendSelectionDelta(chunk.delta)
+          else if ('fullText' in chunk) {
+            setSelectionTranslateLoading(false)
+          }
+          else if ('message' in chunk) { setError(chunk.message); setSelectionTranslateLoading(false) }
+        } else if (chunk.type === 'selectiveSummarize') {
+          if (chunk.articleId !== selectedArticleIdRef.current) return
+          if ('delta' in chunk) {
+            useStore.setState(state => ({ selectionSummary: state.selectionSummary + chunk.delta }))
+          } else if ('fullText' in chunk) {
+            setSelectionSummaryLoading(false)
+          }
+          else if ('message' in chunk) { setError(chunk.message); setSelectionSummaryLoading(false) }
         }
       })
     }
@@ -362,13 +529,16 @@ export default function ReaderView() {
     return () => { cleanup?.() }
   }, [])
 
-  // 切换文章时重置翻译状态 + 拉取文章标签
+  // 切换文章时重置翻译状态 + 拉取文章标签 + 清除段落选中
   useEffect(() => {
     translatingRef.current = false
     resetTranslate()
     resetParagraphTranslations()
     setTranslateMode('original')
     setTranslateLoading(false)
+    clearSelectedParagraphs()
+    setSelectionSummary('')
+    setSelectionSummaryLoading(false)
     // 拉取当前文章的标签
     if (selectedArticleId) {
       fetchArticleTags(selectedArticleId)
@@ -650,8 +820,8 @@ export default function ReaderView() {
 
   // ============ 渲染函数 ============
 
-  /** 渲染 Markdown（reader 模式） */
-  const renderMarkdownContent = () => {
+  /** ★ 按段落拆分渲染，每段带复选框（适用于任何 HTML 结构） */
+  const renderParagraphsWithCheckboxes = () => {
     const displayContent = articleContent || selectedArticle?.summary || ''
 
     if (!displayContent && !isLoading) {
@@ -663,35 +833,27 @@ export default function ReaderView() {
       )
     }
 
+    const paras = splitContent(displayContent)
     return (
       <div className={`prose prose-sm ${darkMode ? 'prose-invert' : 'prose-gray'} max-w-none leading-relaxed`}>
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          components={{
-            a: ({ href, children, ...props }) => (
-              <a href={href} target="_blank" rel="noreferrer" className="text-blue-500 hover:text-blue-600 underline" {...props}>
-                {children}
-              </a>
-            ),
-            img: ({ src, alt, ...props }) => (
-              <img src={src} alt={alt || ''} loading="lazy" className="rounded-lg max-w-full" {...props} />
-            ),
-            code: ({ children, className, ...props }) => {
-              const isInline = !className
-              if (isInline) {
-                return <code className="px-1 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-sm font-mono" {...props}>{children}</code>
-              }
-              return <code className={className} {...props}>{children}</code>
-            },
-            pre: ({ children, ...props }) => (
-              <pre className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4 overflow-x-auto text-sm" {...props}>
-                {children}
-              </pre>
-            ),
-          }}
-        >
-          {displayContent}
-        </ReactMarkdown>
+        {paras.map((para, idx) => {
+          const checked = selectedParagraphIndices.has(idx)
+          const Icon = checked ? CheckSquare : Square
+          return (
+            <div key={idx} data-para-index={idx} className={`group flex gap-2 items-start ${checked ? 'bg-green-50/40 dark:bg-green-900/10 rounded px-2 -mx-2 py-1' : ''}`}>
+              <button
+                onClick={(e) => { e.stopPropagation(); toggleSelectedParagraph(idx) }}
+                className="flex-shrink-0 mt-1 opacity-30 group-hover:opacity-100 transition-opacity"
+                title="选中此段落用于摘要"
+              >
+                <Icon size={14} className={checked ? 'text-green-500' : 'text-gray-400'} />
+              </button>
+              <div className="flex-1 min-w-0">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{para}</ReactMarkdown>
+              </div>
+            </div>
+          )
+        })}
       </div>
     )
   }
@@ -1379,12 +1541,138 @@ export default function ReaderView() {
                 />
               )}
 
-              {/* 无翻译且不在翻译中时显示原文（reader 或 original 模式） */}
-              {!isTranslating && (
-                <div className={`rounded-lg p-6 ${containerBg}`}>
-                  {readerMode === 'reader' ? renderMarkdownContent() : renderOriginalContent()}
+              {/* 原文内容区域（始终渲染，选区检测依赖 ref） */}
+              {/* 选择段落摘要工具栏 */}
+              {showSelectSummaryBar && (
+                <div className="sticky top-0 z-20 mb-4 p-3 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border border-green-200 dark:border-green-700 rounded-lg shadow-sm flex items-center gap-3 flex-wrap">
+                  <span className="text-xs font-semibold text-green-700 dark:text-green-300">
+                    📑 {selectedParagraphIndices.size} 段选中
+                  </span>
+                  <select
+                    value={selectSummaryLang}
+                    onChange={e => setSelectSummaryLang(e.target.value)}
+                    className="text-xs px-2 py-1 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded"
+                  >
+                    {LANG_OPTIONS.map(l => (
+                      <option key={l.value} value={l.value}>{l.label}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={selectSummaryDetail}
+                    onChange={e => setSelectSummaryDetail(e.target.value as 'compact' | 'medium' | 'detailed')}
+                    className="text-xs px-2 py-1 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded"
+                  >
+                    <option value="compact">{t('reader.compact')}</option>
+                    <option value="medium">{t('reader.medium')}</option>
+                    <option value="detailed">{t('reader.detailed')}</option>
+                  </select>
+                  <button
+                    onClick={handleSelectiveSummarize}
+                    disabled={selectionSummaryLoading}
+                    className="flex items-center gap-1 px-3 py-1 text-xs font-medium text-white bg-green-500 hover:bg-green-600 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    {selectionSummaryLoading ? <Loader size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                    生成摘要
+                  </button>
+                  {selectionSummary && (
+                    <button
+                      onClick={handleExportSelectSummary}
+                      className="flex items-center gap-1 px-3 py-1 text-xs font-medium text-green-600 bg-green-50 hover:bg-green-100 dark:text-green-400 dark:bg-green-900/30 dark:hover:bg-green-900/50 rounded-lg transition-colors"
+                    >
+                      <Download size={12} />
+                      导出 MD
+                    </button>
+                  )}
+                  <button
+                    onClick={handleClearSelectSummary}
+                    className="flex items-center gap-1 px-2 py-1 text-xs text-gray-400 hover:text-red-500 rounded-lg transition-colors"
+                  >
+                    <X size={12} />
+                    清除
+                  </button>
                 </div>
               )}
+
+              {/* 原文内容区域 */}
+              <div 
+                ref={readingAreaRef}
+                className={`rounded-lg p-6 ${containerBg}`}
+              >
+                {isTranslating 
+                  ? ( readerMode === 'reader' 
+                      ? <div className="space-y-4">{renderParagraphsWithCheckboxes()}</div>
+                      : renderOriginalContent()
+                    )
+                  : (readerMode === 'reader' ? renderParagraphsWithCheckboxes() : renderOriginalContent())
+                }
+              </div>
+
+              {/* 选择段落摘要结果 (Portal 到选中段落后) */}
+              {(selectionSummary || selectionSummaryLoading) && selectionSummaryAnchorRef.current && document.body.contains(selectionSummaryAnchorRef.current) && createPortal(
+                <div className="my-4 border-2 border-green-300 dark:border-green-600 rounded-lg overflow-hidden">
+                  <div className="bg-green-50 dark:bg-green-900/20 px-3 py-1.5 flex items-center justify-between border-b border-green-200 dark:border-green-700">
+                    <div className="flex items-center gap-1.5">
+                      <Sparkles size={12} className="text-green-500" />
+                      <span className="text-[11px] font-medium text-green-600 dark:text-green-400">
+                        选中摘要 · {LANG_LABEL_MAP[selectSummaryLang] || selectSummaryLang} · {selectSummaryDetail === 'compact' ? t('reader.compact') : selectSummaryDetail === 'detailed' ? t('reader.detailed') : t('reader.medium')}
+                      </span>
+                      {selectionSummaryLoading && <Loader size={10} className="animate-spin text-green-400 ml-1" />}
+                    </div>
+                    <button onClick={handleClearSelectSummary}
+                      className="p-0.5 rounded text-green-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
+                      <X size={12} />
+                    </button>
+                  </div>
+                  <div className="bg-green-50/30 dark:bg-green-900/5 px-4 py-3">
+                    {selectionSummary ? (
+                      <div className={`prose prose-sm ${proseCls} max-w-none leading-relaxed text-sm`}>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectionSummary}</ReactMarkdown>
+                      </div>
+                    ) : (
+                      <div className="text-xs text-green-500 dark:text-green-400 py-1">{t('reader.translating')}</div>
+                    )}
+                  </div>
+                </div>,
+                selectionSummaryAnchorRef.current
+              )}
+
+              {/* ===== 选择文本翻译结果（Portal 到选区末尾锚点） ===== */}
+              {(selectionTranslation || selectionTranslateLoading)
+                && selectionResultAnchorRef.current
+                && document.body.contains(selectionResultAnchorRef.current)
+                && createPortal(
+                  <div className="mt-4 border-2 border-cyan-300 dark:border-cyan-600 rounded-lg overflow-hidden">
+                    <div className="bg-cyan-50 dark:bg-cyan-900/20 px-3 py-1.5 flex items-center justify-between border-b border-cyan-200 dark:border-cyan-700">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs">🔍</span>
+                        <span className="text-[11px] font-medium text-cyan-600 dark:text-cyan-400">
+                          选中翻译 {LANG_LABEL_MAP[selectionTargetLangRef.current] || selectionTargetLangRef.current}
+                        </span>
+                        {selectionTranslateLoading && <Loader size={10} className="animate-spin text-cyan-400 ml-1" />}
+                      </div>
+                      <button
+                        onClick={handleDismissSelectionTranslate}
+                        className="p-0.5 rounded text-cyan-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                    <div className="bg-cyan-50/30 dark:bg-cyan-900/5 px-4 py-3">
+                      {selectionTranslation ? (
+                        <div className={`prose prose-sm ${proseCls} max-w-none leading-relaxed text-sm`}>
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {selectionTranslation}
+                          </ReactMarkdown>
+                        </div>
+                      ) : (
+                        <div className="text-xs text-cyan-500 dark:text-cyan-400 py-1">
+                          {t('reader.translating')}
+                        </div>
+                      )}
+                    </div>
+                  </div>,
+                  selectionResultAnchorRef.current
+                )}
             </div>
           )}
         </div>

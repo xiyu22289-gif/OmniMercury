@@ -1,0 +1,28 @@
+
+> summer-rss-reader@3.0.0 build
+> electron-vite build
+
+[36mvite v5.4.21 [32mbuilding SSR bundle for production...[36m[39m
+transforming...
+[32m✓[39m 11 modules transformed.
+rendering chunks...
+[1m[33m[plugin:vite:reporter][39m[22m [33m[plugin vite:reporter] 
+(!) c:/Users/wo_sh/OmniMercury/src/main/db.ts is dynamically imported by c:/Users/wo_sh/OmniMercury/src/main/ipcHandlers.ts, c:/Users/wo_sh/OmniMercury/src/main/ipcHandlers.ts, c:/Users/wo_sh/OmniMercury/src/main/ipcHandlers.ts but also statically imported by c:/Users/wo_sh/OmniMercury/src/main/contentService.ts, c:/Users/wo_sh/OmniMercury/src/main/feedService.ts, c:/Users/wo_sh/OmniMercury/src/main/ipcHandlers.ts, c:/Users/wo_sh/OmniMercury/src/main/llmService.ts, c:/Users/wo_sh/OmniMercury/src/main/notesExportService.ts, c:/Users/wo_sh/OmniMercury/src/main/tagService.ts, c:\Users\wo_sh\OmniMercury\src\main\main.ts, dynamic import will not move module into another chunk.
+[39m
+[2mdist/main/[22m[36mchunks/notesExportService-DHhR_8JV.js  [39m[1m[2m 2.80 kB[22m[1m[22m
+[2mdist/main/[22m[36mmain.js                                [39m[1m[2m73.23 kB[22m[1m[22m
+[32m✓ built in 359ms[39m
+[36mvite v5.4.21 [32mbuilding SSR bundle for production...[36m[39m
+transforming...
+[32m✓[39m 1 modules transformed.
+rendering chunks...
+[2mdist/preload/[22m[36mindex.js  [39m[1m[2m5.35 kB[22m[1m[22m
+[32m✓ built in 9ms[39m
+[36mvite v5.4.21 [32mbuilding for production...[36m[39m
+transforming...
+[32m✓[39m 1814 modules transformed.
+rendering chunks...
+[2m../../dist/renderer/[22m[32mindex.html                 [39m[1m[2m  0.48 kB[22m[1m[22m
+[2m../../dist/renderer/[22m[35massets/index-BYxsrZHv.css  [39m[1m[2m 50.78 kB[22m[1m[22m
+[2m../../dist/renderer/[22m[36massets/index-CuIgD31R.js   [39m[1m[33m908.21 kB[39m[22m
+[32m✓ built in 2.16s[39m

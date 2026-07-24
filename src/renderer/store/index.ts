@@ -46,6 +46,12 @@ interface AppState {
   /** 翻译目标语言 */
   translateTargetLang: string
 
+  // ---- 选择文本翻译 ----
+  selectionOriginal: string
+  selectionTranslation: string
+  selectionTranslateLoading: boolean
+  selectionTargetLang: string
+
   // ---- 笔记 ----
   noteContent: string
   noteLoading: boolean
@@ -118,6 +124,22 @@ interface AppState {
   loadLlmConfig: () => Promise<void>
   loadTokenStats: () => Promise<void>
 
+  // ---- 选择文本翻译操作 ----
+  appendSelectionDelta: (delta: string) => void
+  resetSelectionTranslation: () => void
+  setSelectionTranslateLoading: (loading: boolean) => void
+  setSelectionTargetLang: (lang: string) => void
+  setSelectionOriginal: (text: string) => void
+
+  // ---- 选择段落摘要 ----
+  selectedParagraphIndices: Set<number>
+  selectionSummary: string
+  selectionSummaryLoading: boolean
+  toggleSelectedParagraph: (index: number) => void
+  clearSelectedParagraphs: () => void
+  setSelectionSummary: (text: string) => void
+  setSelectionSummaryLoading: (loading: boolean) => void
+
   // ---- M5 标签操作 ----
   fetchTags: () => Promise<void>
   fetchArticleTags: (articleId: number) => Promise<void>
@@ -154,12 +176,10 @@ export const useStore = create<AppState>((set, get) => {
           if (cached && Array.isArray(cached) && cached.length > 0) {
             const currentContent = get().articleContent || ''
             if (!currentContent) return
-            // ★ 使用共享分段器计算段落数，保证与翻译时一致
             const paras = splitIntoParagraphs(currentContent)
             if (cached.length === paras.length) {
               set({ paragraphTranslations: cached })
             }
-            // 段落数不匹配：忽略旧缓存，不恢复
           }
         }
       } catch { /* JSON 解析失败则忽略，不阻塞正常阅读 */ }
@@ -228,6 +248,12 @@ export const useStore = create<AppState>((set, get) => {
     displayMode: 'topBottom',
     translateTargetLang: 'Chinese',
 
+    // ---- 选择文本翻译默认值 ----
+    selectionOriginal: '',
+    selectionTranslation: '',
+    selectionTranslateLoading: false,
+    selectionTargetLang: 'Chinese',
+
     // ---- RSS 操作 ----
     setFeeds: (feeds) => set({ feeds }),
     setArticles: (articles) => set({ articles }),
@@ -245,15 +271,11 @@ export const useStore = create<AppState>((set, get) => {
       } finally {
         set({ isLoading: false })
       }
-      // 刷新标签计数
       get().fetchTagArticleCounts()
     },
     selectArticle: async (articleId, feedId) => {
       const state = get()
 
-      // 如果提供了 feedId 且与当前选中的 feed 不同，需要先切换 feed
-      // 关键：selectedArticleId 必须和 articles 同时更新，避免 React 渲染时
-      //       ReaderView 的 articles.find() 找不到 selectedArticle 而显示空白。
       if (feedId !== undefined && feedId !== state.selectedFeedId) {
         set({
           selectedFeedId: feedId,
@@ -264,30 +286,27 @@ export const useStore = create<AppState>((set, get) => {
           summarizingArticleId: null,
           translateStream: '',
           translateMode: 'original',
-          paragraphTranslations: []
+          paragraphTranslations: [],
+          selectionTranslation: '',
+          selectionTranslateLoading: false,
         })
 
-        // 先加载新 feed 的文章列表
         try {
           const feedResponse = await window.api.getArticles(feedId)
           if (feedResponse.payload.error === 0) {
             const newArticles = feedResponse.payload.articles || []
-            // 同时设置 articles 和 selectedArticleId，保证 ReaderView 能找到元数据
             set({
               articles: newArticles,
               selectedArticleId: articleId
             })
-            // 恢复 AI 缓存（摘要 + 翻译）
             restoreAiCache(newArticles, articleId)
           } else {
-            // 加载失败也设上 selectedArticleId（ReaderView 会显示无文章但不会卡空白）
             set({ selectedArticleId: articleId })
           }
         } catch {
           set({ selectedArticleId: articleId })
         }
       } else {
-        // 同 feed 内点击：直接设 articleId 即可，articles 已有数据
         set({
           selectedArticleId: articleId,
           isLoading: true,
@@ -297,13 +316,13 @@ export const useStore = create<AppState>((set, get) => {
           summarizingArticleId: null,
           translateStream: '',
           translateMode: 'original',
-          paragraphTranslations: []
+          paragraphTranslations: [],
+          selectionTranslation: '',
+          selectionTranslateLoading: false,
         })
-        // 恢复 AI 缓存
         restoreAiCache(state.articles, articleId)
       }
 
-      // 加载文章正文
       try {
         const response = await window.api.getArticleContent(articleId)
         if (response.payload.error === 0) {
@@ -311,16 +330,12 @@ export const useStore = create<AppState>((set, get) => {
             articleContent: response.payload.content?.content || '',
             isLoading: false
           })
-          // ★ 修复：articleContent 加载完成后重新尝试恢复 AI 缓存
           const prev = get()
           restoreAiCache(prev.articles, articleId)
           return
         }
-      } catch {
-        // 网络异常，尝试离线缓存
-      }
+      } catch { /* 离线回退 */ }
 
-      // 离线回退：从本地 DB 获取已缓存内容
       try {
         const cachedResponse = await window.api.getCachedArticleContent(articleId)
         if (cachedResponse.payload.error === 0 && cachedResponse.payload.content?.content) {
@@ -332,17 +347,13 @@ export const useStore = create<AppState>((set, get) => {
           restoreAiCache(prev.articles, articleId)
           return
         }
-      } catch {
-        // 离线缓存也失败，保持 articleContent 为 null
-      }
+      } catch { /* 离线缓存也失败 */ }
 
       set({ isLoading: false })
     },
-    /** 从搜索结果直接跳转到文章 — 无额外 API 请求，零竞态 */
     jumpToArticle: async (article) => {
       const state = get()
 
-      // 1) 将目标文章放入 articles 数组（如已有则替换，避免重复）
       const existing = state.articles.find((a) => a.id === article.id)
       const mergedArticles = existing
         ? state.articles.map((a) => (a.id === article.id ? article : a))
@@ -359,12 +370,12 @@ export const useStore = create<AppState>((set, get) => {
         summarizingArticleId: null,
         translateStream: '',
         translateMode: 'original',
-        paragraphTranslations: []
+        paragraphTranslations: [],
+        selectionTranslation: '',
+        selectionTranslateLoading: false,
       })
-      // 恢复 AI 缓存
       restoreAiCache([article], article.id)
 
-      // 2) 加载正文
       try {
         const response = await window.api.getArticleContent(article.id)
         if (response.payload.error === 0) {
@@ -372,16 +383,12 @@ export const useStore = create<AppState>((set, get) => {
             articleContent: response.payload.content?.content || '',
             isLoading: false
           })
-          // ★ 修复：articleContent 加载完成后重新尝试恢复 AI 缓存
           const prev = get()
           restoreAiCache(prev.articles, article.id)
           return
         }
-      } catch {
-        // 网络异常，尝试离线缓存
-      }
+      } catch { /* 离线回退 */ }
 
-      // 3) 离线回退
       try {
         const cachedResponse = await window.api.getCachedArticleContent(article.id)
         if (cachedResponse.payload.error === 0 && cachedResponse.payload.content?.content) {
@@ -393,9 +400,7 @@ export const useStore = create<AppState>((set, get) => {
           restoreAiCache(prev.articles, article.id)
           return
         }
-      } catch {
-        // 离线缓存也失败
-      }
+      } catch { /* 离线缓存也失败 */ }
 
       set({ isLoading: false })
     },
@@ -453,24 +458,42 @@ export const useStore = create<AppState>((set, get) => {
       try {
         const config = await window.api.getLlmConfig()
         set({ llmConfig: config })
-      } catch {
-        // 非 Electron 环境（浏览器 mock），忽略
-      }
+      } catch { /* 非 Electron 环境 */ }
     },
     loadTokenStats: async () => {
       set({ tokenStatsLoading: true })
       try {
         const result = await window.api.getTokenStats()
         if (result.error === 0) { set({ tokenStats: result.stats || [] }) }
-      } catch {
-        // 忽略加载失败
-      } finally {
+      } catch { /* 忽略加载失败 */ }
+      finally {
         set({ tokenStatsLoading: false })
       }
     },
 
-    // ---- M5 标签操作 ----
+    // ---- 选择文本翻译操作 ----
+    appendSelectionDelta: (delta) => set((state) => ({ selectionTranslation: state.selectionTranslation + delta })),
+    resetSelectionTranslation: () => set({ selectionTranslation: '', selectionOriginal: '' }),
+    setSelectionTranslateLoading: (loading) => set({ selectionTranslateLoading: loading }),
+    setSelectionTargetLang: (lang) => set({ selectionTargetLang: lang }),
+    setSelectionOriginal: (text) => set({ selectionOriginal: text }),
 
+    // ---- 选择段落摘要 ----
+    selectedParagraphIndices: new Set<number>(),
+    selectionSummary: '',
+    selectionSummaryLoading: false,
+    toggleSelectedParagraph: (index) =>
+      set(state => {
+        const next = new Set(state.selectedParagraphIndices)
+        if (next.has(index)) next.delete(index)
+        else next.add(index)
+        return { selectedParagraphIndices: next }
+      }),
+    clearSelectedParagraphs: () => set({ selectedParagraphIndices: new Set() }),
+    setSelectionSummary: (summary) => set({ selectionSummary: summary }),
+    setSelectionSummaryLoading: (loading) => set({ selectionSummaryLoading: loading }),
+
+    // ---- M5 标签操作 ----
     fetchTags: async () => {
       try {
         const res = await window.api.getTags()
@@ -482,7 +505,6 @@ export const useStore = create<AppState>((set, get) => {
       } catch (err) {
         console.error('[store] fetchTags 异常：', err)
       }
-      // 同时刷新标签文章计数
       get().fetchTagArticleCounts()
     },
 
@@ -502,10 +524,8 @@ export const useStore = create<AppState>((set, get) => {
     },
 
     toggleArticleTag: async (articleId, tagId) => {
-      console.log('[store] toggleArticleTag — articleId:', articleId, 'tagId:', tagId)
       try {
         const res = await window.api.toggleArticleTag(articleId, tagId)
-        console.log('[store] toggleArticleTag 响应:', res)
         if (res.success && res.data) {
           const { added } = res.data
           set(state => {
@@ -524,7 +544,6 @@ export const useStore = create<AppState>((set, get) => {
             }
             return { articleTagsMap: { ...state.articleTagsMap, [articleId]: updated } }
           })
-          // 刷新侧边栏标签列表（文章计数等可能需要更新）
           get().fetchTags()
         } else {
           console.error('[store] toggleArticleTag 失败：', res.error)
@@ -535,12 +554,10 @@ export const useStore = create<AppState>((set, get) => {
     },
 
     batchAddTagsToArticle: async (articleId, tagIds) => {
-      console.log('[store] batchAddTagsToArticle — articleId:', articleId, 'tagIds:', tagIds)
       try {
         const res = await window.api.batchAddTagsToArticle(articleId, tagIds)
         if (res.success) {
           await get().fetchArticleTags(articleId)
-          // 刷新侧边栏标签列表（可能新增了标签）
           await get().fetchTags()
         } else {
           console.error('[store] batchAddTagsToArticle 失败：', res.error)
@@ -552,10 +569,8 @@ export const useStore = create<AppState>((set, get) => {
 
     setFilterTag: async (tagId) => {
       const prev = get().currentFilterTagId
-      // 点击同一标签 → 清除筛选
       if (tagId !== null && tagId === prev) {
         set({ currentFilterTagId: null })
-        // 恢复当前 feed 的文章列表
         const feedId = get().selectedFeedId
         if (feedId !== null) {
           await get().selectFeed(feedId)
@@ -566,7 +581,6 @@ export const useStore = create<AppState>((set, get) => {
       if (tagId !== null) {
         await get().loadArticlesByTag(tagId)
       } else if (get().selectedFeedId !== null) {
-        // 清除筛选 → 恢复当前 feed
         await get().selectFeed(get().selectedFeedId!)
       }
     },
@@ -595,7 +609,6 @@ export const useStore = create<AppState>((set, get) => {
       try {
         const res = await window.api.createTag(name, color)
         if (res.success) {
-          // 刷新标签列表
           await get().fetchTags()
         } else {
           console.error('[store] createTag 失败：', res.error)
@@ -610,7 +623,6 @@ export const useStore = create<AppState>((set, get) => {
         const res = await window.api.updateTag(id, name, color)
         if (res.success) {
           await get().fetchTags()
-          // 同时刷新 articleTagsMap 中引用该标签的缓存
           set(state => {
             const newMap: Record<number, Tag[]> = {}
             for (const [articleId, tagList] of Object.entries(state.articleTagsMap)) {
@@ -632,9 +644,7 @@ export const useStore = create<AppState>((set, get) => {
       try {
         const res = await window.api.deleteTag(id)
         if (res.success) {
-          // 刷新标签列表
           await get().fetchTags()
-          // 清理 articleTagsMap 中包含该标签的缓存
           set(state => {
             const newMap: Record<number, Tag[]> = {}
             for (const [articleId, tagList] of Object.entries(state.articleTagsMap)) {
