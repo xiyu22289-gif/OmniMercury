@@ -335,14 +335,20 @@ export default function Sidebar() {
       <div className="border-t border-gray-200 dark:border-gray-700 px-3 py-2">
         <button
           onClick={() => {
-            const next = i18n.language === 'zh' ? 'en' : 'zh'
+            const langs = ['zh', 'zh-TW', 'en']
+            const idx = langs.indexOf(i18n.language)
+            const next = langs[(idx + 1) % 3]
             i18n.changeLanguage(next)
           }}
           className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
         >
           <Globe size={13} />
-          <span className="flex-1 text-left">{i18n.language === 'zh' ? '中文' : 'English'}</span>
-          <span className="text-[10px] opacity-50">{i18n.language === 'zh' ? 'EN' : '中'}</span>
+          <span className="flex-1 text-left">
+            {i18n.language === 'zh-TW' ? '中文繁體' : i18n.language === 'zh' ? '中文简体' : 'English'}
+          </span>
+          <span className="text-[10px] opacity-50">
+            {i18n.language === 'zh' ? '简' : i18n.language === 'zh-TW' ? '繁' : 'EN'}
+          </span>
         </button>
       </div>
 

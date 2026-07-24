@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Bold, Italic, Strikethrough, List, ListOrdered,
   X, Download, Check, Type, ChevronDown,
@@ -29,6 +30,8 @@ export default function NotesPanel({ darkMode }: NotesPanelProps) {
     noteLastSaved,
     setError,
   } = useStore()
+
+  const { t } = useTranslation()
 
   const editorRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -178,10 +181,10 @@ export default function NotesPanel({ darkMode }: NotesPanelProps) {
         <div className="flex items-center gap-1.5">
           <PenLine size={14} className="text-amber-500" />
           <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 uppercase tracking-wider">
-            笔记
+            {t('reader.notesTitle')}
           </span>
           {saving && (
-            <span className="text-[10px] text-gray-400 animate-pulse">保存中…</span>
+            <span className="text-[10px] text-gray-400 animate-pulse">{t('reader.saving')}</span>
           )}
           {noteLastSaved && !saving && (
             <span className="text-[10px] text-gray-400">
@@ -193,37 +196,37 @@ export default function NotesPanel({ darkMode }: NotesPanelProps) {
           <button
             onClick={handleExport}
             className={`flex items-center gap-1 px-1.5 py-0.5 text-xs rounded ${textMuted} ${btnHover} transition-colors`}
-            title="导出所有笔记为 Markdown"
+            title={t('reader.exportNotesTooltip')}
           >
             <Download size={12} />
-            导出
+            {t('reader.exportNotes')}
           </button>
           <button
             onClick={handleClose}
             className={`flex items-center gap-1 px-1.5 py-0.5 text-xs rounded ${textMuted} hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors`}
           >
             <X size={12} />
-            关闭
+            {t('reader.close')}
           </button>
         </div>
       </div>
 
       {/* 格式工具栏 */}
       <div className={`flex items-center gap-0.5 px-2 py-1.5 border-b ${border} flex-wrap`}>
-        <button onClick={() => execCmd('bold')} className={`p-1 rounded ${btnHover} transition-colors ${textMain}`} title="加粗 (Ctrl+B)">
+        <button onClick={() => execCmd('bold')} className={`p-1 rounded ${btnHover} transition-colors ${textMain}`} title={t('reader.bold')}>
           <Bold size={14} />
         </button>
-        <button onClick={() => execCmd('italic')} className={`p-1 rounded ${btnHover} transition-colors ${textMain}`} title="斜体 (Ctrl+I)">
+        <button onClick={() => execCmd('italic')} className={`p-1 rounded ${btnHover} transition-colors ${textMain}`} title={t('reader.italic')}>
           <Italic size={14} />
         </button>
-        <button onClick={() => execCmd('strikeThrough')} className={`p-1 rounded ${btnHover} transition-colors ${textMain}`} title="删除线">
+        <button onClick={() => execCmd('strikeThrough')} className={`p-1 rounded ${btnHover} transition-colors ${textMain}`} title={t('reader.strikethrough')}>
           <Strikethrough size={14} />
         </button>
         <div className="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1" />
-        <button onClick={() => execCmd('insertUnorderedList')} className={`p-1 rounded ${btnHover} transition-colors ${textMain}`} title="无序列表">
+        <button onClick={() => execCmd('insertUnorderedList')} className={`p-1 rounded ${btnHover} transition-colors ${textMain}`} title={t('reader.unorderedList')}>
           <List size={14} />
         </button>
-        <button onClick={() => execCmd('insertOrderedList')} className={`p-1 rounded ${btnHover} transition-colors ${textMain}`} title="有序列表">
+        <button onClick={() => execCmd('insertOrderedList')} className={`p-1 rounded ${btnHover} transition-colors ${textMain}`} title={t('reader.orderedList')}>
           <ListOrdered size={14} />
         </button>
         <div className="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1" />
@@ -233,10 +236,10 @@ export default function NotesPanel({ darkMode }: NotesPanelProps) {
           <button
             onClick={() => { setShowFontPicker(!showFontPicker); setShowSizePicker(false) }}
             className={`flex items-center gap-1 px-1.5 py-1 text-xs rounded ${textMuted} ${btnHover} transition-colors`}
-            title="选择字体"
+            title={t('reader.selectFont')}
           >
             <Type size={12} />
-            {FONT_OPTIONS.find(f => f.value === currentFont)?.label ?? '字体'}
+            {FONT_OPTIONS.find(f => f.value === currentFont)?.label ?? t('reader.font')}
             <ChevronDown size={8} />
           </button>
           {showFontPicker && (
@@ -303,7 +306,7 @@ export default function NotesPanel({ darkMode }: NotesPanelProps) {
           fontSize: currentSize + 'px',
           minHeight: '100px',
         }}
-        data-placeholder="在此输入笔记…"
+        data-placeholder={t('reader.inputPlaceholder')}
         suppressContentEditableWarning
       />
 

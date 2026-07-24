@@ -155,37 +155,6 @@ interface AppState {
 }
 
 export const useStore = create<AppState>((set, get) => {
-  /** 从文章元数据中恢复 AI 缓存（翻译 + 摘要），避免重复调用 LLM。 */
-  const restoreAiCache = (articles: Article[], articleId: number) => {
-    const a = articles.find(x => x.id === articleId)
-    if (!a) return
-    if (a.translations) {
-      try {
-        const m: Record<string, unknown> = JSON.parse(a.translations)
-
-        // 恢复 AI 摘要缓存（_summary 键独立于翻译版本号）
-        const summaryCache = m._summary as { text: string; lang: string } | undefined
-        if (summaryCache && summaryCache.text) {
-          set({ summaryStream: summaryCache.text, summarizingArticleId: articleId })
-        }
-
-        // 恢复段落翻译缓存（需要版本号匹配）
-        if (m._v === 2) {
-          const lang = get().translateTargetLang
-          const cached = m[lang]
-          if (cached && Array.isArray(cached) && cached.length > 0) {
-            const currentContent = get().articleContent || ''
-            if (!currentContent) return
-            const paras = splitIntoParagraphs(currentContent)
-            if (cached.length === paras.length) {
-              set({ paragraphTranslations: cached })
-            }
-          }
-        }
-      } catch { /* JSON 解析失败则忽略，不阻塞正常阅读 */ }
-    }
-  }
-
   return {
     // ---- 数据默认值 ----
     feeds: [],
@@ -299,7 +268,6 @@ export const useStore = create<AppState>((set, get) => {
               articles: newArticles,
               selectedArticleId: articleId
             })
-            restoreAiCache(newArticles, articleId)
           } else {
             set({ selectedArticleId: articleId })
           }
@@ -320,7 +288,6 @@ export const useStore = create<AppState>((set, get) => {
           selectionTranslation: '',
           selectionTranslateLoading: false,
         })
-        restoreAiCache(state.articles, articleId)
       }
 
       try {
@@ -330,8 +297,6 @@ export const useStore = create<AppState>((set, get) => {
             articleContent: response.payload.content?.content || '',
             isLoading: false
           })
-          const prev = get()
-          restoreAiCache(prev.articles, articleId)
           return
         }
       } catch { /* 离线回退 */ }
@@ -343,8 +308,6 @@ export const useStore = create<AppState>((set, get) => {
             articleContent: '[离线模式] ' + cachedResponse.payload.content.content,
             isLoading: false
           })
-          const prev = get()
-          restoreAiCache(prev.articles, articleId)
           return
         }
       } catch { /* 离线缓存也失败 */ }
@@ -374,7 +337,6 @@ export const useStore = create<AppState>((set, get) => {
         selectionTranslation: '',
         selectionTranslateLoading: false,
       })
-      restoreAiCache([article], article.id)
 
       try {
         const response = await window.api.getArticleContent(article.id)
@@ -383,8 +345,6 @@ export const useStore = create<AppState>((set, get) => {
             articleContent: response.payload.content?.content || '',
             isLoading: false
           })
-          const prev = get()
-          restoreAiCache(prev.articles, article.id)
           return
         }
       } catch { /* 离线回退 */ }
@@ -396,8 +356,6 @@ export const useStore = create<AppState>((set, get) => {
             articleContent: '[离线模式] ' + cachedResponse.payload.content.content,
             isLoading: false
           })
-          const prev = get()
-          restoreAiCache(prev.articles, article.id)
           return
         }
       } catch { /* 离线缓存也失败 */ }

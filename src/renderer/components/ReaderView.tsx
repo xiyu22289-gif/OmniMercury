@@ -383,24 +383,35 @@ export default function ReaderView() {
     return () => document.removeEventListener('mouseup', onMouseUp)
   }, [])
 
-  /** 触发翻译 */
+  /** 触发翻译 — surroundContents 包裹高亮（不破坏 DOM 结构）+ 锚点 */
   const triggerSelectiveTranslate = useCallback((targetLang: string) => {
     const currentId = selectedArticleIdRef.current
     const text = selectedTextRef.current.trim()
     if (!currentId || !text || selectionTranslateLoading) return
     setShowFloatBtn(false)
     selectedTextRef.current = ''
-    // 插入锚点
     const sel = window.getSelection()
     if (sel && !sel.isCollapsed) {
       try {
         const r = sel.getRangeAt(0)
+        const mark = document.createElement('mark')
+        mark.style.cssText = 'background:#bfdbfe;color:inherit;border-radius:2px;'
+        mark.className = '__selection_highlight__'
+        // surroundContents 包裹选区（不破坏 DOM 树结构）
+        try {
+          r.surroundContents(mark)
+        } catch {
+          // 降级到 extractContents
+          const contents = r.extractContents()
+          mark.appendChild(contents)
+          r.insertNode(mark)
+        }
+        // 锚点插入 mark 之后
         const anchor = document.createElement('div')
         anchor.id = '__selection_result_anchor__'
-        r.collapse(false)
-        r.insertNode(anchor)
+        mark.parentNode?.insertBefore(anchor, mark.nextSibling)
         selectionResultAnchorRef.current = anchor
-      } catch { /* ignore */ }
+      } catch { /* 跨节点选区失败则静默 */ }
     }
     selectionTargetLangRef.current = targetLang
     setSelectionOriginal(text)
@@ -413,6 +424,21 @@ export default function ReaderView() {
   }, [selectionTranslateLoading])
 
   const handleDismissSelectionTranslate = useCallback(() => {
+    // 移除高亮 mark 标签
+    document.querySelectorAll('.__selection_highlight__').forEach(mark => {
+      const parent = mark.parentNode
+      if (parent) {
+        while (mark.firstChild) {
+          parent.insertBefore(mark.firstChild, mark)
+        }
+        parent.removeChild(mark)
+      }
+    })
+    // 移除锚点 DOM
+    if (selectionResultAnchorRef.current) {
+      selectionResultAnchorRef.current.remove()
+      selectionResultAnchorRef.current = null
+    }
     resetSelectionTranslation()
     setSelectionTranslateLoading(false)
   }, [resetSelectionTranslation, setSelectionTranslateLoading])
@@ -539,6 +565,14 @@ export default function ReaderView() {
     clearSelectedParagraphs()
     setSelectionSummary('')
     setSelectionSummaryLoading(false)
+    // 清除 DOM 残留
+    document.querySelectorAll('.__selection_highlight__').forEach(mark => {
+      const p = mark.parentNode
+      if (p) { while (mark.firstChild) p.insertBefore(mark.firstChild, mark); p.removeChild(mark) }
+    })
+    document.querySelectorAll('#__selection_result_anchor__, #__selection_summary_anchor__').forEach(el => el.remove())
+    selectionResultAnchorRef.current = null
+    selectionSummaryAnchorRef.current = null
     // 拉取当前文章的标签
     if (selectedArticleId) {
       fetchArticleTags(selectedArticleId)
@@ -844,7 +878,7 @@ export default function ReaderView() {
               <button
                 onClick={(e) => { e.stopPropagation(); toggleSelectedParagraph(idx) }}
                 className="flex-shrink-0 mt-1 opacity-30 group-hover:opacity-100 transition-opacity"
-                title="选中此段落用于摘要"
+                title={t('reader.selectiveTranslateBtn')}
               >
                 <Icon size={14} className={checked ? 'text-green-500' : 'text-gray-400'} />
               </button>
@@ -1322,10 +1356,10 @@ export default function ReaderView() {
                   ? 'bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400'
                   : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
                 }`}
-              title="笔记"
+              title={t('reader.notes')}
             >
               <PenLine size={13} />
-              笔记
+              {t('reader.notes')}
             </button>
 
             <div className="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1" />
@@ -1546,7 +1580,7 @@ export default function ReaderView() {
               {showSelectSummaryBar && (
                 <div className="sticky top-0 z-20 mb-4 p-3 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border border-green-200 dark:border-green-700 rounded-lg shadow-sm flex items-center gap-3 flex-wrap">
                   <span className="text-xs font-semibold text-green-700 dark:text-green-300">
-                    📑 {selectedParagraphIndices.size} 段选中
+                    📑 {t('reader.selectedParas', { n: selectedParagraphIndices.size })}
                   </span>
                   <select
                     value={selectSummaryLang}
@@ -1572,7 +1606,7 @@ export default function ReaderView() {
                     className="flex items-center gap-1 px-3 py-1 text-xs font-medium text-white bg-green-500 hover:bg-green-600 rounded-lg transition-colors disabled:opacity-50"
                   >
                     {selectionSummaryLoading ? <Loader size={12} className="animate-spin" /> : <Sparkles size={12} />}
-                    生成摘要
+                    {t('reader.generateSummary')}
                   </button>
                   {selectionSummary && (
                     <button
@@ -1580,7 +1614,7 @@ export default function ReaderView() {
                       className="flex items-center gap-1 px-3 py-1 text-xs font-medium text-green-600 bg-green-50 hover:bg-green-100 dark:text-green-400 dark:bg-green-900/30 dark:hover:bg-green-900/50 rounded-lg transition-colors"
                     >
                       <Download size={12} />
-                      导出 MD
+                      {t('reader.exportMd')}
                     </button>
                   )}
                   <button
@@ -1588,7 +1622,7 @@ export default function ReaderView() {
                     className="flex items-center gap-1 px-2 py-1 text-xs text-gray-400 hover:text-red-500 rounded-lg transition-colors"
                   >
                     <X size={12} />
-                    清除
+                    {t('reader.clearSummary')}
                   </button>
                 </div>
               )}
@@ -1614,7 +1648,7 @@ export default function ReaderView() {
                     <div className="flex items-center gap-1.5">
                       <Sparkles size={12} className="text-green-500" />
                       <span className="text-[11px] font-medium text-green-600 dark:text-green-400">
-                        选中摘要 · {LANG_LABEL_MAP[selectSummaryLang] || selectSummaryLang} · {selectSummaryDetail === 'compact' ? t('reader.compact') : selectSummaryDetail === 'detailed' ? t('reader.detailed') : t('reader.medium')}
+                        {t('reader.selectiveSummaryLabel')} · {LANG_LABEL_MAP[selectSummaryLang] || selectSummaryLang} · {selectSummaryDetail === 'compact' ? t('reader.compact') : selectSummaryDetail === 'detailed' ? t('reader.detailed') : t('reader.medium')}
                       </span>
                       {selectionSummaryLoading && <Loader size={10} className="animate-spin text-green-400 ml-1" />}
                     </div>
@@ -1646,7 +1680,7 @@ export default function ReaderView() {
                       <div className="flex items-center gap-1.5">
                         <span className="text-xs">🔍</span>
                         <span className="text-[11px] font-medium text-cyan-600 dark:text-cyan-400">
-                          选中翻译 {LANG_LABEL_MAP[selectionTargetLangRef.current] || selectionTargetLangRef.current}
+                          {t('reader.selectiveTranslate')} {LANG_LABEL_MAP[selectionTargetLangRef.current] || selectionTargetLangRef.current}
                         </span>
                         {selectionTranslateLoading && <Loader size={10} className="animate-spin text-cyan-400 ml-1" />}
                       </div>
@@ -1677,6 +1711,27 @@ export default function ReaderView() {
           )}
         </div>
       </div>
+
+      {/* ===== 选择文本翻译浮动按钮 (Portal 到 body) ===== */}
+      {showFloatBtn && floatBtnPos && createPortal(
+        <div
+          data-selection-btn="true"
+          className="fixed z-[9999] flex items-center gap-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg px-2 py-1"
+          style={{ top: Math.min(floatBtnPos.top, window.innerHeight - 40), left: Math.min(floatBtnPos.left, window.innerWidth - 140) }}
+        >
+          <span className="text-[10px] text-gray-400">🌐</span>
+          {LANG_OPTIONS.slice(0, 4).map(l => (
+            <button
+              key={l.value}
+              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); triggerSelectiveTranslate(l.value) }}
+              className="px-2 py-0.5 text-[11px] font-medium text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/30 rounded transition-colors"
+            >
+              {l.label}
+            </button>
+          ))}
+        </div>,
+        document.body
+      )}
 
       {/* ===== 右侧摘要面板 ===== */}
       {hasSummary && (
