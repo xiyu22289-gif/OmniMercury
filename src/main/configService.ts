@@ -62,9 +62,6 @@ const DEFAULTS: LlmConfig = {
 const MODEL_MIGRATIONS: Record<string, string> = {
   'deepseek-chat': 'deepseek-v4-flash',
   'ecnu-chat': 'ecnu-max',
-  'moonshot-v1-8k': 'kimi-k2.6',
-  'kimi-k3': 'kimi-k2.6',
-  'kimi-k2.7-code-highspeed': 'kimi-k2.6',
 }
 
 /** 获取当前 LLM 配置（自动迁移过时的模型名） */

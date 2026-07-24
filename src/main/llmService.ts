@@ -1,6 +1,6 @@
 /**
  * LLM 通用接入服务 — 兼容 OpenAI 协议的流式调用。
- * 包含 Token 用量统计：API 返回优先，10 秒未返回则本地估算。
+ * 包含 Token 用量统计：本地估算兜底。
  */
 
 import OpenAI from 'openai'
@@ -20,36 +20,16 @@ type StreamCallback = (chunk: LlmStreamChunk | LlmStreamDone | LlmStreamError) =
 // Token 估算（本地兜底）
 // ============================================================
 
-/** 估算文本的 Token 数。
- *  中文：≈ 0.55 Token / 字符
- *  英文：≈ 4 字符 / Token（约 0.75 词 / Token）
- *  混合文本按 CJK 字符占比分配权重。
- */
+/** 估算文本的 Token 数。 */
 function estimateTokenCount(text: string): number {
   if (!text) return 0
   const cjkCount = (text.match(/[\u4e00-\u9fff\u3400-\u4dbf\u3000-\u303f\uff00-\uffef]/g) || []).length
   const totalChars = text.length
   const nonCjkCount = totalChars - cjkCount
-
   if (totalChars === 0) return 0
-
-  const cjkRatio = cjkCount / totalChars
-  // CJK: 1.8 char/token → 0.555 token/char
-  // non-CJK (English): ~4 char/token
   const cjkTokens = cjkCount * 0.555
   const nonCjkTokens = nonCjkCount * 0.25
-
   return Math.max(1, Math.round(cjkTokens + nonCjkTokens))
-}
-
-// ============================================================
-// 模型 → 编码（用于识别是否使用 API 返回的 usage）
-// ============================================================
-
-/** 哪些模型应使用本地估算而不等 API 返回 */
-function shouldEstimateTokens(model: string): boolean {
-  // ChatECNU 使用本地估算
-  return model.includes('ecnu')
 }
 
 // ============================================================
@@ -61,28 +41,10 @@ interface TokenRecordParams {
   operation: string
   prompt: string
   completion: string
-  /** API 返回的 usage（如果有） */
-  apiUsage?: { promptTokens: number; completionTokens: number }
 }
 
 async function recordTokens(params: TokenRecordParams): Promise<void> {
-  const { model, operation, prompt, completion, apiUsage } = params
-
-  if (apiUsage) {
-    // API 返回了精确数据
-    try {
-      insertTokenUsage({
-        model,
-        operation,
-        promptTokens: apiUsage.promptTokens,
-        completionTokens: apiUsage.completionTokens,
-        source: 'api',
-      })
-    } catch { /* 静默失败，不影响主流程 */ }
-    return
-  }
-
-  // 本地估算
+  const { model, operation, prompt, completion } = params
   const promptTokens = estimateTokenCount(prompt)
   const completionTokens = estimateTokenCount(completion)
   try {
@@ -106,106 +68,51 @@ function createClient(config: LlmConfig, activeKey: string): OpenAI {
 }
 
 // ============================================================
-// 流式消费（带 usage 提取）
+// 流式消费
 // ============================================================
 
 type ChatStream = AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>
 
 interface StreamResult {
   fullText: string
-  usage: { promptTokens: number; completionTokens: number } | null
   error: string | null
 }
 
-async function consumeStreamWithUsage(stream: ChatStream): Promise<StreamResult> {
+async function consumeStream(stream: ChatStream): Promise<StreamResult> {
   let fullText = ''
-  let usage: { promptTokens: number; completionTokens: number } | null = null
   let error: string | null = null
-
   try {
     for await (const chunk of stream) {
-      // 检查 usage 字段（OpenAI 流式模式下最后一块包含 usage）
-      if (chunk.usage) {
-        usage = {
-          promptTokens: chunk.usage.prompt_tokens,
-          completionTokens: chunk.usage.completion_tokens,
-        }
-      }
-
       const delta = chunk.choices?.[0]?.delta?.content
-      if (delta) {
-        fullText += delta
-      }
+      if (delta) fullText += delta
     }
   } catch (err) {
     error = err instanceof Error ? err.message : String(err)
   }
-
-  return { fullText, usage, error }
+  return { fullText, error }
 }
 
-/** 带超时的 Token 等待：先等 API 返回 usage，10 秒未返回则用估算 */
-async function waitForUsage(
-  model: string,
+/** 流式消费 + 实时回调 */
+async function consumeStreamWithCallback(
   stream: ChatStream,
   onDelta: (delta: string) => void,
   onError: (message: string) => void,
-  timeoutMs: number = 10_000
-): Promise<{ fullText: string; usage: { promptTokens: number; completionTokens: number } | null; error: string | null }> {
-  // 如果模型直接走估算（ChatECNU），跳过等待
-  if (shouldEstimateTokens(model)) {
-    const result = await consumeStreamWithUsage(stream)
-    if (result.error) onError(result.error)
-    return result
-  }
-
-  // 否则先等 API 返回（带超时）
-  return new Promise((resolve) => {
-    let fullText = ''
-    let usage: { promptTokens: number; completionTokens: number } | null = null
-    let error: string | null = null
-    let settled = false
-    let timeout: ReturnType<typeof setTimeout> | null = null
-
-    const settle = () => {
-      if (settled) return
-      settled = true
-      if (timeout) clearTimeout(timeout)
-      if (error) onError(error)
-      resolve({ fullText, usage, error })
+): Promise<{ fullText: string; error: string | null }> {
+  let fullText = ''
+  let error: string | null = null
+  try {
+    for await (const chunk of stream) {
+      const delta = chunk.choices?.[0]?.delta?.content
+      if (delta) {
+        fullText += delta
+        onDelta(delta)
+      }
     }
-
-    // 异步消费流
-    ;(async () => {
-      try {
-        for await (const chunk of stream) {
-          if (chunk.usage) {
-            usage = {
-              promptTokens: chunk.usage.prompt_tokens,
-              completionTokens: chunk.usage.completion_tokens,
-            }
-          }
-          const delta = chunk.choices?.[0]?.delta?.content
-          if (delta) {
-            fullText += delta
-            onDelta(delta)
-          }
-        }
-        settle()
-      } catch (err) {
-        error = err instanceof Error ? err.message : String(err)
-        settle()
-      }
-    })()
-
-    // 超时：不管 API 是否返回 usage，直接结算
-    timeout = setTimeout(() => {
-      if (!usage && !error) {
-        usage = null // 标记为无 API usage，由调用方本地估算
-      }
-      settle()
-    }, timeoutMs)
-  })
+  } catch (err) {
+    error = err instanceof Error ? err.message : String(err)
+    onError(error)
+  }
+  return { fullText, error }
 }
 
 // ============================================================
@@ -254,28 +161,38 @@ function restoreMedia(translated: string): string {
 }
 
 // ============================================================
-// 段落翻译
+// 工具
 // ============================================================
-
-const splitContentIntoParagraphs = splitIntoParagraphs
 
 function isHtmlContent(content: string): boolean {
   return /<\/?(p|h[1-6]|li|blockquote|div|span|a|img|table|ul|ol|pre|code|br)[>\s]/.test(content)
+}
+
+function buildTranslatePrompt(content: string, targetLang: string): string {
+  const maxContentLen = 4000
+  const truncated = content.length > maxContentLen ? content.slice(0, maxContentLen) + '\n[Content truncated...]' : content
+  const isHtml = isHtmlContent(truncated)
+  const formatHint = isHtml
+    ? 'Keep HTML tags, only translate text.'
+    : 'Keep Markdown format, only translate text.'
+  return `Translate to ${targetLang}. ${formatHint} Output only translation:\n\n${truncated}`
 }
 
 function buildParagraphTranslatePrompt(paragraph: string, targetLang: string): string {
   const protectedText = protectMedia(paragraph)
   const plainText = protectedText.replace(/<[^>]+>/g, '').replace(/__IMG_\d+__/g, '').replace(/__LINK_\d+__/g, '').trim()
   if (!plainText) return ''
-
   const isHtml = isHtmlContent(paragraph)
   const langName = targetLang === 'Chinese' ? '简体中文' : targetLang
-
   if (isHtml) {
     return `Translate the following HTML fragment to ${langName}. Preserve ALL HTML tags and attributes exactly. Only translate visible text content. Keep placeholders like __IMG_N__ and __LINK_N__ exactly as-is. Do NOT include the original text. Output ONLY the translated HTML. No explanations:\n\n${protectedText}`
   }
   return `Translate the following Markdown fragment to ${langName}. Preserve ALL Markdown formatting (headings, bold, italic, code blocks, etc.) exactly. Keep placeholders like __IMG_N__ and __LINK_N__ exactly as-is. Do NOT include the original text. Output ONLY the translated Markdown. No explanations:\n\n${protectedText}`
 }
+
+// ============================================================
+// 段落翻译
+// ============================================================
 
 export async function translateParagraphs(request: TranslateRequest, callback: StreamCallback): Promise<void> {
   const { articleId, content, targetLang } = request
@@ -291,90 +208,32 @@ export async function translateParagraphs(request: TranslateRequest, callback: S
 
   const temp = getTemperature(config.model)
 
-  // Kimi 全文翻译
-  if (config.model.startsWith('kimi-')) {
-    const prompt = buildTranslatePrompt(content, targetLang)
-    const maxRetries = 3
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      try {
-        const client = createClient(config, activeKey)
-        const stream = await client.chat.completions.create({
-          model: config.model, messages: [{ role: 'user', content: prompt }],
-          temperature: temp, stream: true,
-          stream_options: { include_usage: true },
-        })
-
-        const { fullText, usage } = await waitForUsage(config.model, stream,
-          (delta) => callback({ type: 'translateParagraph', articleId, paragraphIndex: 0, delta }),
-          (errorMsg) => { callback({ type: 'translateParagraph', articleId, paragraphIndex: 0, message: errorMsg }); callback({ type: 'translateComplete', articleId, fullText: '' }) },
-          10_000
-        )
-
-        if (fullText) {
-          const trimmed = fullText.trim()
-          if (trimmed) {
-            try {
-              const row = getDb().select({ translations: articlesTable.translations }).from(articlesTable).where(eq(articlesTable.id, articleId)).get()
-              const existingMap: Record<string, unknown> = row?.translations ? JSON.parse(row.translations) : {}
-              existingMap._v = 2
-              existingMap[targetLang] = [trimmed]
-              getDb().update(articlesTable).set({ translations: JSON.stringify(existingMap) }).where(eq(articlesTable.id, articleId)).run()
-            } catch {}
-          }
-          callback({ type: 'translateParagraph', articleId, paragraphIndex: 0, fullText: trimmed })
-
-          // 记录 Token
-          await recordTokens({ model: config.model, operation: 'translateParagraphs', prompt, completion: trimmed, apiUsage: usage ?? undefined })
-        }
-        callback({ type: 'translateComplete', articleId, fullText: '' })
-        return
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        if (msg.includes('429') && attempt < maxRetries - 1) {
-          await new Promise(resolve => setTimeout(resolve, 3000))
-          continue
-        }
-        callback({ type: 'translateParagraph', articleId, paragraphIndex: 0, message: `[翻译失败] ${msg}` })
-        callback({ type: 'translateComplete', articleId, fullText: '' })
-        return
-      }
-    }
-    callback({ type: 'translateComplete', articleId, fullText: '' })
-    return
-  }
-
-  // 逐段翻译
-  const paragraphs = splitContentIntoParagraphs(content)
+  // 逐段翻译（所有模型统一走此路径）
+  const paragraphs = splitIntoParagraphs(content)
   const allTranslations: string[] = new Array(paragraphs.length).fill('')
-  let totalPromptChars = 0
 
   for (let i = 0; i < paragraphs.length; i++) {
     const prompt = buildParagraphTranslatePrompt(paragraphs[i], targetLang)
     if (!prompt) { allTranslations[i] = ''; callback({ type: 'translateParagraph', articleId, paragraphIndex: i, fullText: '' }); continue }
 
-    totalPromptChars += prompt.length
-
     try {
       const client = createClient(config, activeKey)
       const stream = await client.chat.completions.create({
         model: config.model, messages: [{ role: 'user', content: prompt }],
-        temperature: temp, stream: true,
-        stream_options: { include_usage: true },
+        temperature: temp,
+        stream: true,
       })
 
-      const { fullText, usage } = await waitForUsage(config.model, stream,
+      const { fullText } = await consumeStreamWithCallback(stream,
         (delta) => callback({ type: 'translateParagraph', articleId, paragraphIndex: i, delta }),
-        (errorMsg) => { allTranslations[i] = `[错误] ${errorMsg}`; callback({ type: 'translateParagraph', articleId, paragraphIndex: i, message: errorMsg }) },
-        10_000
+        (errorMsg) => { allTranslations[i] = `[错误] ${errorMsg}`; callback({ type: 'translateParagraph', articleId, paragraphIndex: i, message: errorMsg }) }
       )
 
       if (fullText) {
         const restored = restoreMedia(fullText)
         allTranslations[i] = restored
         callback({ type: 'translateParagraph', articleId, paragraphIndex: i, fullText: restored })
-
-        // 记录 Token
-        await recordTokens({ model: config.model, operation: 'translateParagraphs', prompt, completion: restored, apiUsage: usage ?? undefined })
+        await recordTokens({ model: config.model, operation: 'translateParagraphs', prompt, completion: restored })
       }
     } catch (err) {
       const errMsg = `[翻译失败] ${err instanceof Error ? err.message : String(err)}`
@@ -383,7 +242,7 @@ export async function translateParagraphs(request: TranslateRequest, callback: S
     }
 
     if (i < paragraphs.length - 1) {
-      await new Promise(resolve => setTimeout(resolve, 500))
+      await new Promise(r => setTimeout(r, 500))
     }
   }
 
@@ -433,6 +292,7 @@ export async function summarizeArticle(request: SummarizeRequest, callback: Stre
   const prompt = buildSummarizePrompt(title, content, targetLang, detailLevel)
   const maxTokens = detailLevel === 'compact' ? 300 : detailLevel === 'detailed' ? 1500 : 800
   const systemPrompt = '你是一个专业的文章摘要助手。'
+  const totalPrompt = systemPrompt + prompt
 
   try {
     const stream = await client.chat.completions.create({
@@ -441,15 +301,11 @@ export async function summarizeArticle(request: SummarizeRequest, callback: Stre
       temperature: getTemperature(config.model),
       max_tokens: maxTokens,
       stream: true,
-      stream_options: { include_usage: true },
     })
 
-    const totalPrompt = systemPrompt + prompt
-
-    const { fullText, usage } = await waitForUsage(config.model, stream,
+    const { fullText } = await consumeStreamWithCallback(stream,
       (delta) => callback({ type, articleId, delta }),
-      (errorMsg) => callback({ type, articleId, message: errorMsg }),
-      10_000
+      (errorMsg) => callback({ type, articleId, message: errorMsg })
     )
 
     if (fullText) {
@@ -459,15 +315,12 @@ export async function summarizeArticle(request: SummarizeRequest, callback: Stre
           getDb().update(articlesTable).set({ summary: trimmed }).where(eq(articlesTable.id, articleId)).run()
           const row = getDb().select({ translations: articlesTable.translations }).from(articlesTable).where(eq(articlesTable.id, articleId)).get()
           const existingMap: Record<string, unknown> = row?.translations ? JSON.parse(row.translations) : {}
-          existingMap._summary = { text: trimmed, lang: targetLang }
+          existingMap._summary = { text: trimmed, lang: targetLang, detailLevel }
           getDb().update(articlesTable).set({ translations: JSON.stringify(existingMap) }).where(eq(articlesTable.id, articleId)).run()
         } catch {}
       }
-
       callback({ type, articleId, fullText: trimmed })
-
-      // 记录 Token
-      await recordTokens({ model: config.model, operation: 'summarize', prompt: totalPrompt, completion: trimmed, apiUsage: usage ?? undefined })
+      await recordTokens({ model: config.model, operation: 'summarize', prompt: totalPrompt, completion: trimmed })
     }
   } catch (err) { callback({ type, articleId, message: `LLM 调用失败：${err}` }) }
 }
@@ -476,18 +329,8 @@ export async function summarizeArticle(request: SummarizeRequest, callback: Stre
 // 全文翻译（旧版兼容）
 // ============================================================
 
-function buildTranslatePrompt(content: string, targetLang: string): string {
-  const maxContentLen = 6000
-  const truncated = content.length > maxContentLen ? content.slice(0, maxContentLen) + '\n[Content truncated...]' : content
-  const isHtml = isHtmlContent(truncated)
-  const formatHint = isHtml
-    ? 'Preserve ALL HTML tags and structure exactly. Only translate visible text.'
-    : 'Preserve ALL Markdown formatting (headings, bold, italic, links, code blocks, etc.) exactly. Only translate visible text.'
-  return `You are a professional translator. Translate the following ${isHtml ? 'HTML' : 'Markdown'} content to ${targetLang}. ${formatHint} Output ONLY the translated content with identical structure. No explanations:\n\n${truncated}`
-}
-
 export async function translateArticle(request: TranslateRequest, callback: StreamCallback): Promise<void> {
-  const { articleId, content, title, targetLang } = request
+  const { articleId, content, targetLang } = request
   const type = 'translate' as const
   if (!content?.trim()) { callback({ type, articleId, message: '文章内容为空' }); return }
 
@@ -500,21 +343,21 @@ export async function translateArticle(request: TranslateRequest, callback: Stre
   try { client = createClient(config, activeKey) } catch (err) { callback({ type, articleId, message: String(err) }); return }
 
   const prompt = buildTranslatePrompt(content, targetLang)
+  const systemPrompt = 'You are a professional translator.'
+  const totalPrompt = systemPrompt + prompt
+
   try {
     const stream = await client.chat.completions.create({
       model: config.model,
-      messages: [{ role: 'system', content: 'You are a professional translator.' }, { role: 'user', content: prompt }],
-      temperature: getTemperature(config.model), stream: true,
-      stream_options: { include_usage: true },
+      messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: prompt }],
+      temperature: getTemperature(config.model),
+      max_tokens: 4096,
+      stream: true,
     })
 
-    const systemPrompt = 'You are a professional translator.'
-    const totalPrompt = systemPrompt + prompt
-
-    const { fullText, usage } = await waitForUsage(config.model, stream,
+    const { fullText } = await consumeStreamWithCallback(stream,
       (delta) => callback({ type, articleId, delta }),
-      (errorMsg) => callback({ type, articleId, message: errorMsg }),
-      10_000
+      (errorMsg) => callback({ type, articleId, message: errorMsg })
     )
 
     if (fullText) {
@@ -529,9 +372,7 @@ export async function translateArticle(request: TranslateRequest, callback: Stre
         } catch {}
       }
       callback({ type, articleId, fullText: trimmed })
-
-      // 记录 Token
-      await recordTokens({ model: config.model, operation: 'translate', prompt: totalPrompt, completion: trimmed, apiUsage: usage ?? undefined })
+      await recordTokens({ model: config.model, operation: 'translate', prompt: totalPrompt, completion: trimmed })
     }
   } catch (err) { callback({ type, articleId, message: `LLM 调用失败：${err}` }) }
 }
@@ -540,9 +381,9 @@ export async function translateArticle(request: TranslateRequest, callback: Stre
 // 测试连接
 // ============================================================
 
-export async function testConnection(config?: { baseUrl: string; apiKey: string; model: string }): Promise<{ success: boolean; latencyMs: number; message: string }> {
-  const cfg = config || getLlmConfig()
-  const apiKey = config?.apiKey || getApiKeyForModel(cfg.model)
+export async function testConnection(configParams?: { baseUrl: string; apiKey: string; model: string }): Promise<{ success: boolean; latencyMs: number; message: string }> {
+  const cfg = configParams || getLlmConfig()
+  const apiKey = configParams?.apiKey || getApiKeyForModel(cfg.model)
   if (!apiKey) return { success: false, latencyMs: 0, message: '未配置 API Key' }
 
   const client = new OpenAI({ apiKey, baseURL: cfg.baseUrl, timeout: 15_000 })
@@ -559,10 +400,10 @@ export async function testConnection(config?: { baseUrl: string; apiKey: string;
   }
 }
 
-/**
- * AI 标签推荐：基于文章标题和内容，调用 LLM 建议 3-5 个标签名。
- * 返回标签名数组（纯文本，不含颜色）。
- */
+// ============================================================
+// AI 标签推荐
+// ============================================================
+
 export async function suggestTagsForArticle(title: string, content: string, existingTags: string[]): Promise<string[]> {
   console.log(`[llmService] suggestTagsForArticle — title="${title}", existingTags=${JSON.stringify(existingTags)}, contentLen=${content.length}`)
   let config: LlmConfig
@@ -597,7 +438,7 @@ ${truncated}
     const response = await client.chat.completions.create({
       model: config.model,
       messages: [{ role: 'user', content: prompt }],
-      temperature: 0.3,
+      temperature: getTemperature(config.model),
       max_tokens: 120,
     })
 

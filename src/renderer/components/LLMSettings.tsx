@@ -13,9 +13,8 @@ interface FormData {
 const PRESET_MODELS = [
   { label: 'DeepSeek V4 Flash', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-v4-flash' },
   { label: 'ChatECNU (华东师大)', baseUrl: 'https://chat.ecnu.edu.cn/open/api/v1', model: 'ecnu-max' },
-  { label: 'Kimi (Moonshot)', baseUrl: 'https://api.moonshot.cn/v1', model: 'kimi-k2.6' },
+  { label: 'Kimi K2.7 Code', baseUrl: 'https://api.moonshot.cn/v1', model: 'kimi-k2.7-code' },
   { label: 'OpenAI (ChatGPT)', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
-  { label: 'Claude', baseUrl: 'https://codeapi.icu/v1', model: 'claude-sonnet-5' },
 ]
 
 function formatTokens(n: number): string {

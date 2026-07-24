@@ -233,6 +233,8 @@ export default function ReaderView() {
   // ============ 本地状态 ============
 
   const [showFontPicker, setShowFontPicker] = useState(false)
+  const fontBtnRef = useRef<HTMLButtonElement>(null)
+  const [fontPickerPos, setFontPickerPos] = useState<{ top: number; left: number } | null>(null)
   const [showTagPicker, setShowTagPicker] = useState(false)
   // 多选模式：选中的标签 ID 集合
   const [selectedTagIds, setSelectedTagIds] = useState<Set<number>>(new Set())
@@ -307,7 +309,7 @@ export default function ReaderView() {
               const existingTrans: Record<string, unknown> = targetArticle?.translations
                 ? JSON.parse(targetArticle.translations)
                 : {}
-              existingTrans._summary = { text: chunk.fullText, lang: summaryTargetLangRef.current }
+              existingTrans._summary = { text: chunk.fullText, lang: summaryTargetLangRef.current, detailLevel: summaryDetailLevelRef.current }
               return {
                 articles: state.articles.map(a =>
                   a.id === chunk.articleId
@@ -415,8 +417,8 @@ export default function ReaderView() {
     if (selectedArticle.translations) {
       try {
         const transMap: Record<string, unknown> = JSON.parse(selectedArticle.translations)
-        const cached = transMap._summary as { text: string; lang: string } | undefined
-        if (cached && cached.text && cached.lang === targetLang) {
+        const cached = transMap._summary as { text: string; lang: string; detailLevel?: string } | undefined
+        if (cached && cached.text && cached.lang === targetLang && (cached.detailLevel || 'medium') === summaryDetailLevel) {
           // 命中缓存：直接恢复摘要，不调用 API
           resetSummary()
           setSummarizingArticleId(selectedArticleId)
@@ -1196,44 +1198,23 @@ export default function ReaderView() {
             </button>
 
             {/* 字体选择 */}
-            <div className="relative">
-              <button
-                onClick={() => setShowFontPicker(!showFontPicker)}
-                className="flex items-center gap-1 px-2 py-1.5 text-xs rounded-lg text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700 transition-colors"
-                title={t('reader.selectFont')}
-              >
-                <Type size={13} />
-                {FONT_FAMILIES.find(f => f.value === readerFontFamily)?.label || t('reader.font')}
-                <ChevronDown size={10} />
-              </button>
-              {showFontPicker && (
-                <div
-                  className="absolute bottom-full right-0 mb-1 z-50 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 w-40 overflow-hidden"
-                  onClick={e => e.stopPropagation()}
-                >
-                  <div className="px-3 py-1.5 border-b border-gray-200 dark:border-gray-700">
-                    <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{t('reader.selectFont')}</span>
-                  </div>
-                  <div className="py-1">
-                    {FONT_FAMILIES.map(f => (
-                      <button
-                        key={f.value}
-                        onClick={() => { setReaderFontFamily(f.value); setShowFontPicker(false) }}
-                        className={`w-full text-left px-3 py-1.5 text-sm flex items-center justify-between transition-colors
-                          ${readerFontFamily === f.value
-                            ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
-                            : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 text-gray-700 dark:text-gray-200'
-                          }`}
-                        style={{ fontFamily: f.value }}
-                      >
-                        <span>{f.label}</span>
-                        {readerFontFamily === f.value && <Check size={12} className="text-amber-500 flex-shrink-0" />}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
+            <button
+              ref={fontBtnRef}
+              onClick={() => {
+                const btn = fontBtnRef.current
+                if (btn) {
+                  const rect = btn.getBoundingClientRect()
+                  setFontPickerPos({ top: rect.bottom + 4, left: rect.right - 160 })
+                }
+                setShowFontPicker(!showFontPicker)
+              }}
+              className="flex items-center gap-1 px-2 py-1.5 text-xs rounded-lg text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700 transition-colors"
+              title={t('reader.selectFont')}
+            >
+              <Type size={13} />
+              {FONT_FAMILIES.find(f => f.value === readerFontFamily)?.label || t('reader.font')}
+              <ChevronDown size={10} />
+            </button>
 
             <div className="flex-1" />
 
@@ -1443,7 +1424,37 @@ export default function ReaderView() {
         </>
       )}
 
-      {/* ===== 右侧笔记面板 ===== */}
+          {/* ===== 字体选择弹出框 (fixed 定位，跳出 overflow hidden) ===== */}
+          {showFontPicker && fontPickerPos && (
+            <div
+              className="fixed z-50 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 w-40 max-h-60 overflow-y-auto"
+              style={{ top: fontPickerPos.top, left: fontPickerPos.left }}
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="px-3 py-1.5 border-b border-gray-200 dark:border-gray-700">
+                <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{t('reader.selectFont')}</span>
+              </div>
+              <div className="py-1">
+                {FONT_FAMILIES.map(f => (
+                  <button
+                    key={f.value}
+                    onClick={() => { setReaderFontFamily(f.value); setShowFontPicker(false) }}
+                    className={`w-full text-left px-3 py-1.5 text-sm flex items-center justify-between transition-colors
+                      ${readerFontFamily === f.value
+                        ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                        : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 text-gray-700 dark:text-gray-200'
+                      }`}
+                    style={{ fontFamily: f.value }}
+                  >
+                    <span>{f.label}</span>
+                    {readerFontFamily === f.value && <Check size={12} className="text-amber-500 flex-shrink-0" />}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ===== 右侧笔记面板 ===== */}
       {notePanelOpen && !hasSummary && (
         <>
           <ResizeHandle
