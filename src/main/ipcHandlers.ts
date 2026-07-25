@@ -1,5 +1,5 @@
 import { ipcMain, BrowserWindow, dialog } from 'electron'
-import { addFeed, listFeeds, getArticles, getArticlesByIdList, searchArticles, getCachedArticleContent, refreshAllFeeds } from './feedService'
+import { addFeed, listFeeds, getArticles, getArticlesByIdList, searchArticles, fullTextSearch, getCachedArticleContent, refreshAllFeeds } from './feedService'
 import { parseOpmlFile, importOpmlFile, exportOpmlFile } from './opmlService'
 import { getDb, getFeedById, feeds as feedsTable, articles as articlesTable, getTokenStats } from './db'
 import { eq } from 'drizzle-orm'
@@ -114,10 +114,34 @@ export function registerIpcHandlers(): void {
     }
   })
 
-  ipcMain.handle('backend:searchArticles', async (_event, query: string, _feedId?: number, _offset?: number, _limit?: number): Promise<IpcResponse> => {
+  ipcMain.handle('backend:searchArticles', async (_event, query: string, _feedId?: number, _offset?: number, _limit?: number, _useFts?: boolean): Promise<IpcResponse> => {
     if (!query?.trim()) return { type: 'search_articles', payload: { error: 0, articles: [] } }
     const limit = typeof _limit === 'number' && _limit > 0 ? _limit : 20
-    const results = searchArticles(query.trim(), limit)
+
+    // Enter 回车搜索使用 FTS5 全文搜索，输入建议使用标题模糊搜索
+    let results: Array<{
+      id: number
+      feedId: number
+      title: string
+      link: string | null
+      summary: string | null
+      translations: string | null
+      author: string | null
+      pubDate: string | null
+      createdAt: string | null
+      isRead: number | null
+    }>
+
+    if (_useFts) {
+      results = fullTextSearch(query.trim(), limit).map(a => ({
+        id: a.id, feedId: a.feedId, title: a.title, link: a.link,
+        summary: a.summary, translations: a.translations, author: a.author,
+        pubDate: a.pubDate, createdAt: a.createdAt, isRead: a.isRead,
+      }))
+    } else {
+      results = searchArticles(query.trim(), limit)
+    }
+
     const articles: Article[] = results.map(a => ({ id: a.id, feed_id: a.feedId, title: a.title, url: a.link ?? '', author: a.author ?? undefined, summary: a.summary ?? undefined, translations: a.translations ?? undefined, published_at: a.pubDate ?? a.createdAt ?? '', fetched_at: a.createdAt ?? '', is_read: a.isRead === 1 }))
     return { type: 'search_articles', payload: { error: 0, articles } }
   })

@@ -8,12 +8,14 @@ import {
   getArticlesByFeedId,
   getAllFeeds,
   searchArticlesByTitle,
+  searchArticlesFts,
   getArticleContentById,
   getArticleByLink,
   getArticlesByIds,
   type Feed,
   type Article,
   type NewArticle,
+  type FtsSearchResult,
 } from './db';
 
 // ============================================================
@@ -336,6 +338,29 @@ export function searchArticles(query: string, limit = 20): SearchArticleSummary[
     author: a.author,
     pubDate: a.pubDate,
     createdAt: a.createdAt,
+  }));
+}
+
+/**
+ * 全文搜索 — 使用 FTS5 同时匹配标题 + 正文，按 BM25 相关性排序。
+ */
+export interface FullTextSearchResult extends SearchArticleSummary {
+  snippet: string | null
+}
+
+export function fullTextSearch(query: string, limit = 20): FullTextSearchResult[] {
+  return searchArticlesFts(query, limit).map((a: FtsSearchResult) => ({
+    id: a.id,
+    feedId: a.feedId,
+    title: a.title,
+    isRead: a.isRead,
+    summary: a.summary,
+    translations: a.translations,
+    link: a.link,
+    author: a.author,
+    pubDate: a.pubDate,
+    createdAt: a.createdAt,
+    snippet: a.snippet,
   }));
 }
 

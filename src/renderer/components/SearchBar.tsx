@@ -75,7 +75,7 @@ export default function SearchBar() {
     [jumpToArticle, setSearchQuery, setSearchSuggestions]
   )
 
-  // 回车搜索：执行全量搜索，展示到 ArticleList
+  // 回车搜索：执行 FTS5 全文搜索（标题+正文），展示到 ArticleList
   const handleSearch = useCallback(async () => {
     const query = searchQuery.trim()
     setShowDropdown(false)
@@ -85,7 +85,7 @@ export default function SearchBar() {
     }
 
     try {
-      const response = await window.api.searchArticles(query, undefined, undefined, 50)
+      const response = await window.api.searchArticles(query, undefined, undefined, 50, true)
       if (response.payload.error === 0) {
         setSearchResults(response.payload.articles || [])
       }

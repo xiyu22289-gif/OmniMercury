@@ -2,12 +2,14 @@ import { useEffect, useCallback, useState, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import rehypeRaw from 'rehype-raw'
 import { useTranslation } from 'react-i18next'
 import { useStore } from '../store'
 import {
   Globe, ExternalLink, Sparkles, Languages, Loader, Settings,
   Check, Columns, AlignJustify, Replace, X,
-  BookOpen, Monitor, Type, Minus, Plus, ChevronDown, Tag, Zap, Square, CheckSquare, Loader2, PenLine, Download
+  BookOpen, Monitor, Type, Minus, Plus, ChevronDown, Tag, Zap, Square, CheckSquare, Loader2, PenLine, Download,
+  Search, ArrowUp, ArrowDown
 } from 'lucide-react'
 import NotesPanel from './NotesPanel'
 import ResizeHandle from './ResizeHandle'
@@ -282,6 +284,91 @@ export default function ReaderView() {
   // 翻译分界线
   const [dividerPos, setDividerPos] = useState(50)
   const isDragging = useRef(false)
+
+  // ============ 文章内搜索 ============
+  const [inArticleSearch, setInArticleSearch] = useState('')
+  const [showInArticleSearch, setShowInArticleSearch] = useState(false)
+  const [currentHitIndex, setCurrentHitIndex] = useState(0)
+  const inArticleSearchRef = useRef<HTMLInputElement>(null)
+
+  /** 计算所有匹配位置（段落索引 + 段落内偏移），用于高亮 + 跳转 */
+  const searchHits = useMemo(() => {
+    if (!inArticleSearch.trim() || !articleContent) return [] as { paraIdx: number; offset: number }[]
+    const query = inArticleSearch.trim()
+    const lowerQ = query.toLowerCase()
+    const hits: { paraIdx: number; offset: number }[] = []
+    const paras = splitContent(articleContent)
+    for (let i = 0; i < paras.length; i++) {
+      const lower = paras[i].toLowerCase()
+      let idx = 0
+      while ((idx = lower.indexOf(lowerQ, idx)) !== -1) {
+        hits.push({ paraIdx: i, offset: idx })
+        idx += query.length
+      }
+    }
+    return hits
+  }, [inArticleSearch, articleContent])
+
+  /** 高亮搜索词的段落渲染函数 */
+  const renderParagraphWithHighlights = useCallback((para: string, paraIdx: number) => {
+    if (!inArticleSearch.trim()) {
+      return (
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{para}</ReactMarkdown>
+      )
+    }
+
+    const query = inArticleSearch.trim()
+    // 使用 mark 标签包裹匹配词（带唯一 id 用于跳转）
+    const hitsInThisPara = searchHits.filter(h => h.paraIdx === paraIdx)
+    if (hitsInThisPara.length === 0) {
+      return (
+        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{para}</ReactMarkdown>
+      )
+    }
+
+    // 按偏移量从后往前替换（避免索引偏移）
+    let result = para
+    const sorted = [...hitsInThisPara].sort((a, b) => b.offset - a.offset)
+    for (const hit of sorted) {
+      const globalIdx = searchHits.findIndex(h => h.paraIdx === hit.paraIdx && h.offset === hit.offset)
+      const matched = result.slice(hit.offset, hit.offset + query.length)
+      result = result.slice(0, hit.offset) +
+        `<mark id="search-hit-${globalIdx}" class="bg-yellow-300 dark:bg-yellow-700 rounded px-0.5 scroll-mt-20">${matched}</mark>` +
+        result.slice(hit.offset + query.length)
+    }
+
+    return (
+      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{result}</ReactMarkdown>
+    )
+  }, [inArticleSearch, searchHits])
+
+  /** 跳转到第 N 个匹配 */
+  const scrollToHit = useCallback((idx: number) => {
+    if (searchHits.length === 0) return
+    const clamped = Math.max(0, Math.min(idx, searchHits.length - 1))
+    setCurrentHitIndex(clamped)
+    const el = document.getElementById(`search-hit-${clamped}`)
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [searchHits.length])
+
+  /** Ctrl+F 快捷键打开文章内搜索 */
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault()
+        setShowInArticleSearch(true)
+        setTimeout(() => inArticleSearchRef.current?.focus(), 50)
+      }
+      if (showInArticleSearch && e.key === 'Escape') {
+        setShowInArticleSearch(false)
+        setInArticleSearch('')
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [showInArticleSearch])
 
   // ============ 选择段落摘要 ============
   const originalParagraphsIndexRef = useRef(0)
@@ -883,7 +970,7 @@ export default function ReaderView() {
                 <Icon size={14} className={checked ? 'text-green-500' : 'text-gray-400'} />
               </button>
               <div className="flex-1 min-w-0">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{para}</ReactMarkdown>
+                {renderParagraphWithHighlights(para, idx)}
               </div>
             </div>
           )
@@ -1412,6 +1499,19 @@ export default function ReaderView() {
               <ChevronDown size={10} />
             </button>
 
+            {/* ===== 文章内搜索按钮 ===== */}
+            <button
+              onClick={() => { setShowInArticleSearch(!showInArticleSearch); setTimeout(() => inArticleSearchRef.current?.focus(), 50) }}
+              className={`flex items-center justify-center w-7 h-7 rounded text-xs transition-colors
+                ${showInArticleSearch
+                  ? 'bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400'
+                  : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700'
+                }`}
+              title="在文章中搜索 (Ctrl+F)"
+            >
+              <Search size={13} />
+            </button>
+
             <div className="flex-1" />
 
             {/* 设置按钮 */}
@@ -1430,6 +1530,64 @@ export default function ReaderView() {
               className="fixed inset-0 z-40"
               onClick={() => { setShowSummaryLangPicker(false); setShowTranslateLangPicker(false); setShowFontPicker(false) }}
             />
+          )}
+
+          {/* ===== 文章内搜索栏 ===== */}
+          {showInArticleSearch && (
+            <div className="mb-3 p-2 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-lg flex items-center gap-2">
+              <Search size={14} className="text-yellow-600 dark:text-yellow-400 flex-shrink-0" />
+              <input
+                ref={inArticleSearchRef}
+                type="text"
+                value={inArticleSearch}
+                onChange={(e) => { setInArticleSearch(e.target.value); setCurrentHitIndex(0) }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    if (e.shiftKey) scrollToHit(currentHitIndex - 1)
+                    else scrollToHit(currentHitIndex + 1)
+                  }
+                  if (e.key === 'Escape') {
+                    setShowInArticleSearch(false)
+                    setInArticleSearch('')
+                  }
+                }}
+                placeholder="在文章中搜索..."
+                className="flex-1 px-2 py-1 text-sm bg-transparent border-none outline-none placeholder-gray-400 dark:placeholder-gray-500"
+              />
+              {searchHits.length > 0 && (
+                <span className="text-xs text-yellow-700 dark:text-yellow-300 font-medium whitespace-nowrap">
+                  {currentHitIndex + 1}/{searchHits.length}
+                </span>
+              )}
+              {inArticleSearch && (
+                <>
+                  <button
+                    onClick={() => scrollToHit(currentHitIndex - 1)}
+                    disabled={searchHits.length === 0}
+                    className="p-1 rounded hover:bg-yellow-200 dark:hover:bg-yellow-800 disabled:opacity-30 transition-colors"
+                    title="上一个匹配"
+                  >
+                    <ArrowUp size={14} className="text-yellow-600 dark:text-yellow-400" />
+                  </button>
+                  <button
+                    onClick={() => scrollToHit(currentHitIndex + 1)}
+                    disabled={searchHits.length === 0}
+                    className="p-1 rounded hover:bg-yellow-200 dark:hover:bg-yellow-800 disabled:opacity-30 transition-colors"
+                    title="下一个匹配"
+                  >
+                    <ArrowDown size={14} className="text-yellow-600 dark:text-yellow-400" />
+                  </button>
+                </>
+              )}
+              <button
+                onClick={() => { setShowInArticleSearch(false); setInArticleSearch('') }}
+                className="p-1 rounded hover:bg-yellow-200 dark:hover:bg-yellow-800 transition-colors"
+                title="关闭搜索"
+              >
+                <X size={14} className="text-yellow-600 dark:text-yellow-400" />
+              </button>
+            </div>
           )}
 
           {/* 错误信息 */}

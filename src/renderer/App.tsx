@@ -23,7 +23,9 @@ export default function App() {
     sidebarOpen, toggleSidebar,
     themeMode, systemPrefersDark, setThemeMode, setSystemPrefersDark,
     setFeeds, selectFeed, setError, isLoading, loadLlmConfig,
-    opmlImporting, opmlProgress, opmlDialogOpen, setOpmlDialogOpen
+    opmlImporting, opmlProgress, opmlDialogOpen, setOpmlDialogOpen,
+    showSettings, setShowSettings,
+    selectArticle
   } = useStore()
 
   /** 推导实际暗色状态 */
@@ -111,6 +113,77 @@ export default function App() {
     const handler = (e: MediaQueryListEvent) => setSystemPrefersDark(e.matches)
     mq.addEventListener('change', handler)
     return () => mq.removeEventListener('change', handler)
+  }, [])
+
+  // ================================================================
+  // 全局快捷键
+  // ================================================================
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+
+      const mod = e.ctrlKey || e.metaKey
+
+      // Ctrl/Cmd + K — 聚焦搜索
+      if (mod && e.key === 'k') {
+        e.preventDefault()
+        const searchBtn = document.querySelector('[title="Search articles"]') as HTMLButtonElement | null
+        searchBtn?.click()
+        return
+      }
+
+      // Ctrl/Cmd + R — 刷新订阅源
+      if (mod && e.key === 'r') {
+        e.preventDefault()
+        window.api.refreshFeeds().then(() => {
+          const state = useStore.getState()
+          if (state.selectedFeedId !== null) selectFeed(state.selectedFeedId)
+        }).catch(() => {})
+        return
+      }
+
+      // Ctrl/Cmd + , — LLM 设置
+      if (mod && e.key === ',') {
+        e.preventDefault()
+        setShowSettings(!showSettings)
+        return
+      }
+
+      // j / ArrowDown — 下一个文章
+      if (e.key === 'j' || e.key === 'ArrowDown') {
+        e.preventDefault()
+        const state = useStore.getState()
+        const arts = state.articles
+        if (arts.length === 0) return
+        const idx = arts.findIndex(a => a.id === state.selectedArticleId)
+        const nextIdx = idx < 0 ? 0 : Math.min(idx + 1, arts.length - 1)
+        selectArticle(arts[nextIdx].id)
+        return
+      }
+
+      // k / ArrowUp — 上一个文章
+      if (e.key === 'k' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        const state = useStore.getState()
+        const arts = state.articles
+        if (arts.length === 0) return
+        const idx = arts.findIndex(a => a.id === state.selectedArticleId)
+        const prevIdx = idx < 0 ? arts.length - 1 : Math.max(idx - 1, 0)
+        selectArticle(arts[prevIdx].id)
+        return
+      }
+
+      // Ctrl/Cmd + B — 切换侧边栏
+      if (mod && e.key === 'b') {
+        e.preventDefault()
+        toggleSidebar()
+        return
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
 
   return (

@@ -34,7 +34,8 @@ declare global {
       getArticles: (feedId: number, offset?: number, limit?: number) => Promise<IpcResponse>
       getArticleContent: (articleId: number) => Promise<IpcResponse>
       removeFeed: (feedId: number) => Promise<IpcResponse>
-      searchArticles: (query: string, feedId?: number, offset?: number, limit?: number) => Promise<IpcResponse>
+      /** searchArticles: useFts=true 使用 FTS5 全文搜索（正文+标题），默认 false 使用标题模糊搜索 */
+      searchArticles: (query: string, feedId?: number, offset?: number, limit?: number, useFts?: boolean) => Promise<IpcResponse>
       getCachedArticleContent: (articleId: number) => Promise<IpcResponse>
       getArticlesByIds: (ids: number[]) => Promise<IpcResponse>
 

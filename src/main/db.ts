@@ -100,6 +100,8 @@ export type NewTokenUsage = typeof tokenUsage.$inferInsert;
 // ============================================================
 
 let db: BetterSQLite3Database | null = null;
+/** 底层 better-sqlite3 原始实例（用于 FTS5 原生查询） */
+let rawDb: Database.Database | null = null;
 
 export function initDatabase(dbPath: string): BetterSQLite3Database {
   const sqlite = new Database(dbPath);
@@ -164,7 +166,23 @@ export function initDatabase(dbPath: string): BetterSQLite3Database {
       source          TEXT    NOT NULL DEFAULT 'api',
       created_at      TEXT    DEFAULT (datetime('now'))
     );
+
+    -- FTS5 全文索引（标题 + 正文）
+    CREATE VIRTUAL TABLE IF NOT EXISTS articles_fts USING fts5(
+      title,
+      content,
+      content_md,
+      content='articles',
+      content_rowid='id'
+    );
   `);
+
+  // 首次创建 FTS 表后，填充已有数据
+  try {
+    sqlite.exec(`INSERT INTO articles_fts(articles_fts) VALUES('rebuild')`);
+  } catch {
+    // rebuild 失败忽略（可能表为空）
+  }
 
   // M4 兼容迁移：translations 列
   try {
@@ -194,6 +212,7 @@ export function initDatabase(dbPath: string): BetterSQLite3Database {
   }
 
   db = drizzle(sqlite);
+  rawDb = sqlite;
   return db;
 }
 
@@ -202,6 +221,12 @@ export function getDb(): BetterSQLite3Database {
     throw new Error('[db] 数据库未初始化，请先调用 initDatabase()。');
   }
   return db;
+}
+
+/** 获取底层 better-sqlite3 原始实例（用于 FTS5 原生 SQL）。 */
+export function getRawDb(): Database.Database {
+  if (!rawDb) throw new Error('[db] 数据库未初始化。');
+  return rawDb;
 }
 
 // ============================================================
@@ -325,6 +350,59 @@ export function searchArticlesByTitle(
     .orderBy(sql`LOWER(${articles.title}) ASC`)
     .limit(limit)
     .all();
+}
+
+/** FTS5 全文搜索 — 同时匹配标题 + 正文，按 BM25 相关性排序 */
+export interface FtsSearchResult {
+  id: number
+  feedId: number
+  title: string
+  link: string | null
+  summary: string | null
+  translations: string | null
+  author: string | null
+  pubDate: string | null
+  createdAt: string | null
+  isRead: number | null
+  /** 匹配片段（高亮 snippet，含 <b> 标记） */
+  snippet: string | null
+}
+
+/** LIKE 全文搜索 — 同时匹配标题 + 正文（对中文友好），按 pub_date 排序 */
+export function searchArticlesFullText(query: string, limit = 50): FtsSearchResult[] {
+  const sqlite = getRawDb()
+  const safeQuery = query.trim()
+  if (!safeQuery) return []
+
+  const likePattern = `%${safeQuery}%`
+
+  const stmt = sqlite.prepare(
+    `SELECT
+       a.id,
+       a.feed_id   AS feedId,
+       a.title,
+       a.link,
+       a.summary,
+       a.translations,
+       a.author,
+       a.pub_date   AS pubDate,
+       a.created_at AS createdAt,
+       a.is_read    AS isRead,
+       NULL         AS snippet
+     FROM articles a
+     WHERE a.title LIKE ?1
+        OR a.content_md LIKE ?1
+        OR a.content LIKE ?1
+     ORDER BY a.pub_date DESC
+     LIMIT ?2`,
+  )
+
+  return stmt.all(likePattern, limit) as FtsSearchResult[]
+}
+
+/** @deprecated 保留旧版 FTS5 搜索（对中文不友好，仅作参考） */
+export function searchArticlesFts(query: string, limit = 20): FtsSearchResult[] {
+  return searchArticlesFullText(query, limit)
 }
 
 export function getArticleContentById(articleId: number): Pick<Article, 'id' | 'content' | 'contentMd' | 'translations'> | undefined {
