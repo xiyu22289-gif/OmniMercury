@@ -134,18 +134,19 @@ let placeholderCounter = 0
 function protectMedia(text: string): string {
   placeholderMap.clear()
   placeholderCounter = 0
+  // ★ 使用不冲突 Markdown 的占位符格式，避免 __ 被 LLM 当作粗体处理
   text = text.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (match) => {
-    const key = `__IMG_${placeholderCounter++}__`
+    const key = `IMG_PH_${placeholderCounter++}`
     placeholderMap.set(key, match)
     return key
   })
   text = text.replace(/(?<!!)\[([^\]]*)\]\(([^)]+)\)/g, (match) => {
-    const key = `__LINK_${placeholderCounter++}__`
+    const key = `LINK_PH_${placeholderCounter++}`
     placeholderMap.set(key, match)
     return key
   })
   text = text.replace(/<img[^>]*\/?>/gi, (match) => {
-    const key = `__IMG_${placeholderCounter++}__`
+    const key = `IMG_PH_${placeholderCounter++}`
     placeholderMap.set(key, match)
     return key
   })
@@ -155,7 +156,8 @@ function protectMedia(text: string): string {
 function restoreMedia(translated: string): string {
   let result = translated
   for (const [key, original] of placeholderMap) {
-    result = result.replace(key, original)
+    // 全局替换（兼容 ES2015），防止 LLM 重复输出同一占位符
+    result = result.split(key).join(original)
   }
   return result
 }
@@ -180,14 +182,14 @@ function buildTranslatePrompt(content: string, targetLang: string): string {
 
 function buildParagraphTranslatePrompt(paragraph: string, targetLang: string): string {
   const protectedText = protectMedia(paragraph)
-  const plainText = protectedText.replace(/<[^>]+>/g, '').replace(/__IMG_\d+__/g, '').replace(/__LINK_\d+__/g, '').trim()
+  const plainText = protectedText.replace(/<[^>]+>/g, '').replace(/IMG_PH_\d+/g, '').replace(/LINK_PH_\d+/g, '').trim()
   if (!plainText) return ''
   const isHtml = isHtmlContent(paragraph)
   const langName = targetLang === 'Chinese' ? '简体中文' : targetLang
   if (isHtml) {
-    return `Translate the following HTML fragment to ${langName}. Preserve ALL HTML tags and attributes exactly. Only translate visible text content. Keep placeholders like __IMG_N__ and __LINK_N__ exactly as-is. Do NOT include the original text. Output ONLY the translated HTML. No explanations:\n\n${protectedText}`
+    return `Translate the following HTML fragment to ${langName}. Preserve ALL HTML tags and attributes exactly. Only translate visible text content. Keep placeholders like IMG_PH_0 and LINK_PH_0 exactly as-is. Do NOT include the original text. Output ONLY the translated HTML. No explanations:\n\n${protectedText}`
   }
-  return `Translate the following Markdown fragment to ${langName}. Preserve ALL Markdown formatting (headings, bold, italic, code blocks, etc.) exactly. Keep placeholders like __IMG_N__ and __LINK_N__ exactly as-is. Do NOT include the original text. Output ONLY the translated Markdown. No explanations:\n\n${protectedText}`
+  return `Translate the following Markdown fragment to ${langName}. Preserve ALL Markdown formatting (headings, bold, italic, code blocks, etc.) exactly. Keep placeholders like IMG_PH_0 and LINK_PH_0 exactly as-is. Do NOT include the original text. Output ONLY the translated Markdown. No explanations:\n\n${protectedText}`
 }
 
 // ============================================================
@@ -214,7 +216,12 @@ export async function translateParagraphs(request: TranslateRequest, callback: S
 
   for (let i = 0; i < paragraphs.length; i++) {
     const prompt = buildParagraphTranslatePrompt(paragraphs[i], targetLang)
-    if (!prompt) { allTranslations[i] = ''; callback({ type: 'translateParagraph', articleId, paragraphIndex: i, fullText: '' }); continue }
+    if (!prompt) {
+      // 段落无待翻译文字（仅含图片等媒体），直接保留原文
+      allTranslations[i] = paragraphs[i]
+      callback({ type: 'translateParagraph', articleId, paragraphIndex: i, fullText: paragraphs[i] })
+      continue
+    }
 
     try {
       const client = createClient(config, activeKey)
@@ -508,7 +515,7 @@ function buildSelectiveTranslatePrompt(selectedText: string, targetLang: string)
   const langName = targetLang === 'Chinese' ? '简体中文' : targetLang
   const protectedText = protectMedia(selectedText)
   if (!protectedText.trim()) return ''
-  return `Translate the following text to ${langName}. Preserve any Markdown formatting (bold, italic, code, etc.) exactly. Keep placeholders like __IMG_N__ and __LINK_N__ exactly as-is. Output ONLY the translated text. No explanations:\n\n${protectedText}`
+  return `Translate the following text to ${langName}. Preserve any Markdown formatting (bold, italic, code, etc.) exactly. Keep placeholders like IMG_PH_0 and LINK_PH_0 exactly as-is. Output ONLY the translated text. No explanations:\n\n${protectedText}`
 }
 
 export async function translateSelection(request: SelectiveTranslateRequest, callback: StreamCallback): Promise<void> {
