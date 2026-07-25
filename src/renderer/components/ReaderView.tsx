@@ -9,7 +9,7 @@ import {
   Globe, ExternalLink, Sparkles, Languages, Loader, Settings,
   Check, Columns, AlignJustify, Replace, X,
   BookOpen, Monitor, Type, Minus, Plus, ChevronDown, Tag, Zap, Square, CheckSquare, Loader2, PenLine, Download,
-  Search, ArrowUp, ArrowDown
+  Search, ArrowUp, ArrowDown, Keyboard
 } from 'lucide-react'
 import NotesPanel from './NotesPanel'
 import ResizeHandle from './ResizeHandle'
@@ -1532,63 +1532,49 @@ export default function ReaderView() {
             />
           )}
 
-          {/* ===== 文章内搜索栏 ===== */}
-          {showInArticleSearch && (
-            <div className="mb-3 p-2 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-lg flex items-center gap-2">
-              <Search size={14} className="text-yellow-600 dark:text-yellow-400 flex-shrink-0" />
-              <input
-                ref={inArticleSearchRef}
-                type="text"
-                value={inArticleSearch}
-                onChange={(e) => { setInArticleSearch(e.target.value); setCurrentHitIndex(0) }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault()
-                    if (e.shiftKey) scrollToHit(currentHitIndex - 1)
-                    else scrollToHit(currentHitIndex + 1)
-                  }
-                  if (e.key === 'Escape') {
-                    setShowInArticleSearch(false)
-                    setInArticleSearch('')
-                  }
-                }}
-                placeholder="在文章中搜索..."
-                className="flex-1 px-2 py-1 text-sm bg-transparent border-none outline-none placeholder-gray-400 dark:placeholder-gray-500"
-              />
-              {searchHits.length > 0 && (
-                <span className="text-xs text-yellow-700 dark:text-yellow-300 font-medium whitespace-nowrap">
-                  {currentHitIndex + 1}/{searchHits.length}
-                </span>
-              )}
-              {inArticleSearch && (
-                <>
-                  <button
-                    onClick={() => scrollToHit(currentHitIndex - 1)}
-                    disabled={searchHits.length === 0}
-                    className="p-1 rounded hover:bg-yellow-200 dark:hover:bg-yellow-800 disabled:opacity-30 transition-colors"
-                    title="上一个匹配"
-                  >
-                    <ArrowUp size={14} className="text-yellow-600 dark:text-yellow-400" />
-                  </button>
-                  <button
-                    onClick={() => scrollToHit(currentHitIndex + 1)}
-                    disabled={searchHits.length === 0}
-                    className="p-1 rounded hover:bg-yellow-200 dark:hover:bg-yellow-800 disabled:opacity-30 transition-colors"
-                    title="下一个匹配"
-                  >
-                    <ArrowDown size={14} className="text-yellow-600 dark:text-yellow-400" />
-                  </button>
-                </>
-              )}
-              <button
-                onClick={() => { setShowInArticleSearch(false); setInArticleSearch('') }}
-                className="p-1 rounded hover:bg-yellow-200 dark:hover:bg-yellow-800 transition-colors"
-                title="关闭搜索"
-              >
-                <X size={14} className="text-yellow-600 dark:text-yellow-400" />
-              </button>
-            </div>
-          )}
+          {/* ===== 文章内搜索栏（始终可见） ===== */}
+          <div className="mb-3 p-2 bg-yellow-50/80 dark:bg-yellow-900/15 border border-yellow-200/60 dark:border-yellow-700/40 rounded-lg flex items-center gap-2">
+            <Search size={14} className="text-yellow-600 dark:text-yellow-400 flex-shrink-0 opacity-60" />
+            <input
+              type="text"
+              value={inArticleSearch}
+              onChange={(e) => { setInArticleSearch(e.target.value); setCurrentHitIndex(0) }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  if (e.shiftKey) scrollToHit(currentHitIndex - 1)
+                  else scrollToHit(currentHitIndex + 1)
+                }
+              }}
+              placeholder="在文章中搜索..."
+              className="flex-1 px-2 py-1 text-sm bg-transparent border-none outline-none placeholder-gray-400 dark:placeholder-gray-500"
+            />
+            {searchHits.length > 0 && (
+              <span className="text-xs text-yellow-700 dark:text-yellow-300 font-medium whitespace-nowrap">
+                {currentHitIndex + 1}/{searchHits.length}
+              </span>
+            )}
+            {inArticleSearch && (
+              <>
+                <button
+                  onClick={() => scrollToHit(currentHitIndex - 1)}
+                  disabled={searchHits.length === 0}
+                  className="p-1 rounded hover:bg-yellow-200 dark:hover:bg-yellow-800 disabled:opacity-30 transition-colors"
+                  title="上一个匹配"
+                >
+                  <ArrowUp size={14} className="text-yellow-600 dark:text-yellow-400" />
+                </button>
+                <button
+                  onClick={() => scrollToHit(currentHitIndex + 1)}
+                  disabled={searchHits.length === 0}
+                  className="p-1 rounded hover:bg-yellow-200 dark:hover:bg-yellow-800 disabled:opacity-30 transition-colors"
+                  title="下一个匹配"
+                >
+                  <ArrowDown size={14} className="text-yellow-600 dark:text-yellow-400" />
+                </button>
+              </>
+            )}
+          </div>
 
           {/* 错误信息 */}
           {error && (

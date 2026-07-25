@@ -7,7 +7,7 @@ import ReaderView from './components/ReaderView'
 import SearchBar from './components/SearchBar'
 import LLMSettings from './components/LLMSettings'
 import ResizeHandle from './components/ResizeHandle'
-import { Menu as MenuIcon, Sun, Moon, Monitor, Eye, X, CheckCircle, XCircle, Loader2, ChevronDown } from 'lucide-react'
+import { Menu as MenuIcon, Sun, Moon, Monitor, Eye, X, CheckCircle, XCircle, Loader2, ChevronDown, Keyboard } from 'lucide-react'
 
 /** 默认宽度常量 */
 const DEFAULT_SIDEBAR_WIDTH = 260
@@ -43,6 +43,8 @@ export default function App() {
 
   // 主题选择器
   const [showThemePicker, setShowThemePicker] = useState(false)
+  // 快捷键提示
+  const [showShortcuts, setShowShortcuts] = useState(false)
 
   const THEME_OPTIONS = useMemo(() => [
     { value: 'light' as const, icon: Sun, label: t('theme.light') },
@@ -202,6 +204,40 @@ export default function App() {
         </h1>
         <div className="flex-1" />
         <SearchBar />
+
+        {/* 快捷键提示按钮 */}
+        <div className="relative">
+          <button
+            onClick={() => setShowShortcuts(!showShortcuts)}
+            className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+            title="快捷键 (⌨)"
+          >
+            <Keyboard size={16} />
+          </button>
+          {showShortcuts && (
+            <div
+              className="absolute top-full right-0 mt-1 z-50 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 w-52 overflow-hidden"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="px-3 py-1.5 border-b border-gray-200 dark:border-gray-700">
+                <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">快捷键</span>
+              </div>
+              <div className="py-1.5 px-2 text-xs space-y-1 text-gray-600 dark:text-gray-300">
+                <div className="flex justify-between"><span>聚焦搜索</span><kbd>Ctrl+K</kbd></div>
+                <div className="flex justify-between"><span>刷新源</span><kbd>Ctrl+R</kbd></div>
+                <div className="flex justify-between"><span>LLM 设置</span><kbd>Ctrl+,</kbd></div>
+                <div className="flex justify-between"><span>侧边栏</span><kbd>Ctrl+B</kbd></div>
+                <div className="flex justify-between"><span>上一篇文章</span><kbd>k/↑</kbd></div>
+                <div className="flex justify-between"><span>下一篇文章</span><kbd>j/↓</kbd></div>
+                <div className="flex justify-between"><span>文章内搜索</span><kbd>Ctrl+F</kbd></div>
+              </div>
+            </div>
+          )}
+        </div>
+        {showShortcuts && (
+          <div className="fixed inset-0 z-40" onClick={() => setShowShortcuts(false)} />
+        )}
+
         <div className="relative">
           <button
             onClick={() => setShowThemePicker(!showThemePicker)}
