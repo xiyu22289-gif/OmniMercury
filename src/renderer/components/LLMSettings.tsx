@@ -14,7 +14,7 @@ const PRESET_MODELS = [
   { label: 'DeepSeek V4 Flash', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-v4-flash' },
   { label: 'ChatECNU (华东师大)', baseUrl: 'https://chat.ecnu.edu.cn/open/api/v1', model: 'ecnu-max' },
   { label: 'Kimi K2.7 Code', baseUrl: 'https://api.moonshot.cn/v1', model: 'kimi-k2.7-code' },
-  { label: 'OpenAI (ChatGPT)', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+  { label: 'GPT-5.6 Luna (CodeAPI)', baseUrl: 'https://codeapi.icu/v1', model: 'gpt-5.6-luna' },
 ]
 
 function formatTokens(n: number): string {

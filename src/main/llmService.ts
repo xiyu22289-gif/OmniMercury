@@ -64,7 +64,15 @@ async function recordTokens(params: TokenRecordParams): Promise<void> {
 
 function createClient(config: LlmConfig, activeKey: string): OpenAI {
   if (!activeKey) throw new Error('API Key 未配置。请在设置中填写 LLM API Key。')
-  return new OpenAI({ apiKey: activeKey, baseURL: config.baseUrl, timeout: 120_000 })
+  return new OpenAI({
+    apiKey: activeKey,
+    baseURL: config.baseUrl,
+    timeout: 120_000,
+    defaultHeaders: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+      'Origin': new URL(config.baseUrl).origin,
+    },
+  })
 }
 
 // ============================================================
@@ -466,13 +474,45 @@ export async function testConnection(configParams?: { baseUrl: string; apiKey: s
   const apiKey = configParams?.apiKey || getApiKeyForModel(cfg.model)
   if (!apiKey) return { success: false, latencyMs: 0, message: '未配置 API Key' }
 
-  const client = new OpenAI({ apiKey, baseURL: cfg.baseUrl, timeout: 15_000 })
+  const client = new OpenAI({
+    apiKey,
+    baseURL: cfg.baseUrl,
+    timeout: 15_000,
+    defaultHeaders: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+      'Origin': new URL(cfg.baseUrl).origin,
+    },
+  })
   const start = Date.now()
+
+  // 1) 先用 models.list 测试（大多数标准服务商支持）
   try {
     const response = await client.models.list()
     const latencyMs = Date.now() - start
     const modelCount = response.data?.length ?? 0
     return { success: true, latencyMs, message: `连接成功，延迟 ${latencyMs}ms，可用模型 ${modelCount} 个` }
+  } catch {
+    // models.list 不可用（如 CodeAPI 等中转站），继续回退
+  }
+
+  // 2) 回退：发一条轻量 chat 请求验证连通性
+  if (!cfg.model) return { success: false, latencyMs: Date.now() - start, message: '未配置模型名称' }
+
+  try {
+    const response = await client.chat.completions.create({
+      model: cfg.model,
+      messages: [{ role: 'user', content: 'hi' }],
+      max_tokens: 5,
+      temperature: 0,
+    })
+    const latencyMs = Date.now() - start
+    const text = response.choices?.[0]?.message?.content ?? ''
+    const hasContent = text.trim().length > 0
+    return {
+      success: true,
+      latencyMs,
+      message: `连接成功，延迟 ${latencyMs}ms${hasContent ? '' : '（无返回内容）'}`
+    }
   } catch (err) {
     const latencyMs = Date.now() - start
     const msg = err instanceof Error ? err.message : String(err)
@@ -491,7 +531,15 @@ export async function suggestTagsForArticle(title: string, content: string, exis
   const activeKey = getApiKeyForModel(config.model)
   if (!activeKey) { console.warn('[llmService] suggestTagsForArticle — 无 API Key'); return [] }
 
-  const client = new OpenAI({ apiKey: activeKey, baseURL: config.baseUrl, timeout: 30_000 })
+  const client = new OpenAI({
+    apiKey: activeKey,
+    baseURL: config.baseUrl,
+    timeout: 30_000,
+    defaultHeaders: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+      'Origin': new URL(config.baseUrl).origin,
+    },
+  })
   const maxLen = 3000
   const truncated = content.length > maxLen ? content.slice(0, maxLen) + '...' : content
 
