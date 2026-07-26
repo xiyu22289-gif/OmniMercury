@@ -76,6 +76,10 @@ interface AppState {
   currentFilterTagId: number | null
   tagArticleCounts: Record<number, number>
 
+  // ---- 星标文章 ----
+  starredArticles: Article[]
+  loadStarredArticles: () => Promise<void>
+
   // ---- 操作 ----
   setFeeds: (feeds: Feed[]) => void
   setArticles: (articles: Article[]) => void
@@ -97,6 +101,8 @@ interface AppState {
   setOpmlDialogOpen: (open: boolean) => void
   setAddFeedError: (error: string | null) => void
   clearAddFeedError: () => void
+  toggleStar: (articleId: number) => Promise<void>
+  markArticleRead: (articleId: number) => Promise<void>
 
   // ---- M3 阅读模式操作 ----
   setReaderMode: (mode: 'reader' | 'original') => void
@@ -154,7 +160,48 @@ interface AppState {
   fetchTagArticleCounts: () => Promise<void>
 }
 
+// ============================================================
+// UI 持久化：侧边栏、主题、字体、展示模式
+// ============================================================
+
+const PERSIST_KEY = 'omnimercury_ui_prefs'
+
+interface UiPrefs {
+  sidebarOpen: boolean
+  themeMode: 'light' | 'dark' | 'system' | 'eyeCare'
+  readerFontFamily: string
+  readerFontSize: number
+  displayMode: 'replace' | 'sideBySide' | 'topBottom' | 'newTab'
+  translateTargetLang: string
+  readerMode: 'reader' | 'original'
+}
+
+function loadUiPrefs(): Partial<UiPrefs> {
+  try {
+    const raw = localStorage.getItem(PERSIST_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch {}
+  return {}
+}
+
+function saveUiPrefs(state: AppState): void {
+  try {
+    const prefs: UiPrefs = {
+      sidebarOpen: state.sidebarOpen,
+      themeMode: state.themeMode,
+      readerFontFamily: state.readerFontFamily,
+      readerFontSize: state.readerFontSize,
+      displayMode: state.displayMode,
+      translateTargetLang: state.translateTargetLang,
+      readerMode: state.readerMode,
+    }
+    localStorage.setItem(PERSIST_KEY, JSON.stringify(prefs))
+  } catch {}
+}
+
 export const useStore = create<AppState>((set, get) => {
+  const saved = loadUiPrefs()
+
   return {
     // ---- 数据默认值 ----
     feeds: [],
@@ -180,19 +227,22 @@ export const useStore = create<AppState>((set, get) => {
     currentFilterTagId: null,
     tagArticleCounts: {},
 
-    // ---- UI 默认值 ----
-    sidebarOpen: true,
-    themeMode: 'light',
+    // ---- 星标文章 ----
+    starredArticles: [],
+
+    // ---- UI 默认值（优先从 localStorage 恢复）----
+    sidebarOpen: saved.sidebarOpen ?? true,
+    themeMode: saved.themeMode ?? 'light',
     systemPrefersDark: false,
     isLoading: false,
     error: null,
 
     // ---- M3 阅读模式默认值 ----
-    readerMode: 'reader',
+    readerMode: saved.readerMode ?? 'reader',
 
     // ---- 字体设置默认值 ----
-    readerFontFamily: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
-    readerFontSize: 16,
+    readerFontFamily: saved.readerFontFamily ?? 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
+    readerFontSize: saved.readerFontSize ?? 16,
 
     // ---- 笔记默认值 ----
     noteContent: '',
@@ -214,8 +264,8 @@ export const useStore = create<AppState>((set, get) => {
     translateLoading: false,
     translateMode: 'original',
     paragraphTranslations: [],
-    displayMode: 'topBottom',
-    translateTargetLang: 'Chinese',
+    displayMode: saved.displayMode ?? 'topBottom',
+    translateTargetLang: saved.translateTargetLang ?? 'Chinese',
 
     // ---- 选择文本翻译默认值 ----
     selectionOriginal: '',
@@ -290,6 +340,14 @@ export const useStore = create<AppState>((set, get) => {
         })
       }
 
+      // 自动标记已读：4 秒后标记
+      const state2 = get()
+      if (!state2.articles.find(a => a.id === articleId)?.is_read) {
+        setTimeout(() => {
+          get().markArticleRead(articleId)
+        }, 4000)
+      }
+
       try {
         const response = await window.api.getArticleContent(articleId)
         if (response.payload.error === 0) {
@@ -316,16 +374,11 @@ export const useStore = create<AppState>((set, get) => {
     },
     jumpToArticle: async (article) => {
       const state = get()
-
-      const existing = state.articles.find((a) => a.id === article.id)
-      const mergedArticles = existing
-        ? state.articles.map((a) => (a.id === article.id ? article : a))
-        : [article, ...state.articles]
-
+      const isSearch = state.searchResults.length > 0
+      const feedId = article.feed_id
       set({
-        selectedFeedId: article.feed_id,
+        selectedFeedId: feedId,
         selectedArticleId: article.id,
-        articles: mergedArticles,
         isLoading: true,
         articleContent: null,
         summaryStream: '',
@@ -337,6 +390,16 @@ export const useStore = create<AppState>((set, get) => {
         selectionTranslation: '',
         selectionTranslateLoading: false,
       })
+
+      // 非搜索模式：重新加载文章列表；搜索模式：保留搜索结果
+      if (!isSearch) {
+        try {
+          const feedResponse = await window.api.getArticles(feedId)
+          if (feedResponse.payload.error === 0) {
+            set({ articles: feedResponse.payload.articles || [] })
+          }
+        } catch { /* 静默 */ }
+      }
 
       try {
         const response = await window.api.getArticleContent(article.id)
@@ -366,18 +429,34 @@ export const useStore = create<AppState>((set, get) => {
     setSearchQuery: (query) => set({ searchQuery: query }),
     setSearchResults: (articles) => set({ searchResults: articles }),
     setSearchSuggestions: (articles) => set({ searchSuggestions: articles }),
-    toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
-    setThemeMode: (mode) => set({ themeMode: mode }),
+    toggleSidebar: () => set((state) => {
+      const next = { sidebarOpen: !state.sidebarOpen }
+      saveUiPrefs({ ...state, ...next })
+      return next
+    }),
+    setThemeMode: (mode) => {
+      set({ themeMode: mode })
+      saveUiPrefs(get())
+    },
     setSystemPrefersDark: (isDark) => set({ systemPrefersDark: isDark }),
     setLoading: (loading) => set({ isLoading: loading }),
     setError: (error) => set({ error }),
 
     // ---- M3 阅读模式操作 ----
-    setReaderMode: (mode) => set({ readerMode: mode }),
+    setReaderMode: (mode) => {
+      set({ readerMode: mode })
+      saveUiPrefs(get())
+    },
 
     // ---- 字体设置操作 ----
-    setReaderFontFamily: (font) => set({ readerFontFamily: font }),
-    setReaderFontSize: (size) => set({ readerFontSize: size }),
+    setReaderFontFamily: (font) => {
+      set({ readerFontFamily: font })
+      saveUiPrefs(get())
+    },
+    setReaderFontSize: (size) => {
+      set({ readerFontSize: size })
+      saveUiPrefs(get())
+    },
 
     // ---- OPML 操作 ----
     setOpmlImporting: (importing) => set({ opmlImporting: importing }),
@@ -387,6 +466,46 @@ export const useStore = create<AppState>((set, get) => {
     // ---- 添加订阅源错误 ----
     setAddFeedError: (error) => set({ addFeedError: error }),
     clearAddFeedError: () => set({ addFeedError: null }),
+
+    toggleStar: async (articleId) => {
+      try {
+        const res = await window.api.toggleStar(articleId)
+        if (res.success && res.data) {
+          const { isStarred } = res.data
+          set(state => ({
+            articles: state.articles.map(a =>
+              a.id === articleId ? { ...a, is_starred: isStarred === 1 } : a
+            ),
+          }))
+        }
+      } catch (err) {
+        console.error('[store] toggleStar 异常：', err)
+      }
+    },
+
+    markArticleRead: async (articleId) => {
+      try {
+        await window.api.markRead(articleId)
+        set(state => ({
+          articles: state.articles.map(a =>
+            a.id === articleId ? { ...a, is_read: true } : a
+          ),
+        }))
+      } catch (err) {
+        console.error('[store] markArticleRead 异常：', err)
+      }
+    },
+
+    loadStarredArticles: async () => {
+      try {
+        const res = await window.api.getStarredArticles()
+        if (res.payload.error === 0) {
+          set({ articles: res.payload.articles || [] })
+        }
+      } catch (err) {
+        console.error('[store] loadStarredArticles 异常：', err)
+      }
+    },
 
     // ---- LLM 操作 ----
     setShowSettings: (show) => set({ showSettings: show }),
@@ -410,8 +529,14 @@ export const useStore = create<AppState>((set, get) => {
         return { paragraphTranslations: arr }
       }),
     resetParagraphTranslations: () => set({ paragraphTranslations: [] }),
-    setDisplayMode: (mode) => set({ displayMode: mode }),
-    setTranslateTargetLang: (lang) => set({ translateTargetLang: lang }),
+    setDisplayMode: (mode) => {
+      set({ displayMode: mode })
+      saveUiPrefs(get())
+    },
+    setTranslateTargetLang: (lang) => {
+      set({ translateTargetLang: lang })
+      saveUiPrefs(get())
+    },
     loadLlmConfig: async () => {
       try {
         const config = await window.api.getLlmConfig()

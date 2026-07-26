@@ -63,6 +63,7 @@ export interface ArticleSummary {
   id: number;
   title: string;
   isRead: number | null;
+  isStarred?: number | null;
   summary: string | null;
   translations: string | null;
   link: string | null;
@@ -113,6 +114,43 @@ interface ParsedFeed {
 // 核心业务函数
 // ============================================================
 
+/**
+ * 将 RSS article link 解析为绝对 URL。
+ * 处理相对路径 (/article/123)、协议相对 (//cdn.example.com)、
+ * 以及已经绝对化的 URL。
+ */
+function resolveArticleLink(rawLink: string | undefined, feedUrl: string): string | null {
+  if (!rawLink) return null
+  try {
+    const absolute = new URL(rawLink, feedUrl).href
+    return absolute
+  } catch {
+    // 无法解析时返回原始值
+    return rawLink
+  }
+}
+
+/**
+ * 将 RSS 文章日期统一转换为 ISO 8601 格式。
+ * RSS feed 常见的日期格式：
+ *   - RFC 2822: "Mon, 21 Jul 2026 14:30:00 GMT"
+ *   - ISO 8601:  "2026-07-21T14:30:00Z"
+ *   - 纯日期:    "2026-07-21"
+ *
+ * SQLite TEXT 列按字母序排序，RFC 2822 的字母序与时间序不一致
+ * （如 "Wed" < "Tue"），因此必须在入库前统一为 ISO 8601。
+ */
+function normalizeDate(raw: string | undefined | null): string | null {
+  if (!raw) return null
+  try {
+    const d = new Date(raw)
+    if (isNaN(d.getTime())) return raw // 无法解析，保留原始值
+    return d.toISOString()
+  } catch {
+    return raw
+  }
+}
+
 /** 规范化为单行纯文本（去除 HTML 标签和换行），空值兜底空字符串。 */
 function safeSummary(raw: string | undefined, maxLen = 200): string {
   if (!raw) return '';
@@ -130,17 +168,22 @@ function safeSummary(raw: string | undefined, maxLen = 200): string {
  * 任意环节失败均返回 `{ success: false, error }`，绝不抛未捕获异常。
  */
 export async function addFeed(url: string): Promise<AddFeedResult> {
+  console.log('[feedService] addFeed 开始，URL:', url)
+
   // 1. 校验 URL 格式
   let normalizedUrl: string;
   try {
     normalizedUrl = new URL(url).href;
+    console.log('[feedService] ✓ 规范化 URL:', normalizedUrl)
   } catch {
+    console.warn('[feedService] ✗ URL 格式无效:', url)
     return { success: false, errorCode: 'INVALID_URL', error: 'URL 格式无效，请输入完整的 RSS 链接（如 https://example.com/feed.xml）。' };
   }
 
   // 2. 去重检查
   const existing = getFeedByUrl(normalizedUrl);
   if (existing) {
+    console.log('[feedService] ✗ 订阅源已存在:', existing.title)
     return {
       success: false,
       errorCode: 'DUPLICATE',
@@ -151,6 +194,7 @@ export async function addFeed(url: string): Promise<AddFeedResult> {
   // 3. 拉取 RSS XML
   let xml: string;
   try {
+    console.log('[feedService] → 拉取 RSS XML...')
     const response = await axios.get(normalizedUrl, {
       timeout: 15_000,
       proxy: false,
@@ -162,8 +206,10 @@ export async function addFeed(url: string): Promise<AddFeedResult> {
       validateStatus: (status) => status >= 200 && status < 400,
     });
     xml = response.data;
+    console.log('[feedService] ✓ 拉取成功，HTTP', response.status, 'XML 长度:', xml.length)
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    console.error('[feedService] ✗ 网络请求失败:', message)
     return {
       success: false,
       errorCode: 'NETWORK_ERROR',
@@ -174,9 +220,25 @@ export async function addFeed(url: string): Promise<AddFeedResult> {
   // 4. 解析 RSS/Atom
   let parsed: ParsedFeed;
   try {
+    console.log('[feedService] → 解析 RSS/Atom...')
     parsed = (await rssParser.parseString(xml)) as ParsedFeed;
+    const itemCount = parsed.items?.length ?? 0
+    console.log('[feedService] ✓ 解析成功 — feedTitle:', parsed.title, 'items:', itemCount)
+    if (itemCount > 0) {
+      const first = parsed.items![0]
+      console.log('[feedService]   第一条 item:', JSON.stringify({
+        title: first.title?.slice(0, 60),
+        link: first.link,
+        pubDate: first.pubDate,
+        isoDate: first.isoDate,
+        hasContent: !!first.content,
+        hasContentSnippet: !!first.contentSnippet,
+        contentLen: first.content?.length ?? 0,
+      }, null, 2))
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    console.error('[feedService] ✗ RSS 解析失败:', message)
     return {
       success: false,
       errorCode: 'NOT_RSS_FEED',
@@ -190,14 +252,17 @@ export async function addFeed(url: string): Promise<AddFeedResult> {
   // 5. 入库：订阅源
   let feed: Feed;
   try {
+    console.log('[feedService] → 入库订阅源:', title)
     feed = insertFeed({
       title,
       url: normalizedUrl,
       description: parsed.description ?? null,
       link: parsed.link ?? null,
     });
+    console.log('[feedService] ✓ 订阅源入库成功，feedId:', feed.id)
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    console.error('[feedService] ✗ 订阅源入库失败:', message)
     return {
       success: false,
       errorCode: 'DB_ERROR',
@@ -207,28 +272,46 @@ export async function addFeed(url: string): Promise<AddFeedResult> {
 
   // 6. 入库：批量文章
   if (items.length > 0) {
-    const articleRows: Array<Omit<NewArticle, 'id' | 'createdAt'>> = items.map(
-      (item) => ({
-        feedId: feed.id,
-        title: item.title?.trim() || '(无标题)',
-        link: item.link ?? null,
-        content: item.content ?? item.contentSnippet ?? null,
-        contentMd: null,
-        summary: safeSummary(item.contentSnippet ?? item.summary ?? item.content),
-        isRead: 0,
-        isStarred: 0,
-        author: item.author ?? null,
-        pubDate: item.pubDate ?? item.isoDate ?? null,
-      }),
-    );
+    console.log('[feedService] → 准备入库文章，数量:', items.length)
+    let articleRows: Array<Omit<NewArticle, 'id' | 'createdAt'>> = []
+    try {
+      articleRows = items.map(
+        (item) => ({
+          feedId: feed.id,
+          title: item.title?.trim() || '(无标题)',
+          link: resolveArticleLink(item.link, normalizedUrl),
+          content: item.content ?? item.contentSnippet ?? null,
+          contentMd: null,
+          summary: safeSummary(item.contentSnippet ?? item.summary ?? item.content),
+          isRead: 0,
+          isStarred: 0,
+          author: item.author ?? null,
+          pubDate: normalizeDate(item.pubDate ?? item.isoDate),
+        }),
+      );
+    } catch (err) {
+      console.error('[feedService] 构建 articleRows 失败：', err)
+      articleRows = []
+    }
+    console.log('[feedService]   第一篇文章:', JSON.stringify({
+      title: articleRows[0]?.title,
+      link: articleRows[0]?.link,
+      pubDate: articleRows[0]?.pubDate,
+      author: articleRows[0]?.author,
+    }))
 
     try {
-      insertArticles(articleRows);
+      console.log('[feedService] → 调用 insertArticles...')
+      const insertedResult = insertArticles(articleRows);
+      console.log('[feedService] ✓ 文章入库成功，实际插入:', insertedResult.length)
     } catch (err) {
-      console.error(`[feedService] 文章入库部分失败（feedId=${feed.id}）：`, err);
+      console.error(`[feedService] ✗ 文章入库失败（feedId=${feed.id}）：`, err)
     }
+  } else {
+    console.warn('[feedService] ⚠ RSS items 为空，无文章入库')
   }
 
+  console.log('[feedService] ✓ addFeed 完成:', JSON.stringify({ success: true, feedId: feed.id, title: feed.title }))
   return { success: true, feedId: feed.id, title: feed.title };
 }
 
@@ -252,10 +335,17 @@ export function listFeeds(): FeedSummary[] {
  * feedId 不存在时返回空数组，不抛错。
  */
 export function getArticles(feedId: number): ArticleSummary[] {
-  return getArticlesByFeedId(feedId).map((a) => ({
+  const rows = getArticlesByFeedId(feedId)
+  // 诊断日志：输出前 3 条文章的时间戳
+  if (rows.length > 0) {
+    console.log(`[feedService] getArticles feedId=${feedId} 共 ${rows.length} 条，前3条时间:`,
+      rows.slice(0, 3).map(a => ({ id: a.id, pubDate: a.pubDate, createdAt: a.createdAt })))
+  }
+  return rows.map((a) => ({
     id: a.id,
     title: a.title,
     isRead: a.isRead,
+    isStarred: a.isStarred,
     summary: a.summary,
     translations: a.translations,
     link: a.link,
@@ -300,14 +390,14 @@ export async function refreshAllFeeds(): Promise<{ newCount: number }> {
           insertArticle({
             feedId: feed.id,
             title: item.title?.trim() || '(无标题)',
-            link: link,
+            link: resolveArticleLink(link, feed.url),
             content: item.content ?? item.contentSnippet ?? null,
             contentMd: null,
             summary: safeSummary(item.contentSnippet ?? item.summary ?? item.content),
             isRead: 0,
             isStarred: 0,
             author: item.author ?? null,
-            pubDate: item.pubDate ?? item.isoDate ?? null,
+            pubDate: normalizeDate(item.pubDate ?? item.isoDate),
           });
           newCount++;
         } catch {
@@ -332,6 +422,7 @@ export function searchArticles(query: string, limit = 20): SearchArticleSummary[
     feedId: a.feedId,
     title: a.title,
     isRead: a.isRead,
+    isStarred: a.isStarred,
     summary: a.summary,
     translations: a.translations,
     link: a.link,
@@ -354,6 +445,7 @@ export function fullTextSearch(query: string, limit = 20): FullTextSearchResult[
     feedId: a.feedId,
     title: a.title,
     isRead: a.isRead,
+    isStarred: a.isStarred,
     summary: a.summary,
     translations: a.translations,
     link: a.link,
@@ -384,6 +476,7 @@ export function getArticlesByIdList(ids: number[]): ArticleSummary[] {
     id: a.id,
     title: a.title,
     isRead: a.isRead,
+    isStarred: a.isStarred,
     summary: a.summary,
     translations: a.translations,
     link: a.link,

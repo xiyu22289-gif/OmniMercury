@@ -39,8 +39,8 @@ const api = {
     ipcRenderer.invoke('backend:getArticleContent', articleId),
   removeFeed: (feedId: number) =>
     ipcRenderer.invoke('backend:removeFeed', feedId),
-  searchArticles: (query: string, feedId?: number, offset?: number, limit?: number) =>
-    ipcRenderer.invoke('backend:searchArticles', query, feedId, offset, limit),
+  searchArticles: (query: string, feedId?: number, offset?: number, limit?: number, useFts?: boolean) =>
+    ipcRenderer.invoke('backend:searchArticles', query, feedId, offset, limit, useFts),
   getCachedArticleContent: (articleId: number) =>
     ipcRenderer.invoke('backend:getCachedArticleContent', articleId),
 
@@ -49,6 +49,14 @@ const api = {
   // ============================================================
   getArticlesByIds: (ids: number[]): Promise<IpcResponse> =>
     ipcRenderer.invoke('backend:getArticlesByIds', ids),
+
+  // ---- Star / Read ----
+  toggleStar: (articleId: number): Promise<{ success: boolean; data?: { id: number; isStarred: number }; error?: string }> =>
+    ipcRenderer.invoke('backend:toggleStar', articleId),
+  markRead: (articleId: number): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('backend:markRead', articleId),
+  getStarredArticles: (): Promise<IpcResponse> =>
+    ipcRenderer.invoke('backend:getStarredArticles'),
 
   // ---- LLM 配置 ----
   getLlmConfig: (): Promise<LlmConfig> =>

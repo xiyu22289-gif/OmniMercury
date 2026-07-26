@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useStore } from '../store'
-import { Rss, Plus, RefreshCw, Trash2, FolderOpen, Upload, Download, AlertCircle, Info, XCircle, Tag, ChevronDown, ChevronRight, Settings, Globe } from 'lucide-react'
+import { Rss, Plus, RefreshCw, Trash2, FolderOpen, Upload, Download, AlertCircle, Info, XCircle, Tag, ChevronDown, ChevronRight, Settings, Globe, Star } from 'lucide-react'
 import TagManager from './TagManager'
 
 /** 错误码 → 图标 + 颜色映射 */
@@ -24,7 +24,8 @@ export default function Sidebar() {
     addFeedError, setAddFeedError, clearAddFeedError,
     setOpmlImporting, setOpmlProgress, setOpmlDialogOpen,
     // M5 标签
-    tags, currentFilterTagId, setFilterTag, fetchTags, tagArticleCounts
+    tags, currentFilterTagId, setFilterTag, fetchTags, tagArticleCounts,
+    loadStarredArticles
   } = useStore()
 
   const [addUrl, setAddUrl] = useState('')
@@ -279,6 +280,17 @@ export default function Sidebar() {
           </div>
         )}
 
+        {/* ===== ⭐ 星标文章 ===== */}
+        <div className="px-4 py-1.5 mt-1">
+          <button
+            onClick={loadStarredArticles}
+            className="w-full flex items-center gap-2 px-2 py-1 text-sm text-yellow-600 dark:text-yellow-400 hover:bg-yellow-50 dark:hover:bg-yellow-900/20 rounded transition-colors"
+          >
+            <Star size={13} className="flex-shrink-0" />
+            <span className="text-xs">⭐ 星标文章</span>
+          </button>
+        </div>
+
         {/* ===== M5 标签筛选区域 ===== */}
         <div className="border-t border-gray-200 dark:border-gray-700 mt-1 pt-1">
           <button
@@ -299,7 +311,7 @@ export default function Sidebar() {
           </button>
 
           {showTagSection && (
-            <div className="px-2 py-1">
+            <div className="px-2 py-1 max-h-40 overflow-y-auto">
               {tags.length === 0 ? (
                 <div className="px-2 py-2 text-xs text-gray-400">
                   {t('sidebar.noTags')}

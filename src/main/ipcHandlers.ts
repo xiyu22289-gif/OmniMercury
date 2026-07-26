@@ -32,13 +32,23 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('backend:listFeeds', async (): Promise<IpcResponse> => {
-    const feeds: Feed[] = listFeeds().map(f => ({ id: f.id, title: f.title, url: f.url, link: f.link ?? undefined, description: f.description ?? undefined, added_at: f.createdAt ?? '' }))
-    return { type: 'list_feeds', payload: { error: 0, feeds } }
+    try {
+      const feeds: Feed[] = listFeeds().map(f => ({ id: f.id, title: f.title, url: f.url, link: f.link ?? undefined, description: f.description ?? undefined, added_at: f.createdAt ?? '' }))
+      return { type: 'list_feeds', payload: { error: 0, feeds } }
+    } catch (err) {
+      console.error('[ipcHandlers] listFeeds 异常：', err)
+      return { type: 'list_feeds', payload: { error: 1, message: err instanceof Error ? err.message : String(err) } }
+    }
   })
 
   ipcMain.handle('backend:getArticles', async (_event, feedId: number): Promise<IpcResponse> => {
-    const articles: Article[] = getArticles(feedId).map(a => ({ id: a.id, feed_id: feedId, title: a.title, url: a.link ?? '', author: a.author ?? undefined, summary: a.summary ?? undefined, translations: a.translations ?? undefined, published_at: a.pubDate ?? a.createdAt ?? '', fetched_at: a.createdAt ?? '', is_read: a.isRead === 1 }))
-    return { type: 'list_articles', payload: { error: 0, articles } }
+    try {
+      const articles: Article[] = getArticles(feedId).map(a => ({ id: a.id, feed_id: feedId, title: a.title, url: a.link ?? '', author: a.author ?? undefined, summary: a.summary ?? undefined, translations: a.translations ?? undefined, published_at: a.pubDate ?? a.createdAt ?? '', fetched_at: a.createdAt ?? '', is_read: a.isRead === 1, is_starred: a.isStarred === 1 }))
+      return { type: 'list_articles', payload: { error: 0, articles } }
+    } catch (err) {
+      console.error('[ipcHandlers] getArticles 异常：', err)
+      return { type: 'list_articles', payload: { error: 1, message: err instanceof Error ? err.message : String(err) } }
+    }
   })
 
   // ================================================================
@@ -66,9 +76,18 @@ export function registerIpcHandlers(): void {
       }
 
       if (article.contentMd) {
+        // 返回缓存的翻译和摘要数据，供前端检查避免重复 API 调用
         return {
           type: 'get_article_content',
-          payload: { error: 0, content: { id: article.id, content: article.contentMd } }
+          payload: {
+            error: 0,
+            content: {
+              id: article.id,
+              content: article.contentMd,
+              summary: article.summary,
+              translations: article.translations,
+            }
+          }
         }
       }
 
@@ -100,6 +119,44 @@ export function registerIpcHandlers(): void {
   // ================================================================
   // backend:removeFeed — 删除订阅源
   // ================================================================
+  // ---- Star / Read Toggle ----
+  ipcMain.handle('backend:toggleStar', async (_event, articleId: number) => {
+    try {
+      const { toggleStarArticle } = await import('./db')
+      const result = toggleStarArticle(articleId)
+      return { success: true, data: result }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle('backend:markRead', async (_event, articleId: number) => {
+    try {
+      const { markArticleRead } = await import('./db')
+      markArticleRead(articleId)
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle('backend:getStarredArticles', async (): Promise<IpcResponse> => {
+    try {
+      const { getStarredArticles } = await import('./db')
+      const rows = getStarredArticles()
+      const articles: Article[] = rows.map(a => ({
+        id: a.id, feed_id: a.feedId, title: a.title,
+        url: a.link ?? '', author: a.author ?? undefined,
+        summary: a.summary ?? undefined, translations: a.translations ?? undefined,
+        published_at: a.pubDate ?? a.createdAt ?? '', fetched_at: a.createdAt ?? '',
+        is_read: a.isRead === 1, is_starred: a.isStarred === 1,
+      }))
+      return { type: 'list_articles', payload: { error: 0, articles } }
+    } catch (err) {
+      return { type: 'list_articles', payload: { error: 1, message: err instanceof Error ? err.message : String(err) } }
+    }
+  })
+
   ipcMain.handle('backend:removeFeed', async (_event, feedId: number): Promise<IpcResponse> => {
     try { getDb().delete(feedsTable).where(eq(feedsTable.id, feedId)).run(); return { type: 'remove_feed', payload: { error: 0, message: '已删除' } } }
     catch (err) { return { type: 'remove_feed', payload: { error: 1, message: err instanceof Error ? err.message : String(err) } } }
@@ -115,49 +172,64 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('backend:searchArticles', async (_event, query: string, _feedId?: number, _offset?: number, _limit?: number, _useFts?: boolean): Promise<IpcResponse> => {
-    if (!query?.trim()) return { type: 'search_articles', payload: { error: 0, articles: [] } }
-    const limit = typeof _limit === 'number' && _limit > 0 ? _limit : 20
+    try {
+      if (!query?.trim()) return { type: 'search_articles', payload: { error: 0, articles: [] } }
+      const limit = typeof _limit === 'number' && _limit > 0 ? _limit : 20
 
-    // Enter 回车搜索使用 FTS5 全文搜索，输入建议使用标题模糊搜索
-    let results: Array<{
-      id: number
-      feedId: number
-      title: string
-      link: string | null
-      summary: string | null
-      translations: string | null
-      author: string | null
-      pubDate: string | null
-      createdAt: string | null
-      isRead: number | null
-    }>
+      // Enter 回车搜索使用 FTS5 全文搜索，输入建议使用标题模糊搜索
+      let results: Array<{
+        id: number
+        feedId: number
+        title: string
+        link: string | null
+        summary: string | null
+        translations: string | null
+        author: string | null
+        pubDate: string | null
+        createdAt: string | null
+        isRead: number | null
+      }>
 
-    if (_useFts) {
-      results = fullTextSearch(query.trim(), limit).map(a => ({
-        id: a.id, feedId: a.feedId, title: a.title, link: a.link,
-        summary: a.summary, translations: a.translations, author: a.author,
-        pubDate: a.pubDate, createdAt: a.createdAt, isRead: a.isRead,
-      }))
-    } else {
-      results = searchArticles(query.trim(), limit)
+      if (_useFts) {
+        results = fullTextSearch(query.trim(), limit).map(a => ({
+          id: a.id, feedId: a.feedId, title: a.title, link: a.link,
+          summary: a.summary, translations: a.translations, author: a.author,
+          pubDate: a.pubDate, createdAt: a.createdAt, isRead: a.isRead, isStarred: a.isStarred,
+        }))
+      } else {
+        results = searchArticles(query.trim(), limit)
+      }
+
+      const articles: Article[] = results.map(a => ({ id: a.id, feed_id: a.feedId, title: a.title, url: a.link ?? '', author: a.author ?? undefined, summary: a.summary ?? undefined, translations: a.translations ?? undefined, published_at: a.pubDate ?? a.createdAt ?? '', fetched_at: a.createdAt ?? '', is_read: a.isRead === 1, is_starred: a.isStarred === 1 }))
+      return { type: 'search_articles', payload: { error: 0, articles } }
+    } catch (err) {
+      console.error('[ipcHandlers] searchArticles 异常：', err)
+      return { type: 'search_articles', payload: { error: 1, message: err instanceof Error ? err.message : String(err) } }
     }
-
-    const articles: Article[] = results.map(a => ({ id: a.id, feed_id: a.feedId, title: a.title, url: a.link ?? '', author: a.author ?? undefined, summary: a.summary ?? undefined, translations: a.translations ?? undefined, published_at: a.pubDate ?? a.createdAt ?? '', fetched_at: a.createdAt ?? '', is_read: a.isRead === 1 }))
-    return { type: 'search_articles', payload: { error: 0, articles } }
   })
 
   ipcMain.handle('backend:getCachedArticleContent', async (_event, articleId: number): Promise<IpcResponse> => {
-    const cached = getCachedArticleContent(articleId)
-    if (!cached) return { type: 'get_cached_article_content', payload: { error: 1, message: '本地无缓存内容' } }
-    return { type: 'get_cached_article_content', payload: { error: 0, content: { id: cached.id, content: cached.body } } }
+    try {
+      const cached = getCachedArticleContent(articleId)
+      if (!cached) return { type: 'get_cached_article_content', payload: { error: 1, message: '本地无缓存内容' } }
+      return { type: 'get_cached_article_content', payload: { error: 0, content: { id: cached.id, content: cached.body } } }
+    } catch (err) {
+      console.error('[ipcHandlers] getCachedArticleContent 异常：', err)
+      return { type: 'get_cached_article_content', payload: { error: 1, message: err instanceof Error ? err.message : String(err) } }
+    }
   })
 
   // ================================================================
   // M5: 按 ID 列表获取文章（跨订阅源，用于标签筛选）
   // ================================================================
   ipcMain.handle('backend:getArticlesByIds', async (_event, ids: number[]): Promise<IpcResponse> => {
-    const articles: Article[] = getArticlesByIdList(ids).map(a => ({ id: a.id, feed_id: 0, title: a.title, url: a.link ?? '', author: a.author ?? undefined, summary: a.summary ?? undefined, translations: a.translations ?? undefined, published_at: a.pubDate ?? a.createdAt ?? '', fetched_at: a.createdAt ?? '', is_read: a.isRead === 1 }))
-    return { type: 'list_articles', payload: { error: 0, articles } }
+    try {
+      const articles: Article[] = getArticlesByIdList(ids).map(a => ({ id: a.id, feed_id: 0, title: a.title, url: a.link ?? '', author: a.author ?? undefined, summary: a.summary ?? undefined, translations: a.translations ?? undefined, published_at: a.pubDate ?? a.createdAt ?? '', fetched_at: a.createdAt ?? '', is_read: a.isRead === 1, is_starred: a.isStarred === 1 }))
+      return { type: 'list_articles', payload: { error: 0, articles } }
+    } catch (err) {
+      console.error('[ipcHandlers] getArticlesByIds 异常：', err)
+      return { type: 'list_articles', payload: { error: 1, message: err instanceof Error ? err.message : String(err) } }
+    }
   })
 
   // ================================================================

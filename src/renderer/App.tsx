@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useState, useCallback, useMemo, Component } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useStore } from './store'
 import Sidebar from './components/Sidebar'
@@ -8,6 +8,33 @@ import SearchBar from './components/SearchBar'
 import LLMSettings from './components/LLMSettings'
 import ResizeHandle from './components/ResizeHandle'
 import { Menu as MenuIcon, Sun, Moon, Monitor, Eye, X, CheckCircle, XCircle, Loader2, ChevronDown, Keyboard } from 'lucide-react'
+
+class ErrorBoundary extends Component<{ children: React.ReactNode }, { hasError: boolean; error: Error | null }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props)
+    this.state = { hasError: false, error: null }
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error }
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="fixed inset-0 flex items-center justify-center bg-red-50 dark:bg-red-950 z-50 p-8">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-2xl p-6 max-w-lg w-full">
+            <h2 className="text-lg font-bold text-red-600 mb-2">应用错误</h2>
+            <pre className="text-xs text-red-500 bg-red-50 dark:bg-red-950 p-3 rounded overflow-auto max-h-64 whitespace-pre-wrap">{this.state.error?.stack}</pre>
+            <button
+              onClick={() => { this.setState({ hasError: false, error: null }) }}
+              className="mt-3 px-4 py-1.5 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm"
+            >重试</button>
+          </div>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 
 /** 默认宽度常量 */
 const DEFAULT_SIDEBAR_WIDTH = 260
@@ -25,7 +52,7 @@ export default function App() {
     setFeeds, selectFeed, setError, isLoading, loadLlmConfig,
     opmlImporting, opmlProgress, opmlDialogOpen, setOpmlDialogOpen,
     showSettings, setShowSettings,
-    selectArticle
+    selectArticle, toggleStar
   } = useStore()
 
   /** 推导实际暗色状态 */
@@ -123,15 +150,23 @@ export default function App() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      const isEditing = tag === 'TEXTAREA' || (e.target as HTMLElement).isContentEditable
+      if (isEditing) return
 
       const mod = e.ctrlKey || e.metaKey
 
-      // Ctrl/Cmd + K — 聚焦搜索
+      // Ctrl/Cmd + K — 打开/聚焦全局搜索（始终可用，除编辑区外）
       if (mod && e.key === 'k') {
         e.preventDefault()
-        const searchBtn = document.querySelector('[title="Search articles"]') as HTMLButtonElement | null
-        searchBtn?.click()
+        const btn = document.getElementById('global-search-btn') as HTMLButtonElement | null
+        if (btn) {
+          btn.click()
+          // 点击后延迟聚焦输入框
+          setTimeout(() => {
+            const input = document.querySelector('.app-layout input[placeholder*="搜索"]') as HTMLInputElement | null
+            input?.focus()
+          }, 150)
+        }
         return
       }
 
@@ -176,6 +211,17 @@ export default function App() {
         return
       }
 
+      // s — 星标/取消星标当前文章
+      if (mod) return // 不与 Ctrl+S 等组合键冲突
+      if (e.key === 's') {
+        e.preventDefault()
+        const state = useStore.getState()
+        if (state.selectedArticleId !== null) {
+          toggleStar(state.selectedArticleId)
+        }
+        return
+      }
+
       // Ctrl/Cmd + B — 切换侧边栏
       if (mod && e.key === 'b') {
         e.preventDefault()
@@ -189,6 +235,7 @@ export default function App() {
   }, [])
 
   return (
+    <ErrorBoundary>
     <div className="app-layout">
       {/* 顶栏 */}
       <div className="fixed top-0 left-0 right-0 h-10 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center px-3 gap-2 z-10">
@@ -227,6 +274,7 @@ export default function App() {
                 <div className="flex justify-between"><span>刷新源</span><kbd>Ctrl+R</kbd></div>
                 <div className="flex justify-between"><span>LLM 设置</span><kbd>Ctrl+,</kbd></div>
                 <div className="flex justify-between"><span>侧边栏</span><kbd>Ctrl+B</kbd></div>
+                <div className="flex justify-between"><span>星标文章</span><kbd>s</kbd></div>
                 <div className="flex justify-between"><span>上一篇文章</span><kbd>k/↑</kbd></div>
                 <div className="flex justify-between"><span>下一篇文章</span><kbd>j/↓</kbd></div>
                 <div className="flex justify-between"><span>文章内搜索</span><kbd>Ctrl+F</kbd></div>
@@ -279,7 +327,7 @@ export default function App() {
       <div className="flex flex-1 min-h-0">
         {/* 侧边栏 */}
         <div
-          className={sidebarOpen ? '' : 'sidebar collapsed'}
+          className={`overflow-hidden ${sidebarOpen ? '' : 'collapsed'}`}
           style={{
             width: sidebarOpen ? sidebarWidth : 0,
             minWidth: sidebarOpen ? MIN_SIDEBAR_WIDTH : 0
@@ -417,5 +465,6 @@ export default function App() {
         </div>
       )}
     </div>
+    </ErrorBoundary>
   )
 }

@@ -54,6 +54,7 @@
     "stop": "停止",
     "translationBanner": "🌐 AI 翻譯進行中...",
     "translatingParagraphs": "正在逐段翻譯 {{n}} 個段落，請稍候",
+    "noTranslation": "（暫無譯文）",
     "translatedFrom": "譯文",
     "originalText": "原文",
     "close": "關閉",

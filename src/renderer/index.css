@@ -65,7 +65,7 @@ html, body, #root {
 }
 
 .sidebar {
-  border-right: 1px solid #e5e7eb; display: flex; flex-direction: column; background: #f9fafb; overflow: hidden;
+  border-right: 1px solid #e5e7eb; display: flex; flex-direction: column; background: #f9fafb; height: 100%;
 }
 .dark .sidebar { background: #1f2937; border-right-color: #374151; }
 .sidebar.collapsed { width: 0 !important; min-width: 0 !important; overflow: hidden; border-right: none; }

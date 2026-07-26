@@ -23,7 +23,7 @@ type StreamCallback = (chunk: LlmStreamChunk | LlmStreamDone | LlmStreamError) =
 /** 估算文本的 Token 数。 */
 function estimateTokenCount(text: string): number {
   if (!text) return 0
-  const cjkCount = (text.match(/[\u4e00-\u9fff\u3400-\u4dbf\u3000-\u303f\uff00-\uffef]/g) || []).length
+  const cjkCount = (text.match(/[一-鿿㐀-䶿　-〿＀-￯]/g) || []).length
   const totalChars = text.length
   const nonCjkCount = totalChars - cjkCount
   if (totalChars === 0) return 0
@@ -125,38 +125,40 @@ function getTemperature(model: string): number {
 }
 
 // ============================================================
-// 占位符保护
+// 占位符保护（仅图片 — 链接保持原样，LLM 天生会处理 Markdown 链接）
 // ============================================================
 
-const placeholderMap = new Map<string, string>()
-let placeholderCounter = 0
+const imgPlaceholderMap = new Map<string, string>()
+let imgCounter = 0
 
+/**
+ * 只保护图片（替换为占位符，避免 LLM 尝试"翻译"图片 URL）。
+ * 链接 [text](url) 不做任何处理 — LLM 会将显示文本翻译并保留 URL。
+ */
 function protectMedia(text: string): string {
-  placeholderMap.clear()
-  placeholderCounter = 0
-  // ★ 使用不冲突 Markdown 的占位符格式，避免 __ 被 LLM 当作粗体处理
+  imgPlaceholderMap.clear()
+  imgCounter = 0
+
+  // Markdown 图片
   text = text.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (match) => {
-    const key = `IMG_PH_${placeholderCounter++}`
-    placeholderMap.set(key, match)
+    const key = `IMG_PH_${imgCounter++}`
+    imgPlaceholderMap.set(key, match)
     return key
   })
-  text = text.replace(/(?<!!)\[([^\]]*)\]\(([^)]+)\)/g, (match) => {
-    const key = `LINK_PH_${placeholderCounter++}`
-    placeholderMap.set(key, match)
-    return key
-  })
+  // HTML img 标签
   text = text.replace(/<img[^>]*\/?>/gi, (match) => {
-    const key = `IMG_PH_${placeholderCounter++}`
-    placeholderMap.set(key, match)
+    const key = `IMG_PH_${imgCounter++}`
+    imgPlaceholderMap.set(key, match)
     return key
   })
+
   return text
 }
 
+/** 恢复图片占位符为原始 Markdown/HTML。链接无需恢复。 */
 function restoreMedia(translated: string): string {
   let result = translated
-  for (const [key, original] of placeholderMap) {
-    // 全局替换（兼容 ES2015），防止 LLM 重复输出同一占位符
+  for (const [key, original] of imgPlaceholderMap) {
     result = result.split(key).join(original)
   }
   return result
@@ -174,22 +176,40 @@ function buildTranslatePrompt(content: string, targetLang: string): string {
   const maxContentLen = 4000
   const truncated = content.length > maxContentLen ? content.slice(0, maxContentLen) + '\n[Content truncated...]' : content
   const isHtml = isHtmlContent(truncated)
-  const formatHint = isHtml
-    ? 'Keep HTML tags, only translate text.'
-    : 'Keep Markdown format, only translate text.'
-  return `Translate to ${targetLang}. ${formatHint} Output only translation:\n\n${truncated}`
+  const protectedContent = protectMedia(truncated)
+  const langName = targetLang === 'Chinese' ? '简体中文' : targetLang
+  if (isHtml) {
+    return `Translate the following HTML to ${langName}. Preserve HTML tags, links and image placeholders. Output only translation:\n\n${protectedContent}`
+  }
+  return `Translate the following Markdown to ${langName}. Preserve Markdown formatting, links and image placeholders. Output only translation:\n\n${protectedContent}`
+}
+
+/**
+ * 去掉 LLM 多翻的内容。
+ * LLM 有时会"好心"把后面几段也译出来，这里只保留第一段对应的译文。
+ */
+function stripExtraParagraphs(text: string): string {
+  // HTML：截到 </p>、</h>、</div> 等第一个块级结束标签
+  if (isHtmlContent(text)) {
+    const m = text.match(/^([\s\S]*?<\/(?:p|h[1-6]|div|li|blockquote)>)/i)
+    return m ? m[1].trim() : text.trim()
+  }
+  // Markdown：截到第一个双换行（段落分隔符）
+  const idx = text.indexOf('\n\n')
+  if (idx > 0) return text.slice(0, idx).trim()
+  return text.trim()
 }
 
 function buildParagraphTranslatePrompt(paragraph: string, targetLang: string): string {
   const protectedText = protectMedia(paragraph)
-  const plainText = protectedText.replace(/<[^>]+>/g, '').replace(/IMG_PH_\d+/g, '').replace(/LINK_PH_\d+/g, '').trim()
+  const plainText = protectedText.replace(/<[^>]+>/g, '').replace(/IMG_PH_\d+/g, '').trim()
   if (!plainText) return ''
   const isHtml = isHtmlContent(paragraph)
   const langName = targetLang === 'Chinese' ? '简体中文' : targetLang
   if (isHtml) {
-    return `Translate the following HTML fragment to ${langName}. Preserve ALL HTML tags and attributes exactly. Only translate visible text content. Keep placeholders like IMG_PH_0 and LINK_PH_0 exactly as-is. Do NOT include the original text. Output ONLY the translated HTML. No explanations:\n\n${protectedText}`
+    return `Translate this single HTML paragraph to ${langName}. CRITICAL: Output ONLY the translation of this exact paragraph — do NOT add extra paragraphs, do NOT translate anything else. Preserve ALL HTML tags. No explanations:\n\n${protectedText}`
   }
-  return `Translate the following Markdown fragment to ${langName}. Preserve ALL Markdown formatting (headings, bold, italic, code blocks, etc.) exactly. Keep placeholders like IMG_PH_0 and LINK_PH_0 exactly as-is. Do NOT include the original text. Output ONLY the translated Markdown. No explanations:\n\n${protectedText}`
+  return `Translate this single Markdown paragraph to ${langName}. CRITICAL: Output ONLY the translation of this exact paragraph — do NOT add extra paragraphs, do NOT translate anything else. Preserve all formatting. No explanations:\n\n${protectedText}`
 }
 
 // ============================================================
@@ -210,21 +230,22 @@ export async function translateParagraphs(request: TranslateRequest, callback: S
 
   const temp = getTemperature(config.model)
 
-  // 逐段翻译（所有模型统一走此路径）
+  // 复用 client 实例，避免每段都重新创建连接
+  const client = createClient(config, activeKey)
+
+  // ★ 逐段翻译，每段一个 API 调用 — 保证严格 1:1 对照
   const paragraphs = splitIntoParagraphs(content)
   const allTranslations: string[] = new Array(paragraphs.length).fill('')
 
   for (let i = 0; i < paragraphs.length; i++) {
     const prompt = buildParagraphTranslatePrompt(paragraphs[i], targetLang)
     if (!prompt) {
-      // 段落无待翻译文字（仅含图片等媒体），直接保留原文
       allTranslations[i] = paragraphs[i]
       callback({ type: 'translateParagraph', articleId, paragraphIndex: i, fullText: paragraphs[i] })
       continue
     }
 
     try {
-      const client = createClient(config, activeKey)
       const stream = await client.chat.completions.create({
         model: config.model, messages: [{ role: 'user', content: prompt }],
         temperature: temp,
@@ -233,14 +254,19 @@ export async function translateParagraphs(request: TranslateRequest, callback: S
 
       const { fullText } = await consumeStreamWithCallback(stream,
         (delta) => callback({ type: 'translateParagraph', articleId, paragraphIndex: i, delta }),
-        (errorMsg) => { allTranslations[i] = `[错误] ${errorMsg}`; callback({ type: 'translateParagraph', articleId, paragraphIndex: i, message: errorMsg }) }
+        (errorMsg) => {
+          allTranslations[i] = `[错误] ${errorMsg}`
+          callback({ type: 'translateParagraph', articleId, paragraphIndex: i, message: errorMsg })
+        }
       )
 
       if (fullText) {
         const restored = restoreMedia(fullText)
-        allTranslations[i] = restored
-        callback({ type: 'translateParagraph', articleId, paragraphIndex: i, fullText: restored })
-        await recordTokens({ model: config.model, operation: 'translateParagraphs', prompt, completion: restored })
+        // ★ 去掉 LLM 多翻的内容：只保留第一段（双换行之前或第一个块级标签之前）
+        const single = stripExtraParagraphs(restored)
+        allTranslations[i] = single
+        callback({ type: 'translateParagraph', articleId, paragraphIndex: i, fullText: single })
+        await recordTokens({ model: config.model, operation: 'translateParagraphs', prompt, completion: single })
       }
     } catch (err) {
       const errMsg = `[翻译失败] ${err instanceof Error ? err.message : String(err)}`
@@ -249,18 +275,21 @@ export async function translateParagraphs(request: TranslateRequest, callback: S
     }
 
     if (i < paragraphs.length - 1) {
-      await new Promise(r => setTimeout(r, 500))
+      await new Promise(r => setTimeout(r, 300))
     }
   }
 
-  // 写入 DB
+  // 写入 DB 翻译缓存
   try {
     const row = getDb().select({ translations: articlesTable.translations }).from(articlesTable).where(eq(articlesTable.id, articleId)).get()
     const existingMap: Record<string, unknown> = row?.translations ? JSON.parse(row.translations) : {}
     existingMap._v = 2
     existingMap[targetLang] = allTranslations
     getDb().update(articlesTable).set({ translations: JSON.stringify(existingMap) }).where(eq(articlesTable.id, articleId)).run()
-  } catch {}
+    console.log(`[llmService] 翻译缓存已写入 DB: articleId=${articleId} lang=${targetLang} 段落数=${allTranslations.length}`)
+  } catch(err) {
+    console.error(`[llmService] 翻译缓存写入 DB 失败:`, err)
+  }
 
   callback({ type: 'translateComplete', articleId, fullText: '' })
 }
@@ -411,7 +440,8 @@ export async function translateArticle(request: TranslateRequest, callback: Stre
     )
 
     if (fullText) {
-      const trimmed = fullText.trim()
+      const restored = restoreMedia(fullText)
+      const trimmed = restored.trim()
       if (trimmed) {
         try {
           const row = getDb().select({ translations: articlesTable.translations }).from(articlesTable).where(eq(articlesTable.id, articleId)).get()
@@ -513,9 +543,10 @@ ${truncated}
 
 function buildSelectiveTranslatePrompt(selectedText: string, targetLang: string): string {
   const langName = targetLang === 'Chinese' ? '简体中文' : targetLang
+  // 只保护图片。链接 [text](url) 保持原样
   const protectedText = protectMedia(selectedText)
   if (!protectedText.trim()) return ''
-  return `Translate the following text to ${langName}. Preserve any Markdown formatting (bold, italic, code, etc.) exactly. Keep placeholders like IMG_PH_0 and LINK_PH_0 exactly as-is. Output ONLY the translated text. No explanations:\n\n${protectedText}`
+  return `Translate the following text to ${langName}. Translate link text but keep URLs unchanged. Keep images unchanged. Output ONLY the translated text. No explanations:\n\n${protectedText}`
 }
 
 export async function translateSelection(request: SelectiveTranslateRequest, callback: StreamCallback): Promise<void> {

@@ -132,7 +132,8 @@ export function initDatabase(dbPath: string): BetterSQLite3Database {
       is_starred  INTEGER DEFAULT 0,
       author      TEXT,
       pub_date    TEXT,
-      created_at  TEXT    DEFAULT (datetime('now'))
+      created_at  TEXT    DEFAULT (datetime('now')),
+      UNIQUE(feed_id, link)
     );
 
     CREATE TABLE IF NOT EXISTS tags (
@@ -211,6 +212,73 @@ export function initDatabase(dbPath: string): BetterSQLite3Database {
     // 表已存在，忽略
   }
 
+  // M9 兼容迁移：articles 表添加 UNIQUE(feed_id, link) 约束
+  try {
+    sqlite.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_articles_feed_link ON articles(feed_id, link)');
+  } catch {
+    // 索引已存在或创建失败，忽略
+  }
+
+  // M10 兼容迁移：is_starred 列（存量 DB 中可能不存在）
+  try {
+    sqlite.exec('ALTER TABLE articles ADD COLUMN is_starred INTEGER DEFAULT 0');
+  } catch {
+    // 列已存在，忽略
+  }
+
+  // M11 兼容迁移：将 pub_date 中的 RFC 2822 格式日期转为 ISO 8601
+  //   RSS 常见格式: "Mon, 21 Jul 2026 14:30:00 GMT"
+  //   SQLite TEXT 列按字母序排序，"Wed" < "Tue" 导致时间序紊乱
+  try {
+    const rows = sqlite.prepare('SELECT id, pub_date FROM articles WHERE pub_date IS NOT NULL AND pub_date NOT LIKE \'20%-\'').all() as { id: number; pub_date: string }[]
+    if (rows.length > 0) {
+      const updateStmt = sqlite.prepare('UPDATE articles SET pub_date = ? WHERE id = ?')
+      const migrate = sqlite.transaction(() => {
+        let count = 0
+        for (const r of rows) {
+          try {
+            const d = new Date(r.pub_date)
+            if (!isNaN(d.getTime())) {
+              updateStmt.run(d.toISOString(), r.id)
+              count++
+            }
+          } catch { /* 跳过无法解析的日期 */ }
+        }
+        if (count > 0) console.log(`[db] M11 迁移: 已规范化 ${count} 条 pub_date`)
+      })
+      migrate()
+    }
+  } catch {
+    // 迁移失败忽略
+  }
+
+  // M12 兼容迁移：清除 translations 中残留的 {{L:N}} 标记
+  try {
+    const rows = sqlite.prepare(
+      "SELECT id, translations FROM articles WHERE translations LIKE '%{{L:%' OR translations LIKE '%{{/L:%' OR translations LIKE '%LINK_PH_%' OR translations LIKE '%IMG_PH_%'"
+    ).all() as { id: number; translations: string }[]
+    if (rows.length > 0) {
+      const updateStmt = sqlite.prepare('UPDATE articles SET translations = ? WHERE id = ?')
+      const migrate = sqlite.transaction(() => {
+        let count = 0
+        for (const r of rows) {
+          let cleaned = r.translations
+            .replace(/\{\{[^}]*\}\}/g, '')
+            .replace(/\{\{/g, '').replace(/\}\}/g, '')
+            .replace(/\b(LINK|IMG)_PH_\d+\b/gi, '')
+          if (cleaned !== r.translations) {
+            updateStmt.run(cleaned, r.id)
+            count++
+          }
+        }
+        if (count > 0) console.log(`[db] M12 迁移: 已清理 ${count} 条 translations 中的残留标记`)
+      })
+      migrate()
+    }
+  } catch {
+    // 迁移失败忽略
+  }
+
   db = drizzle(sqlite);
   rawDb = sqlite;
   return db;
@@ -264,23 +332,19 @@ export function insertFeed(feed: Omit<NewFeed, 'id' | 'createdAt'>): Feed {
 
 export function getArticlesByFeedId(
   feedId: number,
-): Pick<Article, 'id' | 'title' | 'isRead' | 'summary' | 'translations' | 'link' | 'author' | 'pubDate' | 'createdAt'>[] {
-  return getDb()
-    .select({
-      id: articles.id,
-      title: articles.title,
-      isRead: articles.isRead,
-      summary: articles.summary,
-      translations: articles.translations,
-      link: articles.link,
-      author: articles.author,
-      pubDate: articles.pubDate,
-      createdAt: articles.createdAt,
-    })
-    .from(articles)
-    .where(eq(articles.feedId, feedId))
-    .orderBy(sql`${articles.pubDate} DESC`)
-    .all();
+): Pick<Article, 'id' | 'title' | 'isRead' | 'isStarred' | 'summary' | 'translations' | 'link' | 'author' | 'pubDate' | 'createdAt'>[] {
+  // ★ 使用 raw SQL 确保 ORDER BY 正确执行
+  //    1. COALESCE(pub_date, created_at) DESC — pubDate 优先，null 降级到 createdAt
+  //    2. id DESC — 同时间文章按 ID 倒序（新入库的文章 ID 更大）
+  const sqlite = getRawDb()
+  const stmt = sqlite.prepare(
+    `SELECT id, feed_id AS feedId, title, is_read AS isRead, is_starred AS isStarred,
+            summary, translations, link, author, pub_date AS pubDate, created_at AS createdAt
+     FROM articles
+     WHERE feed_id = ?
+     ORDER BY COALESCE(pub_date, created_at) DESC, id DESC`
+  )
+  return stmt.all(feedId) as any[]
 }
 
 export function insertArticle(
@@ -307,7 +371,58 @@ export function insertArticle(
 export function insertArticles(
   articlesList: Array<Omit<NewArticle, 'id' | 'createdAt'>>,
 ): Article[] {
-  return articlesList.map((a) => insertArticle(a));
+  if (articlesList.length === 0) return []
+
+  // 批量插入：单条 SQL 多 VALUES，大幅减少 DB 往返
+  // 使用原始 better-sqlite3 以获得最优性能
+  const sqlite = getRawDb()
+  const COLUMNS = 'feed_id, title, link, content, content_md, summary, is_read, is_starred, author, pub_date'
+  const COL_COUNT = 10
+  const placeholders = articlesList.map(() => `(${Array(COL_COUNT).fill('?').join(', ')})`).join(', ')
+
+  const values: any[] = []
+  for (const a of articlesList) {
+    values.push(
+      a.feedId, a.title, a.link ?? null, a.content ?? null, a.contentMd ?? null,
+      a.summary ?? null, a.isRead ?? 0, a.isStarred ?? 0,
+      a.author ?? null, a.pubDate ?? null,
+    )
+  }
+
+  console.log(`[db] insertArticles: 批量插入 ${articlesList.length} 篇文章，共 ${values.length} 个参数`)
+
+  const sql = `INSERT OR IGNORE INTO articles (${COLUMNS}) VALUES ${placeholders}`
+
+  const insertMany = sqlite.transaction(() => {
+    sqlite.prepare(sql).run(...values)
+  })
+
+  insertMany()
+
+  console.log(`[db] insertArticles: 批量插入完成`)
+
+  // 返回最后插入的 N 条记录（Drizzle 风格兼容）
+  const lastId = sqlite.prepare('SELECT last_insert_rowid() as id').get() as { id: number }
+  const lastRealId = lastId.id - (articlesList.length - 1)
+  const results: Article[] = []
+  for (let i = 0; i < articlesList.length; i++) {
+    results.push({
+      id: lastRealId + i,
+      feedId: articlesList[i].feedId,
+      title: articlesList[i].title,
+      link: articlesList[i].link ?? null,
+      content: articlesList[i].content ?? null,
+      contentMd: articlesList[i].contentMd ?? null,
+      summary: articlesList[i].summary ?? null,
+      translations: null,
+      isRead: articlesList[i].isRead ?? 0,
+      isStarred: articlesList[i].isStarred ?? 0,
+      author: articlesList[i].author ?? null,
+      pubDate: articlesList[i].pubDate ?? null,
+      createdAt: new Date().toISOString(),
+    })
+  }
+  return results
 }
 
 export function markArticleRead(articleId: number): void {
@@ -316,6 +431,47 @@ export function markArticleRead(articleId: number): void {
     .set({ isRead: 1 })
     .where(eq(articles.id, articleId))
     .run();
+}
+
+export function toggleStarArticle(articleId: number): { id: number; isStarred: number } {
+  const row = getDb()
+    .select({ id: articles.id, isStarred: articles.isStarred })
+    .from(articles)
+    .where(eq(articles.id, articleId))
+    .get()
+
+  if (!row) throw new Error(`文章 ${articleId} 不存在`)
+
+  const newVal = row.isStarred ? 0 : 1
+  getDb()
+    .update(articles)
+    .set({ isStarred: newVal })
+    .where(eq(articles.id, articleId))
+    .run()
+
+  return { id: articleId, isStarred: newVal }
+}
+
+export function getStarredArticles(
+): Pick<Article, 'id' | 'feedId' | 'title' | 'isRead' | 'isStarred' | 'summary' | 'translations' | 'link' | 'author' | 'pubDate' | 'createdAt'>[] {
+  return getDb()
+    .select({
+      id: articles.id,
+      feedId: articles.feedId,
+      title: articles.title,
+      isRead: articles.isRead,
+      isStarred: articles.isStarred,
+      summary: articles.summary,
+      translations: articles.translations,
+      link: articles.link,
+      author: articles.author,
+      pubDate: articles.pubDate,
+      createdAt: articles.createdAt,
+    })
+    .from(articles)
+    .where(sql`${articles.isStarred} = 1`)
+    .orderBy(sql`COALESCE(${articles.pubDate}, ${articles.createdAt}) DESC`)
+    .all()
 }
 
 export function clearAllData(): void {
@@ -331,25 +487,26 @@ export function clearAllData(): void {
 export function searchArticlesByTitle(
   query: string,
   limit = 20,
-): Pick<Article, 'id' | 'feedId' | 'title' | 'link' | 'summary' | 'translations' | 'author' | 'pubDate' | 'createdAt' | 'isRead'>[] {
-  return getDb()
-    .select({
-      id: articles.id,
-      feedId: articles.feedId,
-      title: articles.title,
-      link: articles.link,
-      summary: articles.summary,
-      translations: articles.translations,
-      author: articles.author,
-      pubDate: articles.pubDate,
-      createdAt: articles.createdAt,
-      isRead: articles.isRead,
-    })
-    .from(articles)
-    .where(like(articles.title, `%${query}%`))
-    .orderBy(sql`LOWER(${articles.title}) ASC`)
-    .limit(limit)
-    .all();
+): Pick<Article, 'id' | 'feedId' | 'title' | 'link' | 'summary' | 'translations' | 'author' | 'pubDate' | 'createdAt' | 'isRead' | 'isStarred'>[] {
+  const sqlite = getRawDb()
+  const likePattern = `%${query.trim()}%`
+  console.log(`[db] searchArticlesByTitle query="${query.trim()}" pattern="${likePattern}" limit=${limit}`)
+  try {
+    const rows = sqlite.prepare(
+      `SELECT id, feed_id AS feedId, title, link, summary, translations,
+              author, pub_date AS pubDate, created_at AS createdAt,
+              is_read AS isRead, is_starred AS isStarred
+       FROM articles
+       WHERE title LIKE ?
+       ORDER BY LOWER(title) ASC
+       LIMIT ?`
+    ).all(likePattern, limit) as any[]
+    console.log(`[db] searchArticlesByTitle 结果: ${rows.length} 条`)
+    return rows
+  } catch (err) {
+    console.error(`[db] searchArticlesByTitle 失败:`, err)
+    return []
+  }
 }
 
 /** FTS5 全文搜索 — 同时匹配标题 + 正文，按 BM25 相关性排序 */
@@ -364,6 +521,7 @@ export interface FtsSearchResult {
   pubDate: string | null
   createdAt: string | null
   isRead: number | null
+  isStarred: number | null
   /** 匹配片段（高亮 snippet，含 <b> 标记） */
   snippet: string | null
 }
@@ -388,16 +546,23 @@ export function searchArticlesFullText(query: string, limit = 50): FtsSearchResu
        a.pub_date   AS pubDate,
        a.created_at AS createdAt,
        a.is_read    AS isRead,
+       a.is_starred AS isStarred,
        NULL         AS snippet
      FROM articles a
      WHERE a.title LIKE ?1
         OR a.content_md LIKE ?1
         OR a.content LIKE ?1
-     ORDER BY a.pub_date DESC
+        OR a.summary LIKE ?1
+     ORDER BY COALESCE(a.pub_date, a.created_at) DESC
      LIMIT ?2`,
   )
 
-  return stmt.all(likePattern, limit) as FtsSearchResult[]
+  try {
+    return stmt.all(likePattern, limit) as FtsSearchResult[]
+  } catch (err) {
+    console.error(`[db] searchArticlesFullText 失败 — query="${safeQuery}" limit=${limit}:`, err)
+    return []
+  }
 }
 
 /** @deprecated 保留旧版 FTS5 搜索（对中文不友好，仅作参考） */
@@ -431,7 +596,7 @@ export function getArticleByLink(feedId: number, link: string): Article | undefi
 // ===== M5: 标签筛选 =====
 export function getArticlesByIds(
   ids: number[],
-): Pick<Article, 'id' | 'feedId' | 'title' | 'isRead' | 'summary' | 'translations' | 'link' | 'author' | 'pubDate' | 'createdAt'>[] {
+): Pick<Article, 'id' | 'feedId' | 'title' | 'isRead' | 'isStarred' | 'summary' | 'translations' | 'link' | 'author' | 'pubDate' | 'createdAt'>[] {
   if (ids.length === 0) return []
   return getDb()
     .select({
@@ -439,6 +604,7 @@ export function getArticlesByIds(
       feedId: articles.feedId,
       title: articles.title,
       isRead: articles.isRead,
+      isStarred: articles.isStarred,
       summary: articles.summary,
       translations: articles.translations,
       link: articles.link,
@@ -448,7 +614,7 @@ export function getArticlesByIds(
     })
     .from(articles)
     .where(inArray(articles.id, ids))
-    .orderBy(sql`${articles.pubDate} DESC`)
+    .orderBy(sql`COALESCE(${articles.pubDate}, ${articles.createdAt}) DESC`)
     .all();
 }
 

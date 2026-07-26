@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import {
   Bold, Italic, Strikethrough, List, ListOrdered,
   X, Download, Check, Type, ChevronDown,
-  PenLine
+  PenLine, Trash2
 } from 'lucide-react'
 import { useStore } from '../store'
 
@@ -143,6 +143,19 @@ export default function NotesPanel({ darkMode }: NotesPanelProps) {
     }
   }, [selectedArticleId])
 
+  // 清空笔记
+  const handleClear = useCallback(async () => {
+    if (!selectedArticleId) return
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    if (editorRef.current) {
+      editorRef.current.innerHTML = ''
+    }
+    useStore.setState({ noteContent: '', noteLastSaved: null })
+    try {
+      await window.api.saveNote(selectedArticleId, '')
+    } catch {}
+  }, [selectedArticleId])
+
   // 导出笔记
   const handleExport = useCallback(async () => {
     try {
@@ -193,6 +206,14 @@ export default function NotesPanel({ darkMode }: NotesPanelProps) {
           )}
         </div>
         <div className="flex items-center gap-1">
+          <button
+            onClick={handleClear}
+            className={`flex items-center gap-1 px-1.5 py-0.5 text-xs rounded ${textMuted} hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors`}
+            title="清空笔记"
+            disabled={!noteContent}
+          >
+            <Trash2 size={12} />
+          </button>
           <button
             onClick={handleExport}
             className={`flex items-center gap-1 px-1.5 py-0.5 text-xs rounded ${textMuted} ${btnHover} transition-colors`}

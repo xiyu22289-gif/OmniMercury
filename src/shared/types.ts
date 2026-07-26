@@ -21,6 +21,7 @@ export interface Article {
   published_at: string
   fetched_at: string
   is_read: boolean
+  is_starred?: boolean
 }
 
 export interface ArticleContent {

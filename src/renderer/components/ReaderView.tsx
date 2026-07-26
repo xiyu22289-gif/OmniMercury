@@ -31,6 +31,50 @@ const FONT_SIZE_MIN = 12
 const FONT_SIZE_MAX = 28
 const FONT_SIZE_STEP = 2
 
+// ============ 安全图片组件 ============
+
+/**
+ * 包装 <img>，提供：
+ * 1. 相对路径补全为绝对 URL
+ * 2. 加载失败时显示文字占位符（避免破损图标）
+ * 3. 懒加载 + referrer 策略（避免跨域防盗链）
+ */
+function SafeImage({ src, alt, baseUrl }: { src?: string; alt?: string; baseUrl?: string | null }) {
+  const [error, setError] = useState(false)
+
+  const resolvedSrc = useMemo(() => {
+    if (!src) return src
+    if (/^https?:\/\//i.test(src)) return src
+    if (src.startsWith('//')) return 'https:' + src
+    if (baseUrl && (src.startsWith('/') || !src.startsWith('http'))) {
+      try {
+        return new URL(src, baseUrl).href
+      } catch { /* fall through */ }
+    }
+    return src
+  }, [src, baseUrl])
+
+  if (error) {
+    return (
+      <span className="inline-flex items-center gap-1.5 px-3 py-2 my-2 text-xs text-gray-400 bg-gray-100 dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+        <span className="truncate max-w-[200px]">{alt || src?.slice(-30) || '图片加载失败'}</span>
+      </span>
+    )
+  }
+
+  return (
+    <img
+      src={resolvedSrc}
+      alt={alt || ''}
+      onError={() => setError(true)}
+      className="max-w-full h-auto rounded my-2"
+      loading="lazy"
+      referrerPolicy="no-referrer"
+    />
+  )
+}
+
 // ============ 常量 ============
 
 const LANG_OPTIONS = [
@@ -124,7 +168,7 @@ function NewTabTranslation({
         <div className="space-y-4">
           {originalParagraphs.map((para, idx) => (
             <div key={idx} className={`prose prose-sm ${proseCls} max-w-none leading-relaxed`}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{para}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={markdownComponents}>{para}</ReactMarkdown>
             </div>
           ))}
         </div>
@@ -160,7 +204,7 @@ function NewTabTranslation({
             <div key={idx}>
               {translations[idx] ? (
                 <div className={`prose prose-sm ${proseCls} max-w-none leading-relaxed`}>
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={markdownComponents}>
                     {translations[idx]}
                   </ReactMarkdown>
                 </div>
@@ -313,7 +357,7 @@ export default function ReaderView() {
   const renderParagraphWithHighlights = useCallback((para: string, paraIdx: number) => {
     if (!inArticleSearch.trim()) {
       return (
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{para}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={markdownComponents}>{para}</ReactMarkdown>
       )
     }
 
@@ -322,7 +366,7 @@ export default function ReaderView() {
     const hitsInThisPara = searchHits.filter(h => h.paraIdx === paraIdx)
     if (hitsInThisPara.length === 0) {
       return (
-        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{para}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={markdownComponents}>{para}</ReactMarkdown>
       )
     }
 
@@ -338,7 +382,7 @@ export default function ReaderView() {
     }
 
     return (
-      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{result}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={markdownComponents}>{result}</ReactMarkdown>
     )
   }, [inArticleSearch, searchHits])
 
@@ -351,24 +395,35 @@ export default function ReaderView() {
     el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
   }, [searchHits.length])
 
-  /** Ctrl+F 快捷键打开文章内搜索 */
+  /** Ctrl+F 快捷键打开/关闭文章内搜索 */
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      const isEditing = tag === 'TEXTAREA' || (e.target as HTMLElement).isContentEditable
       if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
         e.preventDefault()
-        setShowInArticleSearch(true)
-        setTimeout(() => inArticleSearchRef.current?.focus(), 50)
+        if (isEditing) return
+        setShowInArticleSearch(prev => {
+          if (!prev) {
+            // 等待 React 渲染并挂载 DOM 后再聚焦
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                inArticleSearchRef.current?.focus()
+              })
+            })
+          }
+          return !prev
+        })
       }
-      if (showInArticleSearch && e.key === 'Escape') {
+      if (e.key === 'Escape') {
         setShowInArticleSearch(false)
         setInArticleSearch('')
+        setCurrentHitIndex(0)
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [showInArticleSearch])
+  }, [])
 
   // ============ 选择段落摘要 ============
   const originalParagraphsIndexRef = useRef(0)
@@ -532,8 +587,48 @@ export default function ReaderView() {
 
   // ============ 计算属性 ============
 
+  /** 是否有译文内容（翻译完成后） */
+  const hasTranslation = paragraphTranslations.some(t => t && t.trim())
+  /** 是否处于翻译状态中（用户点击翻译 → 翻译全部完成） */
+  const isTranslating = translateLoading || hasTranslation
+  const hasSummary = summarizingArticleId === selectedArticleId && summaryStream.trim()
+
   const selectedArticle = articles.find(a => a.id === selectedArticleId)
-  const originalParagraphs = articleContent ? splitContent(articleContent) : []
+
+  // ★ 提取文章的基础 URL，用于解析相对路径的图片链接
+  const articleBaseUrl = useMemo(() => {
+    if (!selectedArticle?.url) return null
+    try {
+      const u = new URL(selectedArticle.url)
+      return u.origin
+    } catch {
+      return null
+    }
+  }, [selectedArticle?.url])
+
+  /** markdownComponents — 使用 articleBaseUrl 闭包传递给 SafeImage */
+  const markdownComponents = useMemo(() => ({
+    img: (props: any) => <SafeImage {...props} baseUrl={articleBaseUrl} />,
+    a: ({ href, children, ...props }: any) => (
+      <a
+        href={href}
+        target="_blank"
+        rel="noreferrer noopener"
+        className="text-blue-600 dark:text-blue-400 underline decoration-blue-300 dark:decoration-blue-700 hover:decoration-blue-500 transition-colors"
+        {...props}
+      >
+        {children}
+      </a>
+    ),
+  }), [articleBaseUrl])
+
+  /** 翻译开始时锁定的原始段落，确保原文和译文一一对应（必须在 originalParagraphs 之前声明） */
+  const frozenOriginalParagraphsRef = useRef<string[]>([])
+
+  // ★ 翻译中使用冻结的原始段落，确保与译文一一对应
+  const originalParagraphs = isTranslating && frozenOriginalParagraphsRef.current.length > 0
+    ? frozenOriginalParagraphsRef.current
+    : (articleContent ? splitContent(articleContent) : [])
 
   /** 推导实际暗色状态（与 App.tsx 同步） */
   const darkMode = useMemo(() => {
@@ -552,7 +647,6 @@ export default function ReaderView() {
   const translateTargetLangRef = useRef('Chinese')
   const summaryTargetLangRef = useRef('Chinese')
   const summaryDetailLevelRef = useRef<'compact' | 'medium' | 'detailed'>('medium')
-
   useEffect(() => {
     selectedArticleIdRef.current = selectedArticleId
   }, [selectedArticleId])
@@ -596,10 +690,11 @@ export default function ReaderView() {
             const targetArticle = state.articles.find(a => a.id === chunk.articleId)
             if (targetArticle) {
               const lang = translateTargetLangRef.current
-              const existing: Record<string, string[]> = targetArticle.translations
+              const existing: Record<string, unknown> = targetArticle.translations
                 ? JSON.parse(targetArticle.translations)
                 : {}
-              const paras = [...(existing[lang] || [])]
+              existing._v = 2
+              const paras = [...((existing[lang] as string[]) || [])]
               paras[idx] = chunk.fullText
               existing[lang] = paras
               useStore.setState({
@@ -903,35 +998,43 @@ export default function ReaderView() {
     if (translateLoading) return
     setShowTranslateLangPicker(false)
 
-    // 缓存命中：该文章已有该语言翻译，直接展示，不调用 API
-    // 需要验证缓存的版本号和段落数是否匹配
-    if (selectedArticle.translations) {
-      try {
-        const transMap: Record<string, unknown> = JSON.parse(selectedArticle.translations)
-        // ★ 版本号校验：旧版缓存绝不使用
-        if (transMap._v !== 2) { /* 旧缓存，忽略 */ }
-        else {
-          const cached = transMap[targetLang]
-          if (Array.isArray(cached) && cached.length > 0) {
-            const currentParagraphs = splitContent(articleContent || selectedArticle.summary || '')
-            if (cached.length === currentParagraphs.length) {
-              useStore.setState({ paragraphTranslations: cached })
-              return
-            }
-          }
-        }
-      } catch { /* JSON 解析失败，走 API 翻译 */ }
+    const transStr = selectedArticle.translations
+    const transMap: Record<string, unknown> = {}
+    if (transStr) {
+      try { Object.assign(transMap, JSON.parse(transStr)) } catch {}
+    }
+    console.log('[缓存] 检查:', JSON.stringify({
+      articleId: selectedArticleId,
+      hasTranslations: !!transStr,
+      v: transMap._v,
+      keys: Object.keys(transMap).filter(k => k !== '_v' && k !== '_summary'),
+      targetLang,
+    }))
+
+    // ★ 翻译缓存检查：优先使用已保存的翻译
+    if (transMap._v === 2 && Array.isArray(transMap[targetLang]) && (transMap[targetLang] as any[]).length > 0) {
+      const cached = transMap[targetLang] as string[]
+      console.log(`[缓存] ✅ 命中 ${targetLang}，${cached.length} 段`)
+      frozenOriginalParagraphsRef.current = splitContent(articleContent || '')
+      translatingRef.current = true
+      translateTargetLangRef.current = targetLang
+      setTranslateLoading(true)
+      useStore.setState({ paragraphTranslations: cached })
+      setTimeout(() => setTranslateLoading(false), 50)
+      return
     }
 
+    console.log('[缓存] ❌ 未命中，调用 API')
+
+    // API 翻译
     translatingRef.current = true
     translateTargetLangRef.current = targetLang
     setTranslateLoading(true)
     resetParagraphTranslations()
+    frozenOriginalParagraphsRef.current = splitContent(articleContent || selectedArticle.summary || '')
     try {
       const c = articleContent || selectedArticle.summary || ''
       if (!c.trim()) { setError('文章无内容'); setTranslateLoading(false); return }
-      // 注意：IPC 立即返回 {success:true}，实际翻译通过流式回调进行
-      // translateLoading 由流式回调中的 translateComplete 事件关闭
       await window.api.translateParagraphs(selectedArticleId, c, selectedArticle.title, targetLang)
     } catch (err) {
       setError(String(err))
@@ -1013,29 +1116,19 @@ export default function ReaderView() {
 
   // ============ 渲染主内容 ============
 
-  /** 是否有译文内容（翻译完成后） */
-  const hasTranslation = paragraphTranslations.some(t => t && t.trim())
-  /** 是否处于翻译状态中（用户点击翻译 → 翻译全部完成） */
-  const isTranslating = translateLoading || hasTranslation
-  const hasSummary = summarizingArticleId === selectedArticleId && summaryStream.trim()
-
   // 翻译/阅读区样式（跟随全局 darkMode）
   const proseCls = darkMode ? 'prose-invert' : 'prose-gray'
   const containerBg = darkMode ? 'bg-gray-900' : 'bg-white'
 
   return (
     <div className="reader-view flex" style={{ height: '100%', overflow: 'hidden' }}>
-      {/* 左侧主区域 */}
+      {/* 左侧：阅读内容 + 摘要 */}
       <div
         className={containerBg}
         style={{
-          width: hasSummary
-            ? `${100 - summaryPanelWidth}%`
-            : notePanelOpen
-              ? `${100 - notePanelWidth}%`
-              : '100%',
+          flex: hasSummary ? `0 0 ${100 - summaryPanelWidth}%` : '1 1 100%',
           overflowY: 'auto',
-          paddingRight: (hasSummary || notePanelOpen) ? 12 : 0,
+          paddingRight: hasSummary ? 16 : 0,
         }}
       >
         <div className="max-w-3xl mx-auto">
@@ -1501,7 +1594,7 @@ export default function ReaderView() {
 
             {/* ===== 文章内搜索按钮 ===== */}
             <button
-              onClick={() => { setShowInArticleSearch(!showInArticleSearch); setTimeout(() => inArticleSearchRef.current?.focus(), 50) }}
+              onClick={() => { setShowInArticleSearch(!showInArticleSearch); requestAnimationFrame(() => requestAnimationFrame(() => inArticleSearchRef.current?.focus())) }}
               className={`flex items-center justify-center w-7 h-7 rounded text-xs transition-colors
                 ${showInArticleSearch
                   ? 'bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400'
@@ -1532,10 +1625,12 @@ export default function ReaderView() {
             />
           )}
 
-          {/* ===== 文章内搜索栏（始终可见） ===== */}
+          {/* ===== 文章内搜索栏 ===== */}
+          {showInArticleSearch && (
           <div className="mb-3 p-2 bg-yellow-50/80 dark:bg-yellow-900/15 border border-yellow-200/60 dark:border-yellow-700/40 rounded-lg flex items-center gap-2">
             <Search size={14} className="text-yellow-600 dark:text-yellow-400 flex-shrink-0 opacity-60" />
             <input
+              ref={inArticleSearchRef}
               type="text"
               value={inArticleSearch}
               onChange={(e) => { setInArticleSearch(e.target.value); setCurrentHitIndex(0) }}
@@ -1575,6 +1670,7 @@ export default function ReaderView() {
               </>
             )}
           </div>
+          )}
 
           {/* 错误信息 */}
           {error && (
@@ -1636,7 +1732,7 @@ export default function ReaderView() {
                     <div key={idx} style={{ display: 'flex', gap: 0, alignItems: 'flex-start' }}>
                       <div style={{ width: `${dividerPos}%`, paddingRight: 12 }}>
                         <div className={`prose prose-sm ${proseCls} max-w-none leading-relaxed`}>
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={markdownComponents}>
                             {para}
                           </ReactMarkdown>
                         </div>
@@ -1649,7 +1745,7 @@ export default function ReaderView() {
                       <div style={{ width: `${100 - dividerPos}%`, paddingLeft: 12 }}>
                         {paragraphTranslations[idx] ? (
                           <div className={`prose prose-sm ${proseCls} max-w-none leading-relaxed`}>
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={markdownComponents}>
                               {paragraphTranslations[idx]}
                             </ReactMarkdown>
                           </div>
@@ -1665,14 +1761,16 @@ export default function ReaderView() {
               {/* 上下对照模式 — 带边框盒子样式 */}
               {displayMode === 'topBottom' && isTranslating && (
                 <div className="space-y-6">
-                  {originalParagraphs.map((para: string, idx: number) => (
+                  {originalParagraphs.map((para: string, idx: number) => {
+                    const hasTranslation = paragraphTranslations[idx] && paragraphTranslations[idx].trim()
+                    return (
                     <div key={idx}>
                       <div className={`prose prose-sm ${proseCls} max-w-none leading-relaxed`}>
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={markdownComponents}>
                           {para}
                         </ReactMarkdown>
                       </div>
-                      {paragraphTranslations[idx] ? (
+                      {hasTranslation ? (
                         <div className="mt-3 border-2 border-blue-300 dark:border-blue-600 rounded-lg overflow-hidden">
                           <div className="bg-blue-50 dark:bg-blue-900/20 px-3 py-1.5 flex items-center gap-1.5 border-b border-blue-200 dark:border-blue-700">
                             <span className="text-xs">🌐</span>
@@ -1682,7 +1780,7 @@ export default function ReaderView() {
                           </div>
                           <div className="bg-blue-50/30 dark:bg-blue-900/5 px-4 py-3">
                             <div className={`prose prose-sm ${proseCls} max-w-none leading-relaxed text-sm`}>
-                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={markdownComponents}>
                                 {paragraphTranslations[idx]}
                               </ReactMarkdown>
                             </div>
@@ -1701,9 +1799,22 @@ export default function ReaderView() {
                             {t('reader.translating')}
                           </div>
                         </div>
-                      ) : null}
+                      ) : (
+                        <div className="mt-3 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg overflow-hidden">
+                          <div className="bg-gray-50 dark:bg-gray-800/30 px-3 py-1.5 flex items-center gap-1.5 border-b border-gray-200 dark:border-gray-700">
+                            <span className="text-xs">🌐</span>
+                            <span className="text-[11px] font-medium text-gray-400">
+                              {LANG_LABEL_MAP[translateTargetLangRef.current] || t('reader.translatedFrom')}
+                            </span>
+                          </div>
+                          <div className="bg-gray-50/30 dark:bg-gray-800/10 px-4 py-3 text-xs text-gray-400 italic">
+                            {t('reader.noTranslation')}
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  ))}
+                    )
+                  })}
                 </div>
               )}
 
@@ -1771,19 +1882,15 @@ export default function ReaderView() {
                 </div>
               )}
 
-              {/* 原文内容区域 */}
-              <div 
+              {/* 原文内容区域 — 翻译模式下隐藏（replace/sideBySide/topBottom 已渲染翻译内容） */}
+              {!isTranslating && (
+              <div
                 ref={readingAreaRef}
                 className={`rounded-lg p-6 ${containerBg}`}
               >
-                {isTranslating 
-                  ? ( readerMode === 'reader' 
-                      ? <div className="space-y-4">{renderParagraphsWithCheckboxes()}</div>
-                      : renderOriginalContent()
-                    )
-                  : (readerMode === 'reader' ? renderParagraphsWithCheckboxes() : renderOriginalContent())
-                }
+                {readerMode === 'reader' ? renderParagraphsWithCheckboxes() : renderOriginalContent()}
               </div>
+              )}
 
               {/* 选择段落摘要结果 (Portal 到选中段落后) */}
               {(selectionSummary || selectionSummaryLoading) && selectionSummaryAnchorRef.current && document.body.contains(selectionSummaryAnchorRef.current) && createPortal(
@@ -1804,7 +1911,7 @@ export default function ReaderView() {
                   <div className="bg-green-50/30 dark:bg-green-900/5 px-4 py-3">
                     {selectionSummary ? (
                       <div className={`prose prose-sm ${proseCls} max-w-none leading-relaxed text-sm`}>
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectionSummary}</ReactMarkdown>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={markdownComponents}>{selectionSummary}</ReactMarkdown>
                       </div>
                     ) : (
                       <div className="text-xs text-green-500 dark:text-green-400 py-1">{t('reader.translating')}</div>
@@ -1838,7 +1945,7 @@ export default function ReaderView() {
                     <div className="bg-cyan-50/30 dark:bg-cyan-900/5 px-4 py-3">
                       {selectionTranslation ? (
                         <div className={`prose prose-sm ${proseCls} max-w-none leading-relaxed text-sm`}>
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={markdownComponents}>
                             {selectionTranslation}
                           </ReactMarkdown>
                         </div>
@@ -1877,7 +1984,7 @@ export default function ReaderView() {
         document.body
       )}
 
-      {/* ===== 右侧摘要面板 ===== */}
+      {/* ===== 摘要面板（右侧） ===== */}
       {hasSummary && (
         <>
           <div
@@ -1895,13 +2002,32 @@ export default function ReaderView() {
                   </span>
                   {summaryLoading && <Loader size={12} className="animate-spin text-purple-400 ml-1" />}
                 </div>
-                <button
-                  onClick={resetSummary}
-                  className="flex items-center gap-1 px-1.5 py-0.5 text-xs text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
-                  title={t('reader.closeSummaryPanel')}
-                >
-                  <X size={12} />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={async () => {
+                      try {
+                        const result = await window.api.exportSummaryMd(selectedArticle.title, summaryStream)
+                        if (!result.success && result.error !== '用户取消') {
+                          setError(result.error || '导出失败')
+                        }
+                      } catch (err) {
+                        setError('导出失败: ' + String(err))
+                      }
+                    }}
+                    disabled={!summaryStream.trim() || summaryLoading}
+                    className="flex items-center gap-1 px-1.5 py-0.5 text-xs text-gray-400 hover:text-purple-500 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded transition-colors disabled:opacity-30"
+                    title={t('reader.exportSummary')}
+                  >
+                    <Download size={12} />
+                  </button>
+                  <button
+                    onClick={resetSummary}
+                    className="flex items-center gap-1 px-1.5 py-0.5 text-xs text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+                    title={t('reader.closeSummaryPanel')}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
               </div>
             </div>
             <div className={`text-sm text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap`}>
@@ -1911,7 +2037,7 @@ export default function ReaderView() {
         </>
       )}
 
-          {/* ===== 字体选择弹出框 (fixed 定位，跳出 overflow hidden) ===== */}
+          {/* ===== 字体选择弹出框 (fixed 定位) ===== */}
           {showFontPicker && fontPickerPos && (
             <div
               className="fixed z-50 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 w-40 max-h-60 overflow-y-auto"
@@ -1941,20 +2067,50 @@ export default function ReaderView() {
             </div>
           )}
 
-          {/* ===== 右侧笔记面板 ===== */}
+      {/* ===== 笔记面板（下方） ===== */}
+          {showFontPicker && fontPickerPos && (
+            <div
+              className="fixed z-50 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 w-40 max-h-60 overflow-y-auto"
+              style={{ top: fontPickerPos.top, left: fontPickerPos.left }}
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="px-3 py-1.5 border-b border-gray-200 dark:border-gray-700">
+                <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{t('reader.selectFont')}</span>
+              </div>
+              <div className="py-1">
+                {FONT_FAMILIES.map(f => (
+                  <button
+                    key={f.value}
+                    onClick={() => { setReaderFontFamily(f.value); setShowFontPicker(false) }}
+                    className={`w-full text-left px-3 py-1.5 text-sm flex items-center justify-between transition-colors
+                      ${readerFontFamily === f.value
+                        ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                        : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 text-gray-700 dark:text-gray-200'
+                      }`}
+                    style={{ fontFamily: f.value }}
+                  >
+                    <span>{f.label}</span>
+                    {readerFontFamily === f.value && <Check size={12} className="text-amber-500 flex-shrink-0" />}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ===== 笔记面板（下方） ===== */}
       {notePanelOpen && !hasSummary && (
         <>
           <ResizeHandle
-            direction="horizontal"
+            direction="vertical"
             onResize={(delta) => {
-              const containerWidth = window.innerWidth - (sidebarOpen ? 260 : 0) - 360
-              const deltaPct = (delta / (containerWidth || 1)) * 100
+              const containerHeight = window.innerHeight - 200
+              const deltaPct = (delta / (containerHeight || 1)) * 100
               setNotePanelWidth((prev) =>
-                Math.min(60, Math.max(20, prev - deltaPct))
+                Math.min(60, Math.max(20, prev + deltaPct))
               )
             }}
           />
-          <div className={containerBg} style={{ width: `${notePanelWidth}%`, overflowY: 'auto' }}>
+          <div className={`${containerBg} border-t border-gray-200 dark:border-gray-700`} style={{ flex: `0 0 ${notePanelWidth}%`, overflowY: 'auto' }}>
             <NotesPanel darkMode={darkMode} />
           </div>
         </>
