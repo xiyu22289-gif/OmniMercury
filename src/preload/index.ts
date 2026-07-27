@@ -8,6 +8,9 @@ import type {
   Tag,
   TokenStats,
   ArticleNote,
+  LlmGlobalConfig,
+  LlmFunctionConfig,
+  LlmModelItem,
 } from '../shared/types'
 
 /** OPML 导入进度事件 */
@@ -67,6 +70,20 @@ const api = {
     ipcRenderer.invoke('llm:resetConfig'),
   testConnection: (config?: { baseUrl: string; apiKey: string; model: string }): Promise<{ success: boolean; latencyMs: number; message: string }> =>
     ipcRenderer.invoke('llm:testConnection', config),
+
+  // ============================================================
+  // 函数级 LLM 配置（新版：4 个功能独立）
+  // ============================================================
+  getLlmGlobalConfig: (): Promise<LlmGlobalConfig> =>
+    ipcRenderer.invoke('llm:getGlobalConfig'),
+  getLlmFunctionConfig: (funcType: string): Promise<LlmFunctionConfig> =>
+    ipcRenderer.invoke('llm:getFunctionConfig', funcType),
+  setLlmFunctionConfig: (funcType: string, config: LlmFunctionConfig): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke('llm:setFunctionConfig', funcType, config),
+
+  // 模型列表查询
+  listLlmModels: (baseUrl: string, apiKey: string): Promise<import('../shared/types').ListModelsResult> =>
+    ipcRenderer.invoke('llm:listModels', baseUrl, apiKey),
 
   // ============================================================
   // M7: Token 用量统计

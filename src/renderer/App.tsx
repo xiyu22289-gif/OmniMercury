@@ -150,7 +150,7 @@ export default function App() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName
-      const isEditing = tag === 'TEXTAREA' || (e.target as HTMLElement).isContentEditable
+      const isEditing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target as HTMLElement).isContentEditable
       if (isEditing) return
 
       const mod = e.ctrlKey || e.metaKey

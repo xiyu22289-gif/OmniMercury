@@ -72,7 +72,37 @@ export interface Tag {
 // LLM 相关类型
 // ============================================================
 
-/** LLM 服务商配置（存于 electron-store） */
+/** LLM 功能类型 */
+export type LlmFunctionType = 'fullTranslate' | 'selectiveTranslate' | 'fullSummary' | 'selectiveSummary'
+
+/** 自定义模型配置（用户自行填写的模型） */
+export interface CustomModelConfig {
+  /** 用户给该模型取的名称 */
+  label: string
+  baseUrl: string
+  apiKey: string
+  model: string
+}
+
+/** 单个 LLM 功能的完整配置 */
+export interface LlmFunctionConfig {
+  /** 当前选中的模型名称 */
+  model: string
+  /** 每个模型对应的 API Key 映射（便捷预设模型使用） */
+  apiKeys: Record<string, string>
+  /** 用户自定义模型列表（最多2个） */
+  customModels: CustomModelConfig[]
+}
+
+/** LLM 全局配置（各功能独立） */
+export interface LlmGlobalConfig {
+  fullTranslate: LlmFunctionConfig
+  selectiveTranslate: LlmFunctionConfig
+  fullSummary: LlmFunctionConfig
+  selectiveSummary: LlmFunctionConfig
+}
+
+/** LLM 服务商配置（旧版兼容，存于 electron-store） */
 export interface LlmConfig {
   /** 兼容 OpenAI 协议的服务商 baseURL（如 https://api.openai.com/v1） */
   baseUrl: string
@@ -82,6 +112,22 @@ export interface LlmConfig {
   model: string
   /** 每个模型独立的 API Key 映射（如 { 'deepseek-chat': 'sk-xxx', 'ecnu-chat': 'sk-yyy' }） */
   apiKeys: Record<string, string>
+}
+
+/** LLM 模型列表项 */
+export interface LlmModelItem {
+  id: string
+  /** 模型显示名称（可能等于 id） */
+  name: string
+}
+
+/** 模型列表查询结果 */
+export interface ListModelsResult {
+  success: boolean
+  models: LlmModelItem[]
+  /** 推荐的三款最快最稳模型 ID */
+  recommended: string[]
+  error: string
 }
 
 /** Token 用量统计 */

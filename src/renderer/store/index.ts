@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Feed, Article, LlmConfig, Tag, TokenStats } from '../../shared/types'
+import type { Feed, Article, LlmConfig, LlmGlobalConfig, LlmFunctionConfig, Tag, TokenStats } from '../../shared/types'
 import { splitIntoParagraphs } from '../../shared/paragraphSplitter'
 
 interface AppState {
@@ -32,6 +32,8 @@ interface AppState {
   // ---- LLM 状态 ----
   showSettings: boolean
   llmConfig: LlmConfig | null
+  /** 函数级 LLM 全局配置 */
+  llmGlobalConfig: LlmGlobalConfig | null
   summaryStream: string
   summaryLoading: boolean
   /** 正在生成摘要的文章 ID，用于隔离不同文章的摘要状态 */
@@ -128,6 +130,7 @@ interface AppState {
   setDisplayMode: (mode: 'replace' | 'sideBySide' | 'topBottom' | 'newTab') => void
   setTranslateTargetLang: (lang: string) => void
   loadLlmConfig: () => Promise<void>
+  loadLlmGlobalConfig: () => Promise<void>
   loadTokenStats: () => Promise<void>
 
   // ---- 选择文本翻译操作 ----
@@ -257,6 +260,7 @@ export const useStore = create<AppState>((set, get) => {
     // ---- LLM 默认值 ----
     showSettings: false,
     llmConfig: null,
+    llmGlobalConfig: null,
     summaryStream: '',
     summaryLoading: false,
     summarizingArticleId: null,
@@ -541,6 +545,12 @@ export const useStore = create<AppState>((set, get) => {
       try {
         const config = await window.api.getLlmConfig()
         set({ llmConfig: config })
+      } catch { /* 非 Electron 环境 */ }
+    },
+    loadLlmGlobalConfig: async () => {
+      try {
+        const config = await window.api.getLlmGlobalConfig()
+        set({ llmGlobalConfig: config })
       } catch { /* 非 Electron 环境 */ }
     },
     loadTokenStats: async () => {
