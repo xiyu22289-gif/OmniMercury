@@ -25,6 +25,8 @@ if (!window.api) {
     // Star / Read
     toggleStar: () => Promise.resolve({ success: true, data: { id: 0, isStarred: 1 } }),
     markRead: () => Promise.resolve({ success: true }),
+    deleteArticle: () => Promise.resolve({ success: true }),
+    getAllArticles: () => mockResolve({ articles: [] }),
     getStarredArticles: () => mockResolve({ articles: [] }),
     // LLM config
     getLlmConfig: () => mockResolve({}) as unknown as Promise<{ baseUrl: string; apiKey: string; model: string; translateTarget: string }>,

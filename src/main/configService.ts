@@ -96,3 +96,22 @@ export function resetLlmConfig(): void {
     // 文件不存在则忽略
   }
 }
+
+// ============================================================
+// 网络请求超时统一配置
+// ============================================================
+
+/** Feed 下载超时（毫秒）— 添加/刷新/OPML 导入单个源 */
+export const FEED_FETCH_TIMEOUT = 15_000
+
+/** AI API 请求超时（毫秒）— 完整响应最大等待时间 */
+export const AI_API_TIMEOUT = 120_000
+
+/** AI 首 Token 超时（毫秒）— 流式响应中首个 token 的最大等待时间 */
+export const AI_FIRST_TOKEN_TIMEOUT = 15_000
+
+/** OPML 批量导入最大并发数 */
+export const OPML_IMPORT_CONCURRENCY = 4
+
+/** 文章正文抓取超时（毫秒） */
+export const CONTENT_FETCH_TIMEOUT = 20_000

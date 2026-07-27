@@ -17,6 +17,7 @@ import { Readability } from '@mozilla/readability'
 import TurndownService from 'turndown'
 import { getDb, articles as articlesTable } from './db'
 import { eq } from 'drizzle-orm'
+import { CONTENT_FETCH_TIMEOUT } from './configService'
 
 // ============================================================
 // 类型定义
@@ -52,8 +53,8 @@ export type ContentResult = CleanResult | DegradedResult
 // 配置常量
 // ============================================================
 
-/** HTTP 请求超时（毫秒） */
-const FETCH_TIMEOUT = 20_000
+/** HTTP 请求超时（毫秒）— 使用统一配置 */
+const FETCH_TIMEOUT = CONTENT_FETCH_TIMEOUT
 
 /** 标准 User-Agent（部分网站会拒绝无 UA 的请求） */
 const USER_AGENT =
@@ -135,12 +136,18 @@ export async function fetchAndCleanArticle(url: string): Promise<ContentResult> 
     rawHtml = response.data
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    console.error(`[contentService] 拉取原文失败 (${url})：${message}`)
+    const statusCode = (err as any)?.response?.status || (err as any)?.status
+    const isTimeout = message.includes('timeout') || message.includes('ETIMEDOUT') || message.includes('ECONNABORTED')
+    const codeStr = statusCode ? ` (HTTP ${statusCode})` : ''
+    const friendlyMsg = isTimeout
+      ? `正文抓取 - ${url} 连接超时（${FETCH_TIMEOUT / 1000}s） - 请尝试打开原文链接`
+      : `正文抓取 - ${url} 请求失败${codeStr} - ${message}`
+    console.error(`[contentService] 拉取原文失败 (${url})${codeStr}：${message}`)
     return {
-      contentHtml: `<p>【正文提取失败】无法访问原文链接。<br>错误：${message}</p>`,
-      contentMd: `【正文提取失败】无法访问原文链接。\n错误：${message}\n\n> 请尝试打开原文链接：${url}`,
+      contentHtml: `<p>【正文提取失败】${friendlyMsg}<br>链接：<a href="${url}">${url}</a></p>`,
+      contentMd: `【正文提取失败】${friendlyMsg}\n\n> 请尝试打开原文链接：${url}`,
       degraded: true,
-      reason: `网络请求失败：${message}`,
+      reason: friendlyMsg,
     }
   }
 
@@ -149,9 +156,9 @@ export async function fetchAndCleanArticle(url: string): Promise<ContentResult> 
     console.warn(`[contentService] 原文内容过短 (${url})，长度=${rawHtml?.length ?? 0}`)
     return {
       contentHtml: rawHtml || '<p>（原文内容为空）</p>',
-      contentMd: rawHtml || '（原文内容为空）',
+      contentMd: rawHtml || `（原文内容为空）\n\n> 原文链接：${url}`,
       degraded: true,
-      reason: '原文内容为空或过短',
+      reason: `原文内容为空或过短（链接：${url}）`,
     }
   }
 
@@ -172,7 +179,7 @@ export async function fetchAndCleanArticle(url: string): Promise<ContentResult> 
       contentHtml: sanitizeHtml(rawHtml),
       contentMd: turndownService.turndown(rawHtml),
       degraded: true,
-      reason: `DOM 解析失败：${message}`,
+      reason: `DOM 解析失败：${message}（链接：${url}）`,
     }
   }
 
@@ -191,7 +198,7 @@ export async function fetchAndCleanArticle(url: string): Promise<ContentResult> 
         contentHtml: sanitizeHtml(rawHtml),
         contentMd: turndownService.turndown(rawHtml),
         degraded: true,
-        reason: 'Readability 未能提取正文，已返回原始 HTML',
+        reason: `Readability 未能提取正文，已返回原始 HTML（链接：${url}）`,
       }
     }
 
@@ -211,7 +218,7 @@ export async function fetchAndCleanArticle(url: string): Promise<ContentResult> 
       contentHtml: sanitizeHtml(rawHtml),
       contentMd: turndownService.turndown(rawHtml),
       degraded: true,
-      reason: `正文提取失败：${message}`,
+      reason: `正文提取失败：${message}（链接：${url}）`,
     }
   }
 
@@ -227,7 +234,7 @@ export async function fetchAndCleanArticle(url: string): Promise<ContentResult> 
       contentHtml: cleanHtml,
       contentMd: `【Markdown 转换失败】\n错误：${message}\n\n> 请尝试打开原文链接：${url}`,
       degraded: true,
-      reason: `Markdown 转换失败：${message}`,
+      reason: `Markdown 转换失败：${message}（链接：${url}）`,
     }
   }
 
@@ -241,7 +248,7 @@ export async function fetchAndCleanArticle(url: string): Promise<ContentResult> 
       contentHtml: cleanHtml,
       contentMd: `【正文提取失败】该页面结构复杂，请尝试打开原文链接。\n\n> ${url}`,
       degraded: true,
-      reason: '转换后 Markdown 为空',
+      reason: `转换后 Markdown 为空（链接：${url}）`,
     }
   }
 

@@ -17,6 +17,7 @@ import {
   type NewArticle,
   type FtsSearchResult,
 } from './db';
+import { FEED_FETCH_TIMEOUT } from './configService';
 
 // ============================================================
 // 类型定义
@@ -196,7 +197,7 @@ export async function addFeed(url: string): Promise<AddFeedResult> {
   try {
     console.log('[feedService] → 拉取 RSS XML...')
     const response = await axios.get(normalizedUrl, {
-      timeout: 15_000,
+      timeout: FEED_FETCH_TIMEOUT,
       proxy: false,
       headers: {
         'User-Agent': 'RSS-Reader/1.0 (Desktop)',
@@ -209,11 +210,19 @@ export async function addFeed(url: string): Promise<AddFeedResult> {
     console.log('[feedService] ✓ 拉取成功，HTTP', response.status, 'XML 长度:', xml.length)
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    const isTimeout = message.includes('timeout') || message.includes('ETIMEDOUT') || message.includes('ECONNABORTED');
     console.error('[feedService] ✗ 网络请求失败:', message)
+    if (isTimeout) {
+      return {
+        success: false,
+        errorCode: 'NETWORK_ERROR',
+        error: `添加订阅源 - ${normalizedUrl} 连接超时（${FEED_FETCH_TIMEOUT / 1000}s） - 请检查网络或稍后重试`,
+      };
+    }
     return {
       success: false,
       errorCode: 'NETWORK_ERROR',
-      error: `网络请求失败：${message}。请检查链接是否可访问。`,
+      error: `添加订阅源 - ${normalizedUrl} 请求失败 - ${message}`,
     };
   }
 
@@ -366,7 +375,7 @@ export async function refreshAllFeeds(): Promise<{ newCount: number }> {
   for (const feed of allFeeds) {
     try {
       const response = await axios.get(feed.url, {
-        timeout: 15_000,
+        timeout: FEED_FETCH_TIMEOUT,
         proxy: false,
         headers: {
           'User-Agent': 'RSS-Reader/1.0 (Desktop)',

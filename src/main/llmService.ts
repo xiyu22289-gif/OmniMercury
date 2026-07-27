@@ -4,10 +4,10 @@
  */
 
 import OpenAI from 'openai'
-import { getLlmConfig, getApiKeyForModel, type LlmConfig } from './configService'
+import { getLlmConfig, getApiKeyForModel, AI_API_TIMEOUT, AI_FIRST_TOKEN_TIMEOUT, type LlmConfig } from './configService'
 import { getDb, articles as articlesTable, insertTokenUsage } from './db'
 import { eq } from 'drizzle-orm'
-import type { LlmStreamChunk, LlmStreamDone, LlmStreamError, SummarizeRequest, TranslateRequest, SelectiveTranslateRequest, SelectiveSummarizeRequest } from '../shared/types'
+import type { LlmStreamChunk, LlmStreamDone, LlmStreamError, LlmErrorDetail, LlmErrorType, SummarizeRequest, TranslateRequest, SelectiveTranslateRequest, SelectiveSummarizeRequest } from '../shared/types'
 import { splitIntoParagraphs } from '../shared/paragraphSplitter'
 
 // ============================================================
@@ -67,7 +67,7 @@ function createClient(config: LlmConfig, activeKey: string): OpenAI {
   return new OpenAI({
     apiKey: activeKey,
     baseURL: config.baseUrl,
-    timeout: 120_000,
+    timeout: AI_API_TIMEOUT,
     defaultHeaders: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
       'Origin': new URL(config.baseUrl).origin,
@@ -100,7 +100,7 @@ async function consumeStream(stream: ChatStream): Promise<StreamResult> {
   return { fullText, error }
 }
 
-/** 流式消费 + 实时回调 */
+/** 流式消费 + 实时回调（含首 Token 超时保护） */
 async function consumeStreamWithCallback(
   stream: ChatStream,
   onDelta: (delta: string) => void,
@@ -108,16 +108,67 @@ async function consumeStreamWithCallback(
 ): Promise<{ fullText: string; error: string | null }> {
   let fullText = ''
   let error: string | null = null
+  let firstTokenReceived = false
+  let firstTokenTimer: ReturnType<typeof setTimeout> | null = null
+
+  // 从异步迭代器中读取下一个值，同时检测首 token 超时
+  const iterator = stream[Symbol.asyncIterator]()
+
   try {
-    for await (const chunk of stream) {
+    while (true) {
+      // 读取下一个 chunk（对首个 token 附加超时）
+      let nextResult: IteratorResult<OpenAI.Chat.Completions.ChatCompletionChunk>
+
+      if (!firstTokenReceived) {
+        // 未收到首 token：启动竞速
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          firstTokenTimer = setTimeout(() => {
+            reject(new Error('AI_FIRST_TOKEN_TIMEOUT'))
+          }, AI_FIRST_TOKEN_TIMEOUT)
+        })
+
+        try {
+          nextResult = await Promise.race([iterator.next(), timeoutPromise])
+        } finally {
+          if (firstTokenTimer) clearTimeout(firstTokenTimer)
+          firstTokenTimer = null
+        }
+      } else {
+        // 已收到首 token：正常读取（无超时竞速）
+        nextResult = await iterator.next()
+      }
+
+      if (nextResult.done) break
+
+      const chunk = nextResult.value
       const delta = chunk.choices?.[0]?.delta?.content
       if (delta) {
+        if (!firstTokenReceived) firstTokenReceived = true
         fullText += delta
         onDelta(delta)
       }
     }
+
+    // 如果整个流结束都没收到任何 token
+    if (!firstTokenReceived) {
+      error = 'AI 服务返回空响应，请检查 API 配置或模型名称是否正确'
+      onError(error)
+    }
   } catch (err) {
-    error = err instanceof Error ? err.message : String(err)
+    // 清理计时器
+    if (firstTokenTimer) clearTimeout(firstTokenTimer)
+
+    const msg = err instanceof Error ? err.message : String(err)
+    const isFirstTokenTimeout = msg.includes('AI_FIRST_TOKEN_TIMEOUT') || msg.includes('首 token')
+    const isNetworkTimeout = msg.includes('timeout') || msg.includes('ETIMEDOUT') || msg.includes('ECONNABORTED')
+
+    if (isFirstTokenTimeout) {
+      error = `AI 调用 - 首 Token 超时（${AI_FIRST_TOKEN_TIMEOUT / 1000}s） - AI 服务无响应，请检查网络连接或 API 配置是否正确`
+    } else if (isNetworkTimeout) {
+      error = `AI 调用 - 网络超时 - 请检查网络连接或尝试缩短文章长度`
+    } else {
+      error = msg
+    }
     onError(error)
   }
   return { fullText, error }
@@ -169,6 +220,88 @@ function restoreMedia(translated: string): string {
   for (const [key, original] of imgPlaceholderMap) {
     result = result.split(key).join(original)
   }
+  return result
+}
+
+// ============================================================
+// 错误分类（增强容错：将原始异常归类为结构化错误类型）
+// ============================================================
+
+/**
+ * 将 LLM API 调用中的原始错误分类为结构化错误类型。
+ * 从 OpenAI SDK 错误对象中提取 HTTP 状态码和详细信息。
+ */
+function classifyError(err: any, url?: string, position?: number, context?: string): LlmErrorDetail {
+  const msg: string = err instanceof Error ? err.message : String(err)
+  const code: number | undefined = err?.status ?? err?.response?.status ?? err?.statusCode
+  const timestamp = new Date().toISOString()
+
+  // 超时（axios/OpenAI SDK 超时标记）
+  if (
+    msg.includes('timeout') || msg.includes('timed out') ||
+    msg.includes('ETIMEDOUT') || msg.includes('ECONNABORTED') ||
+    msg.includes('aborted')
+  ) {
+    return { errorType: 'timeout', message: msg, url, statusCode: code, position, context, timestamp }
+  }
+
+  // 鉴权失败
+  if (code === 401 || code === 403 ||
+    msg.includes('Unauthorized') || msg.includes('Forbidden') ||
+    msg.includes('API Key') || msg.includes('Incorrect API key') ||
+    msg.includes('authentication') || msg.includes('invalid api key')
+  ) {
+    return { errorType: 'auth', message: msg, url, statusCode: code, position, context, timestamp }
+  }
+
+  // 限流
+  if (code === 429 || msg.toLowerCase().includes('rate') || msg.includes('too many requests')) {
+    return { errorType: 'rate_limit', message: msg, url, statusCode: code, position, context, timestamp }
+  }
+
+  // 网络错误（DNS / 连接）
+  if (
+    msg.includes('ENOTFOUND') || msg.includes('ECONNREFUSED') ||
+    msg.includes('ECONNRESET') || msg.includes('fetch failed') ||
+    msg.includes('network') || msg.includes('NetworkError') ||
+    msg.includes('connect') || msg.includes('getaddrinfo')
+  ) {
+    return { errorType: 'network', message: msg, url, statusCode: code, position, context, timestamp }
+  }
+
+  // 解析错误
+  if (
+    msg.includes('JSON') || msg.includes('parse') || msg.includes('SyntaxError') ||
+    msg.includes('Unexpected token') || msg.includes('Invalid JSON')
+  ) {
+    return { errorType: 'parse', message: msg, url, statusCode: code, position, context, timestamp }
+  }
+
+  // 服务端错误
+  if (code && code >= 500) {
+    return { errorType: 'api', message: msg, url, statusCode: code, position, context, timestamp }
+  }
+
+  // 默认
+  return { errorType: 'unknown', message: msg, url, statusCode: code, position, context, timestamp }
+}
+
+/** 将 LlmErrorDetail 格式化为用户友好的错误摘要 */
+function formatErrorDetail(detail: LlmErrorDetail): string {
+  const labels: Record<LlmErrorType, string> = {
+    timeout: '⏱ 超时',
+    network: '🌐 网络错误',
+    auth: '🔑 鉴权失败',
+    rate_limit: '🚦 请求限流',
+    parse: '📝 解析错误',
+    api: '⚙️ API 错误',
+    config: '🔧 配置错误',
+    unknown: '❓ 未知错误',
+  }
+  let result = `${labels[detail.errorType]}：${detail.message}`
+  if (detail.statusCode) result += ` (HTTP ${detail.statusCode})`
+  if (detail.url) result += `\n地址：${detail.url}`
+  if (detail.position !== undefined) result += `\n位置：第 ${detail.position + 1} 段`
   return result
 }
 
@@ -230,11 +363,16 @@ export async function translateParagraphs(request: TranslateRequest, callback: S
 
   let config: LlmConfig
   try { config = getLlmConfig() } catch (err) {
-    callback({ type: 'translate', articleId, message: `读取 LLM 配置失败：${err instanceof Error ? err.message : String(err)}` }); return
+    const detail = classifyError(err, undefined, undefined, undefined)
+    detail.errorType = 'config'
+    callback({ type: 'translate', articleId, message: formatErrorDetail(detail), detail }); return
   }
 
   const activeKey = getApiKeyForModel(config.model)
-  if (!activeKey) { callback({ type: 'translate', articleId, message: '未配置 API Key' }); return }
+  if (!activeKey) {
+    const detail: LlmErrorDetail = { errorType: 'auth', message: '未配置 API Key', url: config.baseUrl, timestamp: new Date().toISOString() }
+    callback({ type: 'translate', articleId, message: formatErrorDetail(detail), detail }); return
+  }
 
   const temp = getTemperature(config.model)
 
@@ -263,8 +401,9 @@ export async function translateParagraphs(request: TranslateRequest, callback: S
       const { fullText } = await consumeStreamWithCallback(stream,
         (delta) => callback({ type: 'translateParagraph', articleId, paragraphIndex: i, delta }),
         (errorMsg) => {
-          allTranslations[i] = `[错误] ${errorMsg}`
-          callback({ type: 'translateParagraph', articleId, paragraphIndex: i, message: errorMsg })
+          const detail = classifyError(new Error(errorMsg), config.baseUrl, i, paragraphs[i]?.slice(0, 50))
+          allTranslations[i] = `[${detail.errorType === 'timeout' ? '超时' : detail.errorType === 'network' ? '网络错误' : '错误'}] ${errorMsg}`
+          callback({ type: 'translateParagraph', articleId, paragraphIndex: i, message: formatErrorDetail(detail), detail })
         }
       )
 
@@ -277,9 +416,10 @@ export async function translateParagraphs(request: TranslateRequest, callback: S
         await recordTokens({ model: config.model, operation: 'translateParagraphs', prompt, completion: single })
       }
     } catch (err) {
-      const errMsg = `[翻译失败] ${err instanceof Error ? err.message : String(err)}`
-      allTranslations[i] = errMsg
-      callback({ type: 'translateParagraph', articleId, paragraphIndex: i, message: errMsg })
+      const detail = classifyError(err, config.baseUrl, i, paragraphs[i]?.slice(0, 50))
+      const errLabel = detail.errorType === 'timeout' ? '翻译超时' : detail.errorType === 'network' ? '网络错误' : detail.errorType === 'rate_limit' ? '请求限流' : '翻译失败'
+      allTranslations[i] = `[${errLabel}] ${detail.message}`
+      callback({ type: 'translateParagraph', articleId, paragraphIndex: i, message: formatErrorDetail(detail), detail })
     }
 
     if (i < paragraphs.length - 1) {
@@ -366,7 +506,10 @@ export async function summarizeArticle(request: SummarizeRequest, callback: Stre
       callback({ type, articleId, fullText: trimmed })
       await recordTokens({ model: config.model, operation: 'summarize', prompt: totalPrompt, completion: trimmed })
     }
-  } catch (err) { callback({ type, articleId, message: `LLM 调用失败：${err}` }) }
+  } catch (err) {
+    const detail = classifyError(err, config.baseUrl)
+    callback({ type, articleId, message: formatErrorDetail(detail), detail })
+  }
 }
 
 // ============================================================
@@ -409,7 +552,10 @@ export async function summarizeSelection(request: SelectiveSummarizeRequest, cal
         await recordTokens({ model: config.model, operation: 'selectiveSummarize', prompt, completion: trimmed })
       }
     }
-  } catch (err) { callback({ type, articleId, message: `LLM 调用失败：${err}` }) }
+  } catch (err) {
+    const detail = classifyError(err, config.baseUrl)
+    callback({ type, articleId, message: formatErrorDetail(detail), detail })
+  }
 }
 
 // ============================================================
@@ -462,7 +608,10 @@ export async function translateArticle(request: TranslateRequest, callback: Stre
       callback({ type, articleId, fullText: trimmed })
       await recordTokens({ model: config.model, operation: 'translate', prompt: totalPrompt, completion: trimmed })
     }
-  } catch (err) { callback({ type, articleId, message: `LLM 调用失败：${err}` }) }
+  } catch (err) {
+    const detail = classifyError(err, config.baseUrl)
+    callback({ type, articleId, message: formatErrorDetail(detail), detail })
+  }
 }
 
 // ============================================================
@@ -534,7 +683,7 @@ export async function suggestTagsForArticle(title: string, content: string, exis
   const client = new OpenAI({
     apiKey: activeKey,
     baseURL: config.baseUrl,
-    timeout: 30_000,
+    timeout: AI_API_TIMEOUT,
     defaultHeaders: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
       'Origin': new URL(config.baseUrl).origin,
@@ -634,5 +783,8 @@ export async function translateSelection(request: SelectiveTranslateRequest, cal
       callback({ type, articleId, fullText: restored })
       await recordTokens({ model: config.model, operation: 'selectiveTranslate', prompt, completion: restored })
     }
-  } catch (err) { callback({ type, articleId, message: `LLM 调用失败：${err}` }) }
+  } catch (err) {
+    const detail = classifyError(err, config.baseUrl)
+    callback({ type, articleId, message: formatErrorDetail(detail), detail })
+  }
 }

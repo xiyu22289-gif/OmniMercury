@@ -1,23 +1,47 @@
 import { useTranslation } from 'react-i18next'
 import { useStore } from '../store'
-import { FileText, Clock, Tag, X, Star, Search } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { FileText, Clock, Tag, X, Star, Search, Trash2, Filter } from 'lucide-react'
 
 export default function ArticleList() {
   const { t } = useTranslation()
   const {
     articles, selectedArticleId, selectArticle, selectedFeedId,
-    currentFilterTagId, setFilterTag, tags, toggleStar, loadStarredArticles,
-    searchResults, setSearchResults, jumpToArticle
+    currentFilterTagId, setFilterTag, tags, toggleStar, deleteArticle, loadStarredArticles,
+    searchResults, setSearchResults, jumpToArticle,
+    articleTagsMap, fetchArticleTags
   } = useStore()
 
+  // 未读筛选（仅全部文章模式生效）
+  const [unreadOnly, setUnreadOnly] = useState(false)
+  const isAllArticlesMode = selectedFeedId === -1
+
   // 如果有搜索结果，显示搜索结果而非普通文章列表
-  const displayArticles = searchResults.length > 0 ? searchResults : articles
+  const displayArticles = (() => {
+    const src = searchResults.length > 0 ? searchResults : articles
+    if (unreadOnly && isAllArticlesMode && searchResults.length === 0) {
+      return src.filter(a => !a.is_read)
+    }
+    return src
+  })()
   const isSearchMode = searchResults.length > 0
+
+  // 批量拉取列表中所有文章的标签（仅拉取无缓存的）
+  useEffect(() => {
+    const idsWithoutCache = displayArticles
+      .map(a => a.id)
+      .filter(id => !articleTagsMap[id])
+    if (idsWithoutCache.length === 0) return
+    // 逐篇拉取（每次间隔 5ms 避免并发过多）
+    idsWithoutCache.forEach((id, i) => {
+      setTimeout(() => fetchArticleTags(id), i * 5)
+    })
+  }, [displayArticles.map(a => a.id).join(','), fetchArticleTags])
 
   // 当前筛选标签对象
   const filterTag = currentFilterTagId ? tags.find(t => t.id === currentFilterTagId) : null
 
-  if (!selectedFeedId && !isSearchMode) {
+  if (selectedFeedId === null && !isSearchMode) {
     return (
       <div className="article-list flex items-center justify-center text-gray-400 text-sm">
         {t('articleList.selectFeed')}
@@ -67,6 +91,14 @@ export default function ArticleList() {
     toggleStar(articleId)
   }
 
+  const handleDeleteClick = (e: React.MouseEvent, articleId: number) => {
+    e.stopPropagation()
+    const title = displayArticles.find(a => a.id === articleId)?.title || '这篇文章'
+    if (window.confirm(`确定要删除「${title}」吗？此操作不可撤销。`)) {
+      deleteArticle(articleId)
+    }
+  }
+
   return (
     <div className="article-list">
       {/* ===== M5 标签筛选提示条 ===== */}
@@ -114,6 +146,37 @@ export default function ArticleList() {
         </div>
       )}
 
+      {/* 全部文章模式：未读筛选切换 */}
+      {isAllArticlesMode && !isSearchMode && (
+        <div className="px-3 py-1.5 text-xs border-b border-gray-200 dark:border-gray-700 flex items-center gap-2">
+          <Filter size={12} className={unreadOnly ? 'text-blue-500' : 'text-gray-400'} />
+          <button
+            onClick={() => setUnreadOnly(!unreadOnly)}
+            className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${
+              unreadOnly
+                ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700/50'
+            }`}
+          >
+            {unreadOnly ? '✓ 仅未读' : '仅未读'}
+          </button>
+          {unreadOnly && (
+            <span className="text-gray-400 dark:text-gray-500">
+              筛选出 {displayArticles.length} 篇未读
+            </span>
+          )}
+          <div className="flex-1" />
+          {unreadOnly && (
+            <button
+              onClick={() => setUnreadOnly(false)}
+              className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+            >
+              <X size={12} />
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="px-4 py-2 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider border-b border-gray-200 dark:border-gray-700">
         {t('articleList.articles')} ({displayArticles.length})
       </div>
@@ -127,7 +190,7 @@ export default function ArticleList() {
           <div
             key={article.id}
             onClick={() => isSearchMode ? jumpToArticle(article) : selectArticle(article.id)}
-            className={`article-item ${isSelected ? 'selected' : ''} ${isRead ? 'read' : ''}`}
+            className={`article-item group ${isSelected ? 'selected' : ''} ${isRead ? 'read' : ''}`}
           >
             <div className="flex items-start gap-2">
               {/* 已读/未读指示点 */}
@@ -169,6 +232,31 @@ export default function ArticleList() {
                     </span>
                   )}
                 </div>
+
+                {/* 文章标签显示 */}
+                {articleTagsMap[article.id] && articleTagsMap[article.id].length > 0 && (
+                  <div className="flex items-center gap-1 mt-1 flex-wrap">
+                    {articleTagsMap[article.id].map(tag => (
+                      <span
+                        key={tag.id}
+                        className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium cursor-pointer hover:opacity-80 transition-opacity"
+                        style={{
+                          backgroundColor: (tag.color || '#3b82f6') + '18',
+                          color: tag.color || '#3b82f6',
+                          border: '1px solid ' + (tag.color || '#3b82f6') + '30',
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setFilterTag(currentFilterTagId === tag.id ? null : tag.id)
+                        }}
+                        title={`筛选标签「${tag.name}」`}
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: tag.color || '#3b82f6' }} />
+                        {tag.name}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* 星标按钮 */}
@@ -182,6 +270,15 @@ export default function ArticleList() {
                 title={isStarred ? '取消星标' : '添加星标'}
               >
                 <Star size={14} fill={isStarred ? 'currentColor' : 'none'} />
+              </button>
+
+              {/* 删除按钮 */}
+              <button
+                onClick={(e) => handleDeleteClick(e, article.id)}
+                className="flex-shrink-0 p-1 rounded transition-all text-gray-300 dark:text-gray-600 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 opacity-0 group-hover:opacity-100"
+                title="删除文章"
+              >
+                <Trash2 size={14} />
               </button>
             </div>
           </div>

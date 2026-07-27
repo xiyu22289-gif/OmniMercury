@@ -79,6 +79,7 @@ interface AppState {
   // ---- 星标文章 ----
   starredArticles: Article[]
   loadStarredArticles: () => Promise<void>
+  loadAllArticles: () => Promise<void>
 
   // ---- 操作 ----
   setFeeds: (feeds: Feed[]) => void
@@ -102,6 +103,7 @@ interface AppState {
   setAddFeedError: (error: string | null) => void
   clearAddFeedError: () => void
   toggleStar: (articleId: number) => Promise<void>
+  deleteArticle: (articleId: number) => Promise<void>
   markArticleRead: (articleId: number) => Promise<void>
 
   // ---- M3 阅读模式操作 ----
@@ -483,6 +485,29 @@ export const useStore = create<AppState>((set, get) => {
       }
     },
 
+    deleteArticle: async (articleId) => {
+      try {
+        const res = await window.api.deleteArticle(articleId);
+        if (res.success) {
+          const state = get();
+          // 如果删除的是当前选中的文章，清除选中状态
+          if (state.selectedArticleId === articleId) {
+            set({ selectedArticleId: null, articleContent: null });
+          }
+          // 从文章列表和搜索结果中移除
+          set({
+            articles: state.articles.filter(a => a.id !== articleId),
+            searchResults: state.searchResults.filter(a => a.id !== articleId),
+          });
+        } else {
+          set({ error: res.error || '删除失败' });
+        }
+      } catch (err) {
+        console.error('[store] deleteArticle 异常：', err);
+        set({ error: String(err) });
+      }
+    },
+
     markArticleRead: async (articleId) => {
       try {
         await window.api.markRead(articleId)
@@ -504,6 +529,21 @@ export const useStore = create<AppState>((set, get) => {
         }
       } catch (err) {
         console.error('[store] loadStarredArticles 异常：', err)
+      }
+    },
+
+    loadAllArticles: async () => {
+      set({ selectedFeedId: -1, currentFilterTagId: null, selectedArticleId: null, articleContent: null, isLoading: true })
+      try {
+        const res = await window.api.getAllArticles()
+        if (res.payload.error === 0) {
+          set({ articles: res.payload.articles || [], isLoading: false })
+        } else {
+          set({ isLoading: false })
+        }
+      } catch (err) {
+        console.error('[store] loadAllArticles 异常：', err)
+        set({ isLoading: false })
       }
     },
 
@@ -655,16 +695,20 @@ export const useStore = create<AppState>((set, get) => {
       if (tagId !== null && tagId === prev) {
         set({ currentFilterTagId: null })
         const feedId = get().selectedFeedId
-        if (feedId !== null) {
+        if (feedId !== null && feedId >= 0) {
           await get().selectFeed(feedId)
+        } else if (feedId === -1) {
+          await get().loadAllArticles()
         }
         return
       }
       set({ currentFilterTagId: tagId })
       if (tagId !== null) {
         await get().loadArticlesByTag(tagId)
-      } else if (get().selectedFeedId !== null) {
+      } else if (get().selectedFeedId !== null && get().selectedFeedId >= 0) {
         await get().selectFeed(get().selectedFeedId!)
+      } else if (get().selectedFeedId === -1) {
+        await get().loadAllArticles()
       }
     },
 

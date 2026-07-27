@@ -51,10 +51,14 @@ const api = {
     ipcRenderer.invoke('backend:getArticlesByIds', ids),
 
   // ---- Star / Read ----
+  deleteArticle: (articleId: number): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('backend:deleteArticle', articleId),
   toggleStar: (articleId: number): Promise<{ success: boolean; data?: { id: number; isStarred: number }; error?: string }> =>
     ipcRenderer.invoke('backend:toggleStar', articleId),
   markRead: (articleId: number): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke('backend:markRead', articleId),
+  getAllArticles: (): Promise<IpcResponse> =>
+    ipcRenderer.invoke('backend:getAllArticles'),
   getStarredArticles: (): Promise<IpcResponse> =>
     ipcRenderer.invoke('backend:getStarredArticles'),
 

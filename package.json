@@ -1,6 +1,6 @@
 {
   "name": "summer-rss-reader",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "Summer RSS Reader - Cross-platform desktop RSS reader",
   "author": "xiyu22289 <xiyu22289@gmail.com>",
   "main": "dist/main/main.js",
@@ -69,6 +69,7 @@
     "openai": "^4.104.0",
     "react-i18next": "^17.0.11",
     "react-markdown": "^10.1.0",
+    "rehype-highlight": "^7.0.2",
     "rehype-raw": "^7.0.0",
     "remark-gfm": "^4.0.1",
     "rss-parser": "^3.13.0",

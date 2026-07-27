@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeRaw from 'rehype-raw'
+import rehypeHighlight from 'rehype-highlight'
+import 'highlight.js/styles/github.css'
 import { useTranslation } from 'react-i18next'
 import { useStore } from '../store'
 import {
@@ -13,7 +15,7 @@ import {
 } from 'lucide-react'
 import NotesPanel from './NotesPanel'
 import ResizeHandle from './ResizeHandle'
-import type { LlmStreamChunk, LlmStreamDone, LlmStreamError } from '../../shared/types'
+import type { LlmStreamChunk, LlmStreamDone, LlmStreamError, LlmErrorType } from '../../shared/types'
 import { splitIntoParagraphs } from '../../shared/paragraphSplitter'
 
 // ============ 字体选项 ============
@@ -40,7 +42,8 @@ const FONT_SIZE_STEP = 2
  * 3. 懒加载 + referrer 策略（避免跨域防盗链）
  */
 function SafeImage({ src, alt, baseUrl }: { src?: string; alt?: string; baseUrl?: string | null }) {
-  const [error, setError] = useState(false)
+  const [error, setError] = useState<string | false>(false)
+  const [errorDetail, setErrorDetail] = useState<{ errorType: LlmErrorType; url?: string; position?: number; context?: string; statusCode?: number } | null>(null)
 
   const resolvedSrc = useMemo(() => {
     if (!src) return src
@@ -76,6 +79,8 @@ function SafeImage({ src, alt, baseUrl }: { src?: string; alt?: string; baseUrl?
 }
 
 // ============ 常量 ============
+
+const rehypePlugins = [rehypeRaw, rehypeHighlight] as const
 
 const LANG_OPTIONS = [
   { value: 'Chinese', label: '中文' },
@@ -168,7 +173,7 @@ function NewTabTranslation({
         <div className="space-y-4">
           {originalParagraphs.map((para, idx) => (
             <div key={idx} className={`prose prose-sm ${proseCls} max-w-none leading-relaxed`}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={markdownComponents}>{para}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins} components={markdownComponents}>{para}</ReactMarkdown>
             </div>
           ))}
         </div>
@@ -204,7 +209,7 @@ function NewTabTranslation({
             <div key={idx}>
               {translations[idx] ? (
                 <div className={`prose prose-sm ${proseCls} max-w-none leading-relaxed`}>
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={markdownComponents}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins} components={markdownComponents}>
                     {translations[idx]}
                   </ReactMarkdown>
                 </div>
@@ -302,6 +307,8 @@ export default function ReaderView() {
   const [showTagPicker, setShowTagPicker] = useState(false)
   // 多选模式：选中的标签 ID 集合
   const [selectedTagIds, setSelectedTagIds] = useState<Set<number>>(new Set())
+  // 颜色编辑状态：{ tagId: showColorPicker }
+  const [editingTagColor, setEditingTagColor] = useState<number | null>(null)
   // 快速创建标签
   const [quickCreateName, setQuickCreateName] = useState('')
   const [quickCreateColor, setQuickCreateColor] = useState('#3b82f6')
@@ -357,7 +364,7 @@ export default function ReaderView() {
   const renderParagraphWithHighlights = useCallback((para: string, paraIdx: number) => {
     if (!inArticleSearch.trim()) {
       return (
-        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={markdownComponents}>{para}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins} components={markdownComponents}>{para}</ReactMarkdown>
       )
     }
 
@@ -366,7 +373,7 @@ export default function ReaderView() {
     const hitsInThisPara = searchHits.filter(h => h.paraIdx === paraIdx)
     if (hitsInThisPara.length === 0) {
       return (
-        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={markdownComponents}>{para}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins} components={markdownComponents}>{para}</ReactMarkdown>
       )
     }
 
@@ -382,7 +389,7 @@ export default function ReaderView() {
     }
 
     return (
-      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={markdownComponents}>{result}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins} components={markdownComponents}>{result}</ReactMarkdown>
     )
   }, [inArticleSearch, searchHits])
 
@@ -399,7 +406,7 @@ export default function ReaderView() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName
-      const isEditing = tag === 'TEXTAREA' || (e.target as HTMLElement).isContentEditable
+      const isEditing = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement).isContentEditable
       if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
         e.preventDefault()
         if (isEditing) return
@@ -678,7 +685,10 @@ export default function ReaderView() {
               }
             })
           }
-          else if ('message' in chunk) { setError(chunk.message); setSummaryLoading(false) }
+          else if ('message' in chunk) {
+            setError(chunk.message); setSummaryLoading(false)
+            if (chunk.detail) setErrorDetail(chunk.detail)
+          }
         } else if (chunk.type === 'translateParagraph') {
           if (chunk.articleId !== selectedArticleIdRef.current) return
           if (!translatingRef.current) return
@@ -714,14 +724,14 @@ export default function ReaderView() {
           if (!translatingRef.current) return
           if ('delta' in chunk) appendTranslateDelta(chunk.delta)
           else if ('fullText' in chunk) { setTranslateLoading(false); setTranslateMode('translation') }
-          else if ('message' in chunk) { setError(chunk.message); setTranslateLoading(false) }
+          else if ('message' in chunk) { setError(chunk.message); setTranslateLoading(false); if (chunk.detail) setErrorDetail(chunk.detail) }
         } else if (chunk.type === 'selectiveTranslate') {
           if (chunk.articleId !== selectedArticleIdRef.current) return
           if ('delta' in chunk) appendSelectionDelta(chunk.delta)
           else if ('fullText' in chunk) {
             setSelectionTranslateLoading(false)
           }
-          else if ('message' in chunk) { setError(chunk.message); setSelectionTranslateLoading(false) }
+          else if ('message' in chunk) { setError(chunk.message); setSelectionTranslateLoading(false); if (chunk.detail) setErrorDetail(chunk.detail) }
         } else if (chunk.type === 'selectiveSummarize') {
           if (chunk.articleId !== selectedArticleIdRef.current) return
           if ('delta' in chunk) {
@@ -729,7 +739,7 @@ export default function ReaderView() {
           } else if ('fullText' in chunk) {
             setSelectionSummaryLoading(false)
           }
-          else if ('message' in chunk) { setError(chunk.message); setSelectionSummaryLoading(false) }
+          else if ('message' in chunk) { setError(chunk.message); setSelectionSummaryLoading(false); if (chunk.detail) setErrorDetail(chunk.detail) }
         }
       })
     }
@@ -863,6 +873,41 @@ export default function ReaderView() {
     })
   }, [])
 
+  /** 修改标签颜色 */
+  const handleChangeTagColor = useCallback(async (tagId: number, color: string) => {
+    const tag = tags.find(t => t.id === tagId)
+    if (!tag) return
+    try {
+      await useStore.getState().updateTag(tagId, tag.name, color)
+      setEditingTagColor(null)
+    } catch (err) {
+      console.error('[ReaderView] 修改标签颜色失败：', err)
+    }
+  }, [tags])
+
+  /** 删除标签（含确认） */
+  const handleDeleteTag = useCallback(async (tagId: number) => {
+    const tag = tags.find(t => t.id === tagId)
+    if (!tag) return
+    if (!window.confirm(`确定要删除标签「${tag.name}」吗？该标签将从所有文章中移除。`)) return
+    try {
+      await useStore.getState().deleteTag(tagId)
+      // 从选中列表中移除
+      setSelectedTagIds(prev => {
+        const next = new Set(prev)
+        next.delete(tagId)
+        return next
+      })
+      // 如果当前文章已有此标签，刷新显示
+      if (selectedArticleId) {
+        await fetchArticleTags(selectedArticleId)
+      }
+    } catch (err) {
+      console.error('[ReaderView] 删除标签失败：', err)
+      useStore.getState().setError(String(err))
+    }
+  }, [tags, selectedArticleId, fetchArticleTags])
+
   /** 批量应用标签变更 */
   const applyTagChanges = useCallback(async () => {
     if (!selectedArticleId) return
@@ -883,9 +928,12 @@ export default function ReaderView() {
     if (toAdd.length > 0) {
       await batchAddTagsToArticle(selectedArticleId, toAdd)
     }
+    // ★ 刷新标签显示（从 DB 读取，确保状态一致）
+    await fetchArticleTags(selectedArticleId)
+    await fetchTags()
 
     setShowTagPicker(false)
-  }, [selectedArticleId, articleTagsMap, selectedTagIds, toggleArticleTag, batchAddTagsToArticle])
+  }, [selectedArticleId, articleTagsMap, selectedTagIds, toggleArticleTag, batchAddTagsToArticle, fetchArticleTags, fetchTags])
 
   /** 快速创建标签并加入选中列表 */
   const handleQuickCreate = useCallback(async () => {
@@ -897,18 +945,8 @@ export default function ReaderView() {
       if (res.success && res.data) {
         // 刷新标签列表
         await fetchTags()
-        // 自动加入选中
+        // 自动加入选中列表（将在 applyTagChanges 中写入 DB）
         setSelectedTagIds(prev => new Set([...prev, res.data!.id]))
-        // 将新标签也加入当前文章的缓存（因为还没提交，先更新本地）
-        const sid = selectedArticleId
-        if (sid) {
-          const cur = articleTagsMap[sid] || []
-          if (!cur.some(t => t.id === res.data!.id)) {
-            useStore.setState(s => ({
-              articleTagsMap: { ...s.articleTagsMap, [sid!]: [...cur, res.data!] }
-            }))
-          }
-        }
         setQuickCreateName('')
       }
     } catch (err) {
@@ -1188,12 +1226,12 @@ export default function ReaderView() {
             {/* 管理标签按钮 → 弹出多选面板 */}
             <button
               onClick={openTagPicker}
-              className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] text-gray-400 hover:text-blue-500
-                       border border-dashed border-gray-300 dark:border-gray-600 rounded-full
-                       hover:border-blue-400 dark:hover:border-blue-500 transition-colors"
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-white bg-blue-500 hover:bg-blue-600
+                       rounded-full transition-colors shadow-sm"
+              title={t('reader.manageTags')}
             >
               <Tag size={11} />
-              {articleTags.length === 0 ? t('reader.addTag') : t('reader.manageTags')}
+              <Plus size={10} />
             </button>
 
             {/* AI 推荐按钮 */}
@@ -1281,15 +1319,61 @@ export default function ReaderView() {
                       const checked = selectedTagIds.has(tag.id)
                       const Icon = checked ? CheckSquare : Square
                       return (
-                        <button
+                        <div
                           key={tag.id}
-                          onClick={() => toggleTagSelection(tag.id)}
-                          className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors text-sm"
+                          className="flex items-center gap-1 px-1 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
                         >
-                          <Icon size={15} className={checked ? 'text-blue-500' : 'text-gray-400'} />
-                          <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: tag.color || '#3b82f6' }} />
-                          <span className="flex-1 text-left text-gray-700 dark:text-gray-200 text-xs">{tag.name}</span>
-                        </button>
+                          <button
+                            onClick={() => toggleTagSelection(tag.id)}
+                            className="flex-1 flex items-center gap-2 min-w-0"
+                          >
+                            <Icon size={15} className={checked ? 'text-blue-500' : 'text-gray-400 flex-shrink-0'} />
+                            <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: tag.color || '#3b82f6' }} />
+                            <span className="flex-1 text-left text-gray-700 dark:text-gray-200 text-xs truncate">{tag.name}</span>
+                          </button>
+
+                          {/* 颜色切换 */}
+                          <div className="relative flex-shrink-0">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setEditingTagColor(editingTagColor === tag.id ? null : tag.id) }}
+                              className="p-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                              title="修改标签颜色"
+                            >
+                              <span className="w-3 h-3 rounded-full border border-gray-300 dark:border-gray-500" style={{ backgroundColor: tag.color || '#3b82f6' }} />
+                            </button>
+                            {editingTagColor === tag.id && (
+                              <div
+                                className="absolute top-full right-0 mt-1 z-50 bg-white dark:bg-gray-700 rounded-lg shadow-lg border border-gray-200 dark:border-gray-600 p-1.5 flex gap-1 flex-wrap w-[130px]"
+                                onClick={e => e.stopPropagation()}
+                              >
+                                {PRESET_COLORS.map(c => (
+                                  <button
+                                    key={c}
+                                    onClick={() => handleChangeTagColor(tag.id, c)}
+                                    className={`w-5 h-5 rounded-full transition-transform hover:scale-110 border-2 ${tag.color === c ? 'border-blue-500 dark:border-blue-400' : 'border-transparent'}`}
+                                    style={{ backgroundColor: c }}
+                                    title={c}
+                                  />
+                                ))}
+                                <button
+                                  onClick={() => setEditingTagColor(null)}
+                                  className="w-full text-[10px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 mt-0.5"
+                                >
+                                  取消
+                                </button>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* 删除标签 */}
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDeleteTag(tag.id) }}
+                            className="flex-shrink-0 p-0.5 rounded text-gray-300 dark:text-gray-600 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                            title="删除标签"
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
                       )
                     })
                   )}
@@ -1672,11 +1756,53 @@ export default function ReaderView() {
           </div>
           )}
 
-          {/* 错误信息 */}
+          {/* 错误信息（增强：含错误类型标签和详细上下文） */}
           {error && (
-            <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-center justify-between">
-              <span className="text-sm text-red-600 dark:text-red-400">{error}</span>
-              <button onClick={() => setError(null)} className="text-red-400 hover:text-red-600 text-xs">✕</button>
+            <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1 min-w-0">
+                  {/* 错误类型标签 */}
+                  <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+                    {errorDetail && (
+                      <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+                        errorDetail.errorType === 'timeout' ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' :
+                        errorDetail.errorType === 'network' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
+                        errorDetail.errorType === 'auth' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400' :
+                        errorDetail.errorType === 'rate_limit' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                        errorDetail.errorType === 'parse' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
+                        errorDetail.errorType === 'config' ? 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400' :
+                        'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                      }`}>
+                        {errorDetail.errorType === 'timeout' ? '⏱ 超时' :
+                         errorDetail.errorType === 'network' ? '🌐 网络错误' :
+                         errorDetail.errorType === 'auth' ? '🔑 鉴权失败' :
+                         errorDetail.errorType === 'rate_limit' ? '🚦 限流' :
+                         errorDetail.errorType === 'parse' ? '📝 解析错误' :
+                         errorDetail.errorType === 'config' ? '🔧 配置' :
+                         '⚙️ 错误'}
+                      </span>
+                    )}
+                    {errorDetail?.statusCode && (
+                      <span className="text-[10px] text-red-400 dark:text-red-500 font-mono">HTTP {errorDetail.statusCode}</span>
+                    )}
+                  </div>
+                  {/* 错误消息 */}
+                  <span className="text-sm text-red-600 dark:text-red-400 whitespace-pre-wrap">{error}</span>
+                  {/* 上下文信息 */}
+                  {errorDetail?.url && (
+                    <div className="mt-1 text-[11px] text-red-400 dark:text-red-500 truncate">
+                      🔗 {errorDetail.url}
+                    </div>
+                  )}
+                  {errorDetail?.position !== undefined && (
+                    <div className="mt-0.5 text-[11px] text-red-400 dark:text-red-500">
+                      📍 出错位置：第 {errorDetail.position + 1} 段
+                      {errorDetail.context && <span className="opacity-70">（{errorDetail.context}...）</span>}
+                    </div>
+                  )}
+                </div>
+                <button onClick={() => { setError(false); setErrorDetail(null) }} className="flex-shrink-0 text-red-400 hover:text-red-600 text-xs p-0.5">✕</button>
+              </div>
             </div>
           )}
 
@@ -1732,7 +1858,7 @@ export default function ReaderView() {
                     <div key={idx} style={{ display: 'flex', gap: 0, alignItems: 'flex-start' }}>
                       <div style={{ width: `${dividerPos}%`, paddingRight: 12 }}>
                         <div className={`prose prose-sm ${proseCls} max-w-none leading-relaxed`}>
-                          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={markdownComponents}>
+                          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins} components={markdownComponents}>
                             {para}
                           </ReactMarkdown>
                         </div>
@@ -1745,7 +1871,7 @@ export default function ReaderView() {
                       <div style={{ width: `${100 - dividerPos}%`, paddingLeft: 12 }}>
                         {paragraphTranslations[idx] ? (
                           <div className={`prose prose-sm ${proseCls} max-w-none leading-relaxed`}>
-                            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={markdownComponents}>
+                            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins} components={markdownComponents}>
                               {paragraphTranslations[idx]}
                             </ReactMarkdown>
                           </div>
@@ -1766,7 +1892,7 @@ export default function ReaderView() {
                     return (
                     <div key={idx}>
                       <div className={`prose prose-sm ${proseCls} max-w-none leading-relaxed`}>
-                        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={markdownComponents}>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins} components={markdownComponents}>
                           {para}
                         </ReactMarkdown>
                       </div>
@@ -1780,7 +1906,7 @@ export default function ReaderView() {
                           </div>
                           <div className="bg-blue-50/30 dark:bg-blue-900/5 px-4 py-3">
                             <div className={`prose prose-sm ${proseCls} max-w-none leading-relaxed text-sm`}>
-                              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={markdownComponents}>
+                              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins} components={markdownComponents}>
                                 {paragraphTranslations[idx]}
                               </ReactMarkdown>
                             </div>
@@ -1911,7 +2037,7 @@ export default function ReaderView() {
                   <div className="bg-green-50/30 dark:bg-green-900/5 px-4 py-3">
                     {selectionSummary ? (
                       <div className={`prose prose-sm ${proseCls} max-w-none leading-relaxed text-sm`}>
-                        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={markdownComponents}>{selectionSummary}</ReactMarkdown>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins} components={markdownComponents}>{selectionSummary}</ReactMarkdown>
                       </div>
                     ) : (
                       <div className="text-xs text-green-500 dark:text-green-400 py-1">{t('reader.translating')}</div>
@@ -1945,7 +2071,7 @@ export default function ReaderView() {
                     <div className="bg-cyan-50/30 dark:bg-cyan-900/5 px-4 py-3">
                       {selectionTranslation ? (
                         <div className={`prose prose-sm ${proseCls} max-w-none leading-relaxed text-sm`}>
-                          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={markdownComponents}>
+                          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins} components={markdownComponents}>
                             {selectionTranslation}
                           </ReactMarkdown>
                         </div>

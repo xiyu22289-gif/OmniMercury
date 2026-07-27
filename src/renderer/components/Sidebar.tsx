@@ -25,7 +25,7 @@ export default function Sidebar() {
     setOpmlImporting, setOpmlProgress, setOpmlDialogOpen,
     // M5 标签
     tags, currentFilterTagId, setFilterTag, fetchTags, tagArticleCounts,
-    loadStarredArticles
+    loadStarredArticles, loadAllArticles
   } = useStore()
 
   const [addUrl, setAddUrl] = useState('')
@@ -133,7 +133,8 @@ export default function Sidebar() {
       }
       // 如果当前有选中的订阅源，刷新其文章列表
       if (selectedFeedId !== null) {
-        selectFeed(selectedFeedId)
+        if (selectedFeedId >= 0) selectFeed(selectedFeedId)
+        else loadAllArticles()
       }
     } catch (err) {
       setError(String(err))
@@ -192,7 +193,7 @@ export default function Sidebar() {
         <button
           onClick={handleOpmlImport}
           className="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
-          title={t('sidebar.importOpml')}
+          title="导入订阅源 (OPML/CSV/TXT/JSON)"
         >
           <Upload size={14} />
         </button>
@@ -253,6 +254,21 @@ export default function Sidebar() {
 
       {/* 订阅源列表 */}
       <div className="flex-1 overflow-y-auto py-1">
+        {/* ===== 🌐 全部文章 ===== */}
+        <div className="px-4 py-1.5">
+          <button
+            onClick={loadAllArticles}
+            className={`w-full flex items-center gap-2 px-2 py-1 text-sm rounded transition-colors ${
+              selectedFeedId === -1
+                ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                : 'text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20'
+            }`}
+          >
+            <Globe size={13} className="flex-shrink-0" />
+            <span className="text-xs">🌐 全部文章</span>
+          </button>
+        </div>
+
         <div className="px-4 py-1.5 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
           <FolderOpen size={12} className="inline mr-1" />
           {t('sidebar.feeds')} ({feeds.length})

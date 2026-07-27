@@ -150,7 +150,7 @@ export default function App() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName
-      const isEditing = tag === 'TEXTAREA' || (e.target as HTMLElement).isContentEditable
+      const isEditing = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement).isContentEditable
       if (isEditing) return
 
       const mod = e.ctrlKey || e.metaKey
@@ -175,7 +175,10 @@ export default function App() {
         e.preventDefault()
         window.api.refreshFeeds().then(() => {
           const state = useStore.getState()
-          if (state.selectedFeedId !== null) selectFeed(state.selectedFeedId)
+          if (state.selectedFeedId !== null) {
+            if (state.selectedFeedId >= 0) selectFeed(state.selectedFeedId)
+            else state.loadAllArticles()
+          }
         }).catch(() => {})
         return
       }

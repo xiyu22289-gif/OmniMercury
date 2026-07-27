@@ -83,6 +83,135 @@ html, body, #root {
 .resize-handle:hover, .resize-handle:active { background: #3b82f6; }
 .dark .resize-handle:hover, .dark .resize-handle:active { background: #60a5fa; }
 
+/* ========== Markdown 渲染修复 ========== */
+
+/* 代码块：强制换行 + 不溢出 */
+.prose pre {
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
+  overflow-x: auto !important;
+  max-width: 100% !important;
+  padding: 12px 16px !important;
+  border-radius: 6px !important;
+  font-size: 0.85em !important;
+  line-height: 1.6 !important;
+}
+
+.prose pre code {
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
+}
+
+/* 行内代码 */
+.prose :not(pre) > code {
+  padding: 2px 5px !important;
+  border-radius: 3px !important;
+  font-size: 0.85em !important;
+  background: #f0f0f0 !important;
+  color: #d63384 !important;
+}
+
+.dark .prose :not(pre) > code {
+  background: #2d2d2d !important;
+  color: #f0a0c0 !important;
+}
+
+/* 列表（有序/无序）缩进和标记 */
+.prose ul {
+  list-style-type: disc !important;
+  padding-left: 1.5em !important;
+  margin-top: 0.25em !important;
+  margin-bottom: 0.25em !important;
+}
+
+.prose ol {
+  list-style-type: decimal !important;
+  padding-left: 1.5em !important;
+  margin-top: 0.25em !important;
+  margin-bottom: 0.25em !important;
+}
+
+.prose li {
+  margin-top: 0.15em !important;
+  margin-bottom: 0.15em !important;
+  padding-left: 0.25em !important;
+}
+
+.prose ul ul { list-style-type: circle !important; }
+.prose ul ul ul { list-style-type: square !important; }
+
+/* 引用块 */
+.prose blockquote {
+  border-left: 3px solid #d1d5db !important;
+  padding-left: 1em !important;
+  color: #6b7280 !important;
+  margin-top: 0.5em !important;
+  margin-bottom: 0.5em !important;
+}
+
+.dark .prose blockquote {
+  border-left-color: #4b5563 !important;
+  color: #9ca3af !important;
+}
+
+/* 表格 */
+.prose table {
+  display: block !important;
+  overflow-x: auto !important;
+  max-width: 100% !important;
+}
+
+.prose th, .prose td {
+  padding: 6px 12px !important;
+  border: 1px solid #d1d5db !important;
+}
+
+.dark .prose th, .dark .prose td {
+  border-color: #4b5563 !important;
+}
+
+.prose th {
+  background: #f3f4f6 !important;
+  font-weight: 600 !important;
+}
+
+.dark .prose th {
+  background: #1f2937 !important;
+}
+
+/* 代码块深色模式覆盖 */
+.dark .prose pre {
+  background: #1a1a2e !important;
+}
+
+.dark .prose pre code {
+  color: #e5e7eb !important;
+}
+
+/* 护眼模式列表颜色修复 */
+body.eye-care .prose ul,
+body.eye-care .prose ol {
+  color: #3C3328 !important;
+}
+
+body.eye-care .prose li::marker {
+  color: #3C3328 !important;
+}
+
+/* highlight.js 深色模式覆盖 */
+.dark .hljs { background: #1a1a2e !important; color: #e5e7eb !important; }
+.dark .hljs-keyword { color: #c792ea !important; }
+.dark .hljs-string { color: #c3e88d !important; }
+.dark .hljs-comment { color: #676e95 !important; font-style: italic !important; }
+.dark .hljs-function { color: #82aaff !important; }
+.dark .hljs-number { color: #f78c6c !important; }
+.dark .hljs-title { color: #82aaff !important; }
+.dark .hljs-attr { color: #ffcb6b !important; }
+.dark .hljs-built_in { color: #82aaff !important; }
+.dark .hljs-type { color: #ffcb6b !important; }
+.dark .hljs-literal { color: #f78c6c !important; }
+.dark .hljs-meta { color: #89ddff !important; }
+
 .article-item { padding: 12px 16px; border-bottom: 1px solid #f3f4f6; cursor: pointer; transition: background-color 0.15s ease; }
 .article-item:hover { background-color: #f3f4f6; }
 .dark .article-item { border-bottom-color: #1f2937; }

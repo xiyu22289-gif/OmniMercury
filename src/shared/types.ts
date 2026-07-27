@@ -158,6 +158,22 @@ export interface LlmStreamDone {
   fullText: string
 }
 
+// ============================================================
+// 结构化错误类型（AI 调用容错增强）
+// ============================================================
+
+export type LlmErrorType = 'network' | 'timeout' | 'auth' | 'rate_limit' | 'parse' | 'api' | 'config' | 'unknown'
+
+export interface LlmErrorDetail {
+  errorType: LlmErrorType
+  message: string
+  url?: string           // 卡死/错误的 URL 或 API 端点
+  statusCode?: number    // HTTP 状态码
+  position?: number      // 卡死位置（段落索引）
+  context?: string       // 上下文（出错的段落前几个字）
+  timestamp: string      // 错误发生时间
+}
+
 /** 流式错误通知 */
 export interface LlmStreamError {
   type: 'summarize' | 'translate' | 'translateParagraph' | 'translateComplete' | 'selectiveTranslate' | 'selectiveSummarize'
@@ -165,6 +181,8 @@ export interface LlmStreamError {
   /** 段落索引（仅 translateParagraph 使用） */
   paragraphIndex?: number
   message: string
+  /** 结构化错误详情（增强容错） */
+  detail?: LlmErrorDetail
 }
 
 // ============================================================

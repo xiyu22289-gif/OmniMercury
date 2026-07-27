@@ -433,6 +433,31 @@ export function markArticleRead(articleId: number): void {
     .run();
 }
 
+export function getAllArticles(
+): Pick<Article, 'id' | 'feedId' | 'title' | 'isRead' | 'isStarred' | 'summary' | 'translations' | 'link' | 'author' | 'pubDate' | 'createdAt'>[] {
+  return getDb()
+    .select({
+      id: articles.id,
+      feedId: articles.feedId,
+      title: articles.title,
+      isRead: articles.isRead,
+      isStarred: articles.isStarred,
+      summary: articles.summary,
+      translations: articles.translations,
+      link: articles.link,
+      author: articles.author,
+      pubDate: articles.pubDate,
+      createdAt: articles.createdAt,
+    })
+    .from(articles)
+    .orderBy(sql`COALESCE(${articles.pubDate}, ${articles.createdAt}) DESC`)
+    .all()
+}
+
+export function deleteArticle(articleId: number): void {
+  getDb().delete(articles).where(eq(articles.id, articleId)).run();
+}
+
 export function toggleStarArticle(articleId: number): { id: number; isStarred: number } {
   const row = getDb()
     .select({ id: articles.id, isStarred: articles.isStarred })

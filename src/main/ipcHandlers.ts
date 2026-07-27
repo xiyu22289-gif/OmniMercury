@@ -1,6 +1,6 @@
 import { ipcMain, BrowserWindow, dialog } from 'electron'
 import { addFeed, listFeeds, getArticles, getArticlesByIdList, searchArticles, fullTextSearch, getCachedArticleContent, refreshAllFeeds } from './feedService'
-import { parseOpmlFile, importOpmlFile, exportOpmlFile } from './opmlService'
+import { parseOpmlFile, parseSubscriptionFile, importOpmlFile, exportOpmlFile } from './opmlService'
 import { getDb, getFeedById, feeds as feedsTable, articles as articlesTable, getTokenStats } from './db'
 import { eq } from 'drizzle-orm'
 import { summarizeArticle, translateArticle, translateParagraphs, testConnection, suggestTagsForArticle, translateSelection, summarizeSelection } from './llmService'
@@ -96,14 +96,15 @@ export function registerIpcHandlers(): void {
           const result = await getOrFetchArticleContent(articleId, article.link)
           return {
             type: 'get_article_content',
-            payload: { error: 0, content: { id: articleId, content: result.content } }
+            payload: { error: 0, content: { id: articleId, content: result.content }, message: result.degraded ? result.reason : undefined }
           }
         } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
           console.error('[ipcHandlers] getOrFetchArticleContent 异常：', err)
-          const fallback = article.content ?? '(暂无正文内容)'
+          const fallback = article.content ?? `（正文抓取失败：${msg}）`
           return {
             type: 'get_article_content',
-            payload: { error: 0, content: { id: articleId, content: fallback } }
+            payload: { error: 0, content: { id: articleId, content: fallback }, message: msg }
           }
         }
       }
@@ -117,9 +118,39 @@ export function registerIpcHandlers(): void {
   )
 
   // ================================================================
+  // backend:getAllArticles — 全部文章（跨订阅源，按时间倒序）
+  // ================================================================
+  ipcMain.handle('backend:getAllArticles', async (): Promise<IpcResponse> => {
+    try {
+      const { getAllArticles } = await import('./db');
+      const rows = getAllArticles();
+      const articles: Article[] = rows.map(a => ({
+        id: a.id, feed_id: a.feedId, title: a.title,
+        url: a.link ?? '', author: a.author ?? undefined,
+        summary: a.summary ?? undefined, translations: a.translations ?? undefined,
+        published_at: a.pubDate ?? a.createdAt ?? '', fetched_at: a.createdAt ?? '',
+        is_read: a.isRead === 1, is_starred: a.isStarred === 1,
+      }));
+      return { type: 'list_articles', payload: { error: 0, articles } };
+    } catch (err) {
+      return { type: 'list_articles', payload: { error: 1, message: err instanceof Error ? err.message : String(err) } };
+    }
+  });
+
+  // ================================================================
   // backend:removeFeed — 删除订阅源
   // ================================================================
   // ---- Star / Read Toggle ----
+  ipcMain.handle('backend:deleteArticle', async (_event, articleId: number) => {
+    try {
+      const { deleteArticle } = await import('./db');
+      deleteArticle(articleId);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
   ipcMain.handle('backend:toggleStar', async (_event, articleId: number) => {
     try {
       const { toggleStarArticle } = await import('./db')
@@ -367,7 +398,7 @@ export function registerIpcHandlers(): void {
     const result = await dialog.showOpenDialog(win, {
       title: '选择 OPML 文件',
       filters: [
-        { name: 'OPML 文件', extensions: ['opml', 'xml'] },
+        { name: '支持的订阅格式', extensions: ['opml', 'xml', 'csv', 'txt', 'json'] },
         { name: '所有文件', extensions: ['*'] },
       ],
       properties: ['openFile'],
@@ -378,7 +409,7 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('opml:preview', async (_event, filePath: string): Promise<IpcResponse> => {
     try {
-      const result = parseOpmlFile(filePath)
+      const result = parseSubscriptionFile(filePath)
       return {
         type: 'opml_preview',
         payload: {
