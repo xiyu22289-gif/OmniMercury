@@ -312,7 +312,6 @@ export default function ReaderView() {
   // 快速创建标签
   const [quickCreateName, setQuickCreateName] = useState('')
   const [quickCreateColor, setQuickCreateColor] = useState('#3b82f6')
-  const [quickCreating, setQuickCreating] = useState(false)
   // AI 推荐
   const [aiSuggesting, setAiSuggesting] = useState(false)
   const [aiSuggestions, setAiSuggestions] = useState<string[]>([])
@@ -908,17 +907,37 @@ export default function ReaderView() {
     }
   }, [tags, selectedArticleId, fetchArticleTags])
 
-  /** 批量应用标签变更 */
+  /** 批量应用标签变更（含快速创建） */
   const applyTagChanges = useCallback(async () => {
     if (!selectedArticleId) return
+
+    // ★ 先处理快速创建：输入框有内容时自动创建标签
+    const name = quickCreateName.trim()
+    let quickCreatedId: number | null = null
+    if (name) {
+      try {
+        const res = await window.api.createTag(name, quickCreateColor)
+        if (res.success && res.data) {
+          quickCreatedId = res.data.id
+          setQuickCreateName('')
+          await fetchTags()
+        }
+      } catch (err) {
+        console.error('[ReaderView] quickCreate 失败：', err)
+      }
+    }
+
+    // 构建最终的标签 ID 列表（当前选中 + 刚创建的）
+    const finalTagIds = [...selectedTagIds]
+    if (quickCreatedId !== null && !finalTagIds.includes(quickCreatedId)) {
+      finalTagIds.push(quickCreatedId)
+    }
+
     const currentTags = articleTagsMap[selectedArticleId] || []
     const currentIds = new Set(currentTags.map(t => t.id))
-    const selectedArr = [...selectedTagIds]
 
-    // 需要新增的标签
-    const toAdd = selectedArr.filter(id => !currentIds.has(id))
-    // 需要移除的标签
-    const toRemove = [...currentIds].filter(id => !selectedTagIds.has(id))
+    const toAdd = finalTagIds.filter(id => !currentIds.has(id))
+    const toRemove = [...currentIds].filter(id => !finalTagIds.includes(id))
 
     // 先移除
     for (const id of toRemove) {
@@ -933,28 +952,7 @@ export default function ReaderView() {
     await fetchTags()
 
     setShowTagPicker(false)
-  }, [selectedArticleId, articleTagsMap, selectedTagIds, toggleArticleTag, batchAddTagsToArticle, fetchArticleTags, fetchTags])
-
-  /** 快速创建标签并加入选中列表 */
-  const handleQuickCreate = useCallback(async () => {
-    const name = quickCreateName.trim()
-    if (!name) return
-    setQuickCreating(true)
-    try {
-      const res = await window.api.createTag(name, quickCreateColor)
-      if (res.success && res.data) {
-        // 刷新标签列表
-        await fetchTags()
-        // 自动加入选中列表（将在 applyTagChanges 中写入 DB）
-        setSelectedTagIds(prev => new Set([...prev, res.data!.id]))
-        setQuickCreateName('')
-      }
-    } catch (err) {
-      console.error('[ReaderView] quickCreate 失败：', err)
-    } finally {
-      setQuickCreating(false)
-    }
-  }, [quickCreateName, quickCreateColor, selectedArticleId, articleTagsMap, fetchTags])
+  }, [selectedArticleId, articleTagsMap, selectedTagIds, quickCreateName, quickCreateColor, toggleArticleTag, batchAddTagsToArticle, fetchArticleTags, fetchTags])
 
   /** AI 标签推荐 */
   const handleAiSuggest = useCallback(async () => {
@@ -1387,29 +1385,23 @@ export default function ReaderView() {
                       type="text"
                       value={quickCreateName}
                       onChange={e => setQuickCreateName(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter') handleQuickCreate() }}
+                      onKeyDown={e => { if (e.key === 'Enter') e.preventDefault() }}
                       placeholder={t('reader.newTagPlaceholder')}
-                      className="flex-1 px-2 py-1 text-xs border border-gray-300 dark:border-gray-500
+                      className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-500
                                bg-white dark:bg-gray-700 dark:text-gray-100 rounded focus:outline-none
                                focus:ring-1 focus:ring-blue-500 placeholder:text-gray-400"
                     />
-                    <div className="flex gap-0.5">
+                    <div className="flex gap-0.5 mt-1">
+                      <span className="text-[9px] text-gray-400 mr-0.5 self-center">颜色：</span>
                       {PRESET_COLORS.map(c => (
                         <button
                           key={c}
                           onClick={() => setQuickCreateColor(c)}
-                          className={`w-4 h-4 rounded-full transition-transform hover:scale-110 ${quickCreateColor === c ? 'ring-1 ring-offset-1 ring-blue-500' : ''}`}
+                          className={`w-5 h-5 rounded-full transition-transform hover:scale-110 ${quickCreateColor === c ? 'ring-2 ring-offset-1 ring-blue-500' : ''}`}
                           style={{ backgroundColor: c }}
                         />
                       ))}
                     </div>
-                    <button
-                      onClick={handleQuickCreate}
-                      disabled={quickCreating || !quickCreateName.trim()}
-                      className="px-2 py-1 text-xs font-medium text-white bg-blue-500 rounded hover:bg-blue-600 disabled:opacity-40 transition-colors flex-shrink-0"
-                    >
-                      <Plus size={12} />
-                    </button>
                   </div>
                 </div>
 
