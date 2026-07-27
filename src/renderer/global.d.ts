@@ -7,6 +7,9 @@ import type {
   Tag,
   TokenStats,
   ArticleNote,
+  LlmGlobalConfig,
+  LlmFunctionConfig,
+  LlmModelItem,
 } from '../shared/types'
 
 /** OPML 导入进度事件（类型定义同 preload/index.ts） */
@@ -62,6 +65,14 @@ declare global {
 
       /** 测试 LLM API 连接 */
       testConnection: (config?: { baseUrl: string; apiKey: string; model: string }) => Promise<{ success: boolean; latencyMs: number; message: string }>
+
+      // ---- 函数级 LLM 配置（新版） ----
+      getLlmGlobalConfig: () => Promise<LlmGlobalConfig>
+      getLlmFunctionConfig: (funcType: string) => Promise<LlmFunctionConfig>
+      setLlmFunctionConfig: (funcType: string, config: LlmFunctionConfig) => Promise<{ success: boolean }>
+
+      // 模型列表查询
+      listLlmModels: (baseUrl: string, apiKey: string) => Promise<import('../shared/types').ListModelsResult>
 
       /** Token 用量统计 */
       getTokenStats: () => Promise<{ error: number; stats?: TokenStats[]; message?: string }>

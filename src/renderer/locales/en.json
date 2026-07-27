@@ -108,7 +108,8 @@
     "strikethrough": "Strikethrough",
     "unorderedList": "Unordered list",
     "orderedList": "Ordered list",
-    "fontSizeLabel": "Font size"
+    "fontSizeLabel": "Font size",
+    "confirm": "Confirm"
   },
   "tagManager": {
     "title": "Manage Tags",
@@ -146,7 +147,23 @@
     "totalTokens": "Total",
     "operationSummarize": "Summarize",
     "operationTranslate": "Translate",
-    "refreshStats": "Refresh stats"
+    "refreshStats": "Refresh stats",
+    "tabFullTranslate": "Full Translation",
+    "tabSelectiveTranslate": "Select Translation",
+    "tabFullSummary": "Full Summary",
+    "tabSelectiveSummary": "Select Summary",
+    "tabTokenStats": "Token Usage",
+    "newCustomModel": "New Custom Model",
+    "editCustomModel": "Edit Custom Model",
+    "customModelLabel": "Custom Model Label",
+    "customModelLabelPlaceholder": "e.g.: My DeepSeek",
+    "saveCustomModel": "Save Model",
+    "deleteCustomModel": "Delete this model",
+    "cancel": "Cancel",
+    "testAndListModels": "Test & Fetch Models",
+    "listingModels": "Fetching models...",
+    "availableModels": "Available models ({{count}} total)",
+    "currentModel": "Currently using"
   },
   "opml": {
     "importProgress": "OPML Import Progress",

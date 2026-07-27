@@ -1,14 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useStore } from '../store'
-import { Settings, X, RotateCcw, Check, Zap, Loader2, Eye, EyeOff, BarChart3 } from 'lucide-react'
-import type { TokenStats } from '../../shared/types'
-
-interface FormData {
-  baseUrl: string
-  apiKey: string
-  model: string
-}
+import { Settings, X, RotateCcw, Check, Zap, Loader2, Eye, EyeOff, BarChart3, Globe, FileText, MousePointerClick, ListFilter, Star } from 'lucide-react'
+import type { TokenStats, LlmFunctionType, LlmFunctionConfig, CustomModelConfig, LlmModelItem } from '../../shared/types'
 
 const PRESET_MODELS = [
   { label: 'DeepSeek V4 Flash', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-v4-flash' },
@@ -17,335 +11,260 @@ const PRESET_MODELS = [
   { label: 'GPT-5.6 Luna (CodeAPI)', baseUrl: 'https://codeapi.icu/v1', model: 'gpt-5.6-luna' },
 ]
 
+type TabType = 'fullTranslate' | 'selectiveTranslate' | 'fullSummary' | 'selectiveSummary' | 'tokenStats'
+const TAB_CONFIG: { key: TabType; icon: typeof Globe; labelKey: string }[] = [
+  { key: 'fullTranslate', icon: Globe, labelKey: 'llmSettings.tabFullTranslate' },
+  { key: 'selectiveTranslate', icon: MousePointerClick, labelKey: 'llmSettings.tabSelectiveTranslate' },
+  { key: 'fullSummary', icon: FileText, labelKey: 'llmSettings.tabFullSummary' },
+  { key: 'selectiveSummary', icon: ListFilter, labelKey: 'llmSettings.tabSelectiveSummary' },
+  { key: 'tokenStats', icon: BarChart3, labelKey: 'llmSettings.tabTokenStats' },
+]
+const ALL_FUNC_TYPES: LlmFunctionType[] = ['fullTranslate', 'selectiveTranslate', 'fullSummary', 'selectiveSummary']
+
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
   return String(n)
 }
 
-export default function LLMSettings() {
+function ModelDetailView({ modelId, baseUrl, initialApiKey, showKey, onShowKeyToggle, onApiKeyChange, testing, onTest, testResult, isPreset }: {
+  modelId: string; baseUrl: string; initialApiKey: string; showKey: boolean; onShowKeyToggle: () => void
+  onApiKeyChange: (value: string) => void; testing: boolean; onTest: () => void
+  testResult: { success: boolean; latencyMs: number; message: string } | null; isPreset: boolean
+}) {
   const { t } = useTranslation()
-  const { showSettings, setShowSettings, llmConfig, setLlmConfig, loadLlmConfig, tokenStats, tokenStatsLoading, loadTokenStats } = useStore()
-
-  const [form, setForm] = useState<FormData>({
-    baseUrl: 'https://api.deepseek.com/v1',
-    apiKey: '',
-    model: 'deepseek-chat'
-  })
-  const [saved, setSaved] = useState(false)
-  const [testing, setTesting] = useState(false)
-  const [testResult, setTestResult] = useState<{ success: boolean; latencyMs: number; message: string } | null>(null)
-  const [showKey, setShowKey] = useState(false)
-  const [showStats, setShowStats] = useState(false)
-
-  // 弹窗打开时从 store 同步配置到表单
-  useEffect(() => {
-    if (showSettings && llmConfig) {
-      setForm({
-        baseUrl: llmConfig.baseUrl,
-        apiKey: llmConfig.apiKeys?.[llmConfig.model] || llmConfig.apiKey,
-        model: llmConfig.model
-      })
-    }
-  }, [showSettings, llmConfig])
-
-  // 打开统计面板时加载 Token 统计
-  useEffect(() => {
-    if (showSettings && showStats) {
-      loadTokenStats()
-    }
-  }, [showSettings, showStats, loadTokenStats])
-
-  const handlePreset = (preset: typeof PRESET_MODELS[number]) => {
-    const savedKey = llmConfig?.apiKeys?.[preset.model] || ''
-    setForm((prev) => ({ ...prev, baseUrl: preset.baseUrl, model: preset.model, apiKey: savedKey }))
-  }
-
-  const handleSave = async () => {
-    const updatedApiKeys = { ...(llmConfig?.apiKeys ?? {}), [form.model]: form.apiKey }
-    await window.api.setLlmConfig({
-      ...form,
-      apiKeys: updatedApiKeys,
-      apiKey: form.apiKey
-    } as unknown as Record<string, string>)
-    await loadLlmConfig()
-    setSaved(true)
-    setTimeout(() => {
-      setSaved(false)
-      setShowSettings(false)
-    }, 400)
-  }
-
-  const handleTestConnection = async () => {
-    setTesting(true)
-    setTestResult(null)
-    try {
-      const result = await window.api.testConnection({
-        baseUrl: form.baseUrl,
-        apiKey: form.apiKey,
-        model: form.model,
-      })
-      setTestResult(result)
-    } catch (err) {
-      setTestResult({ success: false, latencyMs: 0, message: String(err) })
-    } finally {
-      setTesting(false)
-    }
-  }
-
-  const handleReset = async () => {
-    await window.api.resetLlmConfig()
-    await loadLlmConfig()
-  }
-
-  if (!showSettings) return null
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col overflow-hidden">
-        {/* 标题栏 */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
-          <div className="flex items-center gap-2">
-            <Settings size={18} className="text-blue-500" />
-            <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">
-              {t('llmSettings.title')}
-            </h2>
-          </div>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setShowStats(!showStats)}
-              className={`p-1 rounded transition-colors ${
-                showStats
-                  ? 'bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400'
-                  : 'hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400'
-              }`}
-              title={t('llmSettings.showStats')}
-            >
-              <BarChart3 size={16} />
-            </button>
-            <button
-              onClick={() => setShowSettings(false)}
-              className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
-            >
-              <X size={18} />
-            </button>
-          </div>
+    <div className="space-y-3">
+      <div>
+        <label className="block text-xs font-medium text-gray-700 dark:text-white/90 mb-1">{t('llmSettings.baseUrl')}</label>
+        <input type="text" value={baseUrl} readOnly className="w-full px-3 py-2 text-sm border-2 border-gray-500 dark:border-white/20 bg-gray-50 dark:bg-gray-700/60 dark:text-white rounded-lg text-gray-700 dark:text-white/80 cursor-default select-all" />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-700 dark:text-white/90 mb-1">{t('llmSettings.model')}</label>
+        <input type="text" value={modelId} readOnly className="w-full px-3 py-2 text-sm border-2 border-gray-500 dark:border-white/20 bg-gray-50 dark:bg-gray-700/60 dark:text-white rounded-lg text-gray-700 dark:text-white/80 cursor-default select-all" />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-700 dark:text-white/90 mb-1">{t('llmSettings.apiKey')}</label>
+        <div className="relative">
+          <input type={showKey ? 'text' : 'password'} value={initialApiKey} onChange={(e) => onApiKeyChange(e.target.value)} placeholder="sk-..." className="w-full px-3 py-2 pr-9 text-sm border-2 border-gray-500 dark:border-white/20 bg-white dark:bg-gray-700 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/50 placeholder:text-gray-400 dark:placeholder:text-white/50" />
+          <button type="button" onClick={onShowKeyToggle} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 dark:hover:text-white/80 transition-colors" title={showKey ? t('llmSettings.hideKey') : t('llmSettings.showKey')}>{showKey ? <EyeOff size={14} /> : <Eye size={14} />}</button>
         </div>
+        <p className="text-[11px] text-gray-400 dark:text-white/60 mt-1">{t('llmSettings.apiKeyHint')}</p>
+      </div>
+      <div className="flex items-center gap-2">
+        <button onClick={onTest} disabled={testing || !initialApiKey.trim()} className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:bg-emerald-900/20 dark:text-emerald-400 dark:hover:bg-emerald-900/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">{testing ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}{testing ? t('llmSettings.testing') : t('llmSettings.testConnection')}</button>
+        {testResult && (<span className={`text-xs ${testResult.success ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}`}>{testResult.success ? '✓' : '✗'} {testResult.latencyMs > 0 ? `${testResult.latencyMs}ms` : ''} {testResult.message}</span>)}
+      </div>
+    </div>
+  )
+}
 
-        {/* 内容区域 - 可滚动 */}
-        <div className="flex-1 overflow-y-auto">
-          {showStats ? (
-            /* ===== Token 统计面板 ===== */
-            <div className="px-5 py-4">
-              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">
-                {t('llmSettings.tokenStatsTitle')}
-              </h3>
-
-              {tokenStatsLoading ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 size={20} className="animate-spin text-purple-500" />
-                </div>
-              ) : !tokenStats || tokenStats.length === 0 ? (
-                <div className="text-center py-8 text-sm text-gray-400 dark:text-gray-500">
-                  {t('llmSettings.noTokenData')}
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {tokenStats.map((stat: TokenStats) => (
-                    <div key={stat.model} className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4 border border-gray-200 dark:border-gray-600">
-                      <div className="flex items-center justify-between mb-2">
-                        <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-100">{stat.model}</h4>
-                        <span className="text-xs text-gray-400 dark:text-gray-500">{stat.callCount} {t('llmSettings.calls')}</span>
-                      </div>
-
-                      <div className="grid grid-cols-3 gap-2 mb-3">
-                        <div className="bg-white dark:bg-gray-800 rounded p-2 text-center">
-                          <div className="text-xs text-gray-400 dark:text-gray-500">{t('llmSettings.inputTokens')}</div>
-                          <div className="text-sm font-bold text-blue-600 dark:text-blue-400">{formatTokens(stat.totalPromptTokens)}</div>
-                        </div>
-                        <div className="bg-white dark:bg-gray-800 rounded p-2 text-center">
-                          <div className="text-xs text-gray-400 dark:text-gray-500">{t('llmSettings.outputTokens')}</div>
-                          <div className="text-sm font-bold text-green-600 dark:text-green-400">{formatTokens(stat.totalCompletionTokens)}</div>
-                        </div>
-                        <div className="bg-white dark:bg-gray-800 rounded p-2 text-center">
-                          <div className="text-xs text-gray-400 dark:text-gray-500">{t('llmSettings.totalTokens')}</div>
-                          <div className="text-sm font-bold text-purple-600 dark:text-purple-400">{formatTokens(stat.totalTokens)}</div>
-                        </div>
-                      </div>
-
-                      {stat.byOperation.length > 0 && (
-                        <div className="text-xs text-gray-500 dark:text-gray-400 space-y-1">
-                          {stat.byOperation.map(op => (
-                            <div key={op.operation} className="flex items-center justify-between">
-                              <span>
-                                {op.operation === 'summarize' ? '📝 ' + t('llmSettings.operationSummarize') : '🌐 ' + t('llmSettings.operationTranslate')}
-                              </span>
-                              <span>
-                                {t('llmSettings.inputTokens')} {formatTokens(op.prompt)} / {t('llmSettings.outputTokens')} {formatTokens(op.completion)}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div className="mt-4 flex justify-center">
-                <button
-                  onClick={loadTokenStats}
-                  disabled={tokenStatsLoading}
-                  className="flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg bg-purple-50 text-purple-600 hover:bg-purple-100 dark:bg-purple-900/20 dark:text-purple-400 dark:hover:bg-purple-900/30 disabled:opacity-50 transition-colors"
-                >
-                  <RotateCcw size={12} />
-                  {t('llmSettings.refreshStats')}
-                </button>
-              </div>
-            </div>
-          ) : (
-            /* ===== LLM 配置表单 ===== */
-            <div className="px-5 py-4 space-y-4">
-              {/* 快捷预设 */}
-              <div>
-                <label className="block text-xs font-medium text-gray-700 dark:text-gray-200 mb-2">
-                  {t('llmSettings.presets')}
-                </label>
-                <div className="flex flex-wrap gap-1.5">
-                  {PRESET_MODELS.map((preset) => {
-                    const isActive = form.model === preset.model
-                    return (
-                      <button
-                        key={preset.model}
-                        onClick={() => handlePreset(preset)}
-                        className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${
-                          isActive
-                            ? 'bg-blue-500 text-white border-blue-500 dark:bg-blue-600 dark:border-blue-500 dark:text-white'
-                            : 'border-gray-300 text-gray-600 hover:bg-gray-100 dark:border-gray-500 dark:text-gray-200 dark:hover:bg-gray-700'
-                        }`}
-                      >
-                        {preset.label}
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-
-              {/* Base URL */}
-              <div>
-                <label className="block text-xs font-medium text-gray-700 dark:text-gray-200 mb-1">
-                  {t('llmSettings.baseUrl')}
-                </label>
-                <input
-                  type="url"
-                  value={form.baseUrl}
-                  onChange={(e) => setForm((prev) => ({ ...prev, baseUrl: e.target.value }))}
-                  placeholder="https://api.openai.com/v1"
-                  className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-500
-                           bg-white dark:bg-gray-700 dark:text-gray-100 rounded-lg focus:outline-none
-                           focus:ring-2 focus:ring-blue-500/50 placeholder:text-gray-400 dark:placeholder:text-gray-500"
-                />
-              </div>
-
-              {/* API Key */}
-              <div>
-                <label className="block text-xs font-medium text-gray-700 dark:text-gray-200 mb-1">
-                  {t('llmSettings.apiKey')}
-                </label>
-                <div className="relative">
-                  <input
-                    type={showKey ? 'text' : 'password'}
-                    value={form.apiKey}
-                    onChange={(e) => setForm((prev) => ({ ...prev, apiKey: e.target.value }))}
-                    placeholder="sk-..."
-                    className="w-full px-3 py-2 pr-9 text-sm border border-gray-300 dark:border-gray-500
-                             bg-white dark:bg-gray-700 dark:text-gray-100 rounded-lg focus:outline-none
-                             focus:ring-2 focus:ring-blue-500/50 placeholder:text-gray-400 dark:placeholder:text-gray-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowKey(!showKey)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-                    title={showKey ? t('llmSettings.hideKey') : t('llmSettings.showKey')}
-                  >
-                    {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
-                  </button>
-                </div>
-                <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">
-                  {t('llmSettings.apiKeyHint')}
-                </p>
-              </div>
-
-              {/* 模型名称 */}
-              <div>
-                <label className="block text-xs font-medium text-gray-700 dark:text-gray-200 mb-1">
-                  {t('llmSettings.model')}
-                </label>
-                <input
-                  type="text"
-                  value={form.model}
-                  onChange={(e) => setForm((prev) => ({ ...prev, model: e.target.value }))}
-                  placeholder="gpt-4o-mini"
-                  className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-500
-                           bg-white dark:bg-gray-700 dark:text-gray-100 rounded-lg focus:outline-none
-                           focus:ring-2 focus:ring-blue-500/50 placeholder:text-gray-400 dark:placeholder:text-gray-500"
-                />
-              </div>
-
-              {/* 测试连接 */}
-              <div className="pt-1 border-t border-gray-100 dark:border-gray-700">
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={handleTestConnection}
-                    disabled={testing || !form.apiKey.trim()}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg
-                             bg-green-50 text-green-600 hover:bg-green-100
-                             dark:bg-green-900/20 dark:text-green-400 dark:hover:bg-green-900/30
-                             disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                  >
-                    {testing ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
-                    {testing ? t('llmSettings.testing') : t('llmSettings.testConnection')}
-                  </button>
-                  {testResult && (
-                    <span className={`text-xs ${testResult.success ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
-                      {testResult.success ? '✓' : '✗'} {testResult.latencyMs > 0 ? `${testResult.latencyMs}ms` : ''} {testResult.message}
-                    </span>
-                  )}
-                </div>
+function CustomModelEditor({ editingIndex, customForm, showKey, listingModels, availableModels, recommendedModels, modelListError, onFormChange, onCancel, onTestModels, onSave, onSelectModel }: {
+  editingIndex: number; customForm: CustomModelConfig; showKey: boolean; listingModels: boolean; availableModels: LlmModelItem[]
+  recommendedModels: string[]; modelListError: string; onFormChange: (form: CustomModelConfig) => void; onCancel: () => void
+  onTestModels: () => void; onSave: () => void; onSelectModel: (id: string) => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <div className="border-2 border-indigo-300 dark:border-indigo-700 rounded-lg p-3 bg-indigo-50/30 dark:bg-indigo-900/10 space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold text-indigo-700 dark:text-indigo-300">{editingIndex >= 0 ? t('llmSettings.editCustomModel') : t('llmSettings.newCustomModel')}</span>
+        <button onClick={onCancel} className="text-gray-400 hover:text-red-500"><X size={14} /></button>
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-600 dark:text-white/80 mb-1">{t('llmSettings.customModelLabel')}</label>
+        <input type="text" value={customForm.label} onChange={(e) => onFormChange({ ...customForm, label: e.target.value })} placeholder={t('llmSettings.customModelLabelPlaceholder')} spellCheck={false} className="w-full px-3 py-1.5 text-xs border-2 border-gray-500 dark:border-white/20 bg-white dark:bg-gray-700 dark:text-white rounded focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-600 dark:text-white/80 mb-1">{t('llmSettings.baseUrl')}</label>
+        <input type="url" value={customForm.baseUrl} onChange={(e) => onFormChange({ ...customForm, baseUrl: e.target.value })} placeholder="https://api.openai.com/v1" spellCheck={false} className="w-full px-3 py-1.5 text-xs border-2 border-gray-500 dark:border-white/20 bg-white dark:bg-gray-700 dark:text-white rounded focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-600 dark:text-white/80 mb-1">{t('llmSettings.apiKey')}</label>
+        <input type={showKey ? 'text' : 'password'} value={customForm.apiKey} onChange={(e) => onFormChange({ ...customForm, apiKey: e.target.value })} placeholder="sk-..." spellCheck={false} className="w-full px-3 py-1.5 text-xs border-2 border-gray-500 dark:border-white/20 bg-white dark:bg-gray-700 dark:text-white rounded focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+      </div>
+      <button onClick={onTestModels} disabled={listingModels || !customForm.baseUrl.trim() || !customForm.apiKey.trim()} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:bg-emerald-900/20 dark:text-emerald-400 dark:hover:bg-emerald-900/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">{listingModels ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}{listingModels ? t('llmSettings.listingModels') : t('llmSettings.testAndListModels')}</button>
+      {modelListError && (<div className="text-xs text-red-500 bg-red-50 dark:bg-red-900/20 px-3 py-1.5 rounded border border-red-200 dark:border-red-700">{modelListError}</div>)}
+      {availableModels.length > 0 && (
+        <div>
+          <label className="block text-xs font-medium text-gray-600 dark:text-white/80 mb-1">{t('llmSettings.availableModels', { count: availableModels.length })}</label>
+          {recommendedModels.length > 0 && (
+            <div className="mb-2">
+              <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1"><Star size={10} /> {t('llmSettings.recommendedModels')}</span>
+              <div className="flex flex-wrap gap-1 mt-1">
+                {recommendedModels.map(rm => (<button key={rm} onClick={() => onSelectModel(rm)} type="button" className={`cursor-pointer px-2 py-1 text-[11px] rounded border transition-all ${customForm.model === rm ? 'bg-indigo-500 text-white border-indigo-500 dark:bg-indigo-600 dark:border-indigo-500 dark:text-white font-medium ring-2 ring-indigo-300' : 'border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-100 hover:border-amber-400 active:scale-95 dark:border-amber-600 dark:text-amber-300 dark:bg-amber-900/20 dark:hover:bg-amber-900/40'}`}>⭐ {rm}</button>))}
               </div>
             </div>
           )}
-        </div>
-
-        {/* 底部按钮（仅配置模式显示） */}
-        {!showStats && (
-          <div className="flex items-center justify-between px-5 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex-shrink-0">
-            <button
-              onClick={handleReset}
-              className="flex items-center gap-1 px-3 py-1.5 text-xs text-gray-600 dark:text-gray-300 hover:text-red-500
-                       dark:hover:text-red-400 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors"
-            >
-              <RotateCcw size={13} />
-              {t('llmSettings.reset')}
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={!form.apiKey.trim()}
-              className="flex items-center gap-1.5 px-5 py-2 text-xs font-medium text-white
-                       bg-blue-500 rounded-lg hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed
-                       transition-colors"
-            >
-              {saved ? (
-                <>
-                  <Check size={14} />
-                  {t('llmSettings.saved')}
-                </>
-              ) : (
-                t('llmSettings.save')
-              )}
-            </button>
+          <div className="max-h-40 overflow-y-auto border-2 border-gray-500 dark:border-white/20 rounded">
+            {availableModels.map(m => (<button key={m.id} onClick={() => onSelectModel(m.id)} className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors ${customForm.model === m.id ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-white font-medium' : 'text-gray-700 dark:text-white/80'}`}>{recommendedModels.includes(m.id) && <Star size={10} className="inline mr-1 text-amber-500" />}{m.name}</button>))}
           </div>
-        )}
+        </div>
+      )}
+      <div>
+        <label className="block text-xs font-medium text-gray-600 dark:text-white/80 mb-1">{t('llmSettings.model')}</label>
+        <input type="text" value={customForm.model} onChange={(e) => onFormChange({ ...customForm, model: e.target.value })} placeholder="gpt-4o-mini" className="w-full px-3 py-1.5 text-xs border-2 border-gray-500 dark:border-white/20 bg-white dark:bg-gray-700 dark:text-white rounded focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+      </div>
+      <div className="flex gap-2">
+        <button onClick={onCancel} className="flex-1 py-1.5 text-xs text-gray-600 dark:text-white/80 border-2 border-gray-500 dark:border-white/20 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">{t('llmSettings.cancel')}</button>
+        <button onClick={onSave} className="flex-1 py-1.5 text-xs font-medium text-white bg-indigo-500 rounded-lg hover:bg-indigo-600 transition-colors">{t('llmSettings.saveCustomModel')}</button>
+      </div>
+    </div>
+  )
+}
+
+interface LlmConfigPanelProps { funcType: LlmFunctionType; config: LlmFunctionConfig; onSave: (config: LlmFunctionConfig) => Promise<boolean> }
+function LlmConfigPanel({ funcType, config, onSave }: LlmConfigPanelProps) {
+  const { t } = useTranslation()
+  const [selectedModel, setSelectedModel] = useState(config.model)
+  const [apiKeys, setApiKeys] = useState<Record<string, string>>({ ...config.apiKeys })
+  const [customModels, setCustomModels] = useState<CustomModelConfig[]>([...config.customModels])
+  const [saved, setSaved] = useState(false); const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<{ success: boolean; latencyMs: number; message: string } | null>(null)
+  const [showKey, setShowKey] = useState(false)
+  const [editingCustomIndex, setEditingCustomIndex] = useState<number | null>(null)
+  const [customForm, setCustomForm] = useState<CustomModelConfig>({ label: '', baseUrl: '', apiKey: '', model: '' })
+  const [listingModels, setListingModels] = useState(false)
+  const [availableModels, setAvailableModels] = useState<LlmModelItem[]>([])
+  const [recommendedModels, setRecommendedModels] = useState<string[]>([])
+  const [modelListError, setModelListError] = useState('')
+
+  useEffect(() => { setSelectedModel(config.model); setApiKeys({ ...config.apiKeys }); setCustomModels([...config.customModels]) }, [config])
+
+  const currentModel = selectedModel; const preset = PRESET_MODELS.find(p => p.model === currentModel)
+  const currentCustom = customModels.find(c => c.model === currentModel || c.label === currentModel)
+  const isPresetModel = !!preset; const showingCustomDetail = !!currentCustom && editingCustomIndex === null
+  const currentLabel = isPresetModel ? preset!.label : (currentCustom?.label || currentModel)
+  const currentBaseUrl = isPresetModel ? preset!.baseUrl : (currentCustom?.baseUrl || '')
+  const currentModelId = isPresetModel ? preset!.model : (currentCustom?.model || currentModel)
+
+  const handlePresetClick = (modelId: string) => { setSelectedModel(modelId); setTestResult(null) }
+  const handleCustomModelClick = (cm: CustomModelConfig) => { setSelectedModel(cm.model); setTestResult(null) }
+  const handleApiKeyChange = (model: string, value: string) => { setApiKeys(prev => ({ ...prev, [model]: value })) }
+
+  const handleTest = async () => {
+    const key = isPresetModel ? (apiKeys[currentModelId] || '') : (currentCustom?.apiKey || '')
+    if (!key.trim()) { setTestResult({ success: false, latencyMs: 0, message: '请先填写 API Key' }); return }
+    setTesting(true); setTestResult(null)
+    try { const result = await window.api.testConnection({ baseUrl: currentBaseUrl, apiKey: key, model: currentModelId }); setTestResult(result) }
+    catch (err) { setTestResult({ success: false, latencyMs: 0, message: String(err) }) }
+    finally { setTesting(false) }
+  }
+
+  const handleSave = async () => {
+    const updated: LlmFunctionConfig = { model: selectedModel, apiKeys: { ...apiKeys }, customModels: [...customModels] }
+    if (isPresetModel) { const key = apiKeys[preset!.model] || ''; if (key.trim()) { setTesting(true); try { const result = await window.api.testConnection({ baseUrl: preset!.baseUrl, apiKey: key, model: preset!.model }); setTestResult(result); if (!result.success) { setTesting(false); return } } catch (err) { setTestResult({ success: false, latencyMs: 0, message: String(err) }); setTesting(false); return }; setTesting(false) } }
+    const newKeys: Record<string, string> = {}; for (const m of PRESET_MODELS) { if (apiKeys[m.model]?.trim()) newKeys[m.model] = apiKeys[m.model] }
+    for (const cm of customModels) { const mp = PRESET_MODELS.find(p => p.model === cm.model); if (mp && cm.apiKey.trim()) newKeys[cm.model] = cm.apiKey }
+    const success = await onSave(updated)
+    if (success && Object.keys(newKeys).length > 0) { for (const otherFunc of ALL_FUNC_TYPES) { if (otherFunc === funcType) continue; try { const oc = await window.api.getLlmFunctionConfig(otherFunc); let ch = false; const ua = { ...oc.apiKeys }; for (const [m, k] of Object.entries(newKeys)) { if (ua[m] !== k) { ua[m] = k; ch = true } }; if (ch) await window.api.setLlmFunctionConfig(otherFunc, { ...oc, apiKeys: ua }) } catch {} } }
+    if (success) { setSaved(true); setTimeout(() => setSaved(false), 400) }
+  }
+
+  const startEditCustom = (index: number) => { setEditingCustomIndex(index); setCustomForm(index >= 0 ? { ...customModels[index] } : { label: '', baseUrl: '', apiKey: '', model: '' }); setTestResult(null) }
+  const cancelEditCustom = () => { setEditingCustomIndex(null); setAvailableModels([]); setRecommendedModels([]); setModelListError('') }
+
+  const handleListModels = async () => {
+    if (!customForm.baseUrl.trim() || !customForm.apiKey.trim()) { setModelListError('请先填写 Base URL 和 API Key'); return }
+    setModelListError(''); setListingModels(true); setAvailableModels([]); setRecommendedModels([])
+    try { const r = await window.api.listLlmModels(customForm.baseUrl, customForm.apiKey); if (r.success) { if (r.models.length === 0) setModelListError('连接成功但未返回可用模型，请检查 Base URL 或 API Key 是否正确'); else { setAvailableModels(r.models); setRecommendedModels(r.recommended || []) } } else setModelListError(r.error) }
+    catch (err) { setModelListError(String(err)) }
+    finally { setListingModels(false) }
+  }
+
+  const saveCustomModel = async () => {
+    if (!customForm.label.trim()) { setModelListError('请输入模型名称'); return }
+    if (!customForm.baseUrl.trim() || !customForm.apiKey.trim()) { setModelListError('请填写 Base URL 和 API Key'); return }
+    if (!customForm.model.trim()) { setModelListError('请选择或输入模型名称'); return }
+    const isNew = editingCustomIndex === null || editingCustomIndex < 0; const updated = isNew ? [...customModels, { ...customForm }] : customModels.map((cm, i) => i === editingCustomIndex ? { ...customForm } : cm)
+    if (updated.length > 2) { setModelListError('最多只能添加 2 个自定义模型'); return }
+    const sa = { ...apiKeys, [customForm.model]: customForm.apiKey }; const fc: LlmFunctionConfig = { model: customForm.model, apiKeys: sa, customModels: updated }
+    setCustomModels(updated); setSelectedModel(customForm.model); setEditingCustomIndex(null); setAvailableModels([]); setRecommendedModels([]); setModelListError(''); setListingModels(false); setTestResult(null)
+    const success = await onSave(fc)
+    if (success) {
+      for (const otherFunc of ALL_FUNC_TYPES) { if (otherFunc === funcType) continue; try { const oc = await window.api.getLlmFunctionConfig(otherFunc); const ei = oc.customModels.findIndex(c => c.label === customForm.label || c.model === customForm.model); let nc: CustomModelConfig[]; if (ei >= 0) nc = oc.customModels.map((c, i) => i === ei ? { ...customForm } : c); else nc = [...oc.customModels, { ...customForm }].slice(0, 2); const sk = { ...oc.apiKeys, [customForm.model]: customForm.apiKey }; await window.api.setLlmFunctionConfig(otherFunc, { model: customForm.model, apiKeys: sk, customModels: nc }) } catch {} }
+      await useStore.getState().loadLlmGlobalConfig(); setSaved(true); setTimeout(() => setSaved(false), 400)
+    }
+  }
+
+  const deleteCustomModel = (index: number) => { const updated = customModels.filter((_, i) => i !== index); setCustomModels(updated); if (selectedModel === customModels[index].model && updated.length > 0) setSelectedModel(updated[0].model); else if (updated.length === 0) setSelectedModel(PRESET_MODELS[0].model) }
+  const showDetail = (isPresetModel || showingCustomDetail) && editingCustomIndex === null && !listingModels
+
+  return (
+    <div className="px-5 py-4 space-y-4">
+      <div className="bg-blue-50 dark:bg-blue-900/10 border-2 border-blue-300 dark:border-blue-700 rounded-lg px-3 py-2 flex items-center gap-2">
+        <span className="text-xs text-blue-600 dark:text-blue-400 font-medium">{t('llmSettings.currentModel')}：</span>
+        <span className="text-xs text-blue-700 dark:text-blue-300 font-semibold">{currentLabel}</span>
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-700 dark:text-white/90 mb-2">{t('llmSettings.presets')}</label>
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {PRESET_MODELS.map((p) => { const isActive = currentModel === p.model; return (
+            <button key={p.model} onClick={() => handlePresetClick(p.model)} className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${isActive ? 'bg-blue-500 text-white border-blue-500 dark:bg-blue-600 dark:border-blue-500 dark:text-white' : 'border-gray-400 text-gray-600 hover:bg-gray-100 dark:border-white/30 dark:text-white/80 dark:hover:bg-gray-700'}`}>{p.label}</button>)})}
+          {customModels.map((cm, idx) => { const isActive = currentModel === cm.model || currentModel === cm.label; return (
+            <button key={`custom-${idx}`} onClick={() => handleCustomModelClick(cm)} className={`px-2.5 py-1 text-xs rounded-full border transition-colors flex items-center gap-1 ${isActive ? 'bg-indigo-500 text-white border-indigo-500 dark:bg-indigo-600 dark:border-indigo-500 dark:text-white' : 'border-indigo-300 text-indigo-600 hover:bg-indigo-50 dark:border-indigo-600 dark:text-indigo-300 dark:hover:bg-indigo-900/30'}`}>{cm.label}</button>)})}
+          {customModels.length < 2 && editingCustomIndex === null && (
+            <button onClick={() => startEditCustom(-1)} className="px-2.5 py-1 text-xs rounded-full border border-dashed border-indigo-400 text-indigo-500 hover:bg-indigo-50 dark:border-indigo-600 dark:text-indigo-400 dark:hover:bg-indigo-900/20 transition-colors">+ 自定义</button>)}
+        </div>
+      </div>
+      {showDetail && (<ModelDetailView modelId={currentModelId} baseUrl={currentBaseUrl} initialApiKey={isPresetModel ? (apiKeys[currentModelId] || '') : (currentCustom?.apiKey || '')} showKey={showKey} onShowKeyToggle={() => setShowKey(!showKey)} onApiKeyChange={(value) => { if (isPresetModel) handleApiKeyChange(currentModelId, value); else if (currentCustom) setCustomModels(prev => prev.map(c => { if (c.model === currentCustom.model || c.label === currentCustom.label) return { ...c, apiKey: value }; return c })) }} testing={testing} onTest={handleTest} testResult={testResult} isPreset={isPresetModel} />)}
+      {editingCustomIndex !== null && (<CustomModelEditor editingIndex={editingCustomIndex} customForm={customForm} showKey={showKey} listingModels={listingModels} availableModels={availableModels} recommendedModels={recommendedModels} modelListError={modelListError} onFormChange={setCustomForm} onCancel={cancelEditCustom} onTestModels={handleListModels} onSave={saveCustomModel} onSelectModel={(id) => setCustomForm(p => ({ ...p, model: id }))} />)}
+      {customModels.length > 0 && editingCustomIndex === null && (<div className="flex flex-wrap gap-1.5">{customModels.map((cm, idx) => (<button key={`del-${idx}`} onClick={() => deleteCustomModel(idx)} className="px-2 py-0.5 text-[11px] text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors" title={t('llmSettings.deleteCustomModel')}>删除「{cm.label}」</button>))}</div>)}
+      <div className="pt-3 border-t-2 border-gray-300 dark:border-white/20 flex justify-end">
+        <button onClick={handleSave} disabled={testing || listingModels} className="flex items-center gap-1.5 px-5 py-2 text-xs font-medium text-white bg-blue-500 rounded-lg hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">{saved ? <><Check size={14} />{t('llmSettings.saved')}</> : t('llmSettings.save')}</button>
+      </div>
+    </div>
+  )
+}
+
+function TokenStatsPanel() {
+  const { t } = useTranslation(); const { tokenStats, tokenStatsLoading, loadTokenStats } = useStore()
+  useEffect(() => { loadTokenStats() }, [loadTokenStats])
+  if (tokenStatsLoading) return <div className="flex items-center justify-center py-8"><Loader2 size={20} className="animate-spin text-purple-500" /></div>
+  if (!tokenStats || tokenStats.length === 0) return <div className="text-center py-8 text-sm text-gray-400 dark:text-white/60">{t('llmSettings.noTokenData')}</div>
+  return (
+    <div className="px-5 py-4 space-y-4">
+      {tokenStats.map((stat: TokenStats) => (
+        <div key={stat.model} className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4 border-2 border-gray-500 dark:border-white/20">
+          <div className="flex items-center justify-between mb-2"><h4 className="text-sm font-semibold text-gray-800 dark:text-white">{stat.model}</h4><span className="text-xs text-gray-400 dark:text-white/60">{stat.callCount} {t('llmSettings.calls')}</span></div>
+          <div className="grid grid-cols-3 gap-2 mb-3">
+            <div className="bg-white dark:bg-gray-800 rounded p-2 text-center"><div className="text-xs text-gray-400 dark:text-white/60">{t('llmSettings.inputTokens')}</div><div className="text-sm font-bold text-blue-600 dark:text-blue-400">{formatTokens(stat.totalPromptTokens)}</div></div>
+            <div className="bg-white dark:bg-gray-800 rounded p-2 text-center"><div className="text-xs text-gray-400 dark:text-white/60">{t('llmSettings.outputTokens')}</div><div className="text-sm font-bold text-green-600 dark:text-green-400">{formatTokens(stat.totalCompletionTokens)}</div></div>
+            <div className="bg-white dark:bg-gray-800 rounded p-2 text-center"><div className="text-xs text-gray-400 dark:text-white/60">{t('llmSettings.totalTokens')}</div><div className="text-sm font-bold text-purple-600 dark:text-purple-400">{formatTokens(stat.totalTokens)}</div></div>
+          </div>
+          {stat.byOperation.length > 0 && (<div className="text-xs text-gray-500 dark:text-white/70 space-y-1">{stat.byOperation.map(op => (<div key={op.operation} className="flex items-center justify-between"><span>{op.operation === 'summarize' ? '📝 ' + t('llmSettings.operationSummarize') : '🌐 ' + t('llmSettings.operationTranslate')}</span><span>{t('llmSettings.inputTokens')} {formatTokens(op.prompt)} / {t('llmSettings.outputTokens')} {formatTokens(op.completion)}</span></div>))}</div>)}
+        </div>
+      ))}
+      <div className="flex justify-center"><button onClick={loadTokenStats} disabled={tokenStatsLoading} className="flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg bg-purple-50 text-purple-600 hover:bg-purple-100 dark:bg-purple-900/20 dark:text-purple-400 dark:hover:bg-purple-900/30 disabled:opacity-50 transition-colors"><RotateCcw size={12} />{t('llmSettings.refreshStats')}</button></div>
+    </div>
+  )
+}
+
+export default function LLMSettings() {
+  const { t } = useTranslation(); const { showSettings, setShowSettings, llmGlobalConfig, loadLlmGlobalConfig } = useStore()
+  const [activeTab, setActiveTab] = useState<TabType>('fullTranslate')
+  useEffect(() => { if (showSettings) loadLlmGlobalConfig() }, [showSettings, loadLlmGlobalConfig])
+  const handleSave = async (funcType: LlmFunctionType, config: LlmFunctionConfig): Promise<boolean> => { try { await window.api.setLlmFunctionConfig(funcType, config); await loadLlmGlobalConfig(); return true } catch (err) { console.error('[LLMSettings] 保存失败：', err); return false } }
+  if (!showSettings) return null
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-3 border-b-2 border-gray-300 dark:border-white/20 flex-shrink-0">
+          <div className="flex items-center gap-2"><Settings size={18} className="text-blue-500" /><h2 className="text-base font-semibold text-gray-800 dark:text-white">{t('llmSettings.title')}</h2></div>
+          <div className="flex items-center gap-1">
+            <button onClick={async () => { await window.api.resetLlmConfig(); await loadLlmGlobalConfig() }} className="flex items-center gap-1 px-2 py-1 text-xs text-gray-400 hover:text-red-500 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" title={t('llmSettings.reset')}><RotateCcw size={13} /></button>
+            <button onClick={() => setShowSettings(false)} className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"><X size={18} /></button>
+          </div>
+        </div>
+        <div className="flex-shrink-0 border-b-2 border-gray-300 dark:border-white/20 px-2">
+          <div className="flex gap-0.5 overflow-x-auto">
+            {TAB_CONFIG.map(tab => { const Icon = tab.icon; const isActive = activeTab === tab.key; return (
+              <button key={tab.key} onClick={() => setActiveTab(tab.key)} className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium whitespace-nowrap border-b-2 transition-colors ${isActive ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-white/60 dark:hover:text-white'}`}><Icon size={13} />{t(tab.labelKey)}</button>)})}
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {activeTab === 'tokenStats' ? (<TokenStatsPanel />) : (<LlmConfigPanel funcType={activeTab} config={llmGlobalConfig?.[activeTab] ?? { model: 'deepseek-v4-flash', apiKeys: {}, customModels: [] }} onSave={(config) => handleSave(activeTab, config)} />)}
+        </div>
       </div>
     </div>
   )

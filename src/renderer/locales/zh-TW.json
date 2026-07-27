@@ -109,7 +109,8 @@
     "strikethrough": "刪除線",
     "unorderedList": "無序列表",
     "orderedList": "有序列表",
-    "fontSizeLabel": "字型大小"
+    "fontSizeLabel": "字型大小",
+    "confirm": "確定"
   },
   "tagManager": {
     "title": "管理標籤",
@@ -147,7 +148,23 @@
     "totalTokens": "合計",
     "operationSummarize": "摘要",
     "operationTranslate": "翻譯",
-    "refreshStats": "重新整理統計"
+    "refreshStats": "重新整理統計",
+    "tabFullTranslate": "全文翻譯LLM",
+    "tabSelectiveTranslate": "選擇翻譯LLM",
+    "tabFullSummary": "全文摘要LLM",
+    "tabSelectiveSummary": "選擇摘要LLM",
+    "tabTokenStats": "Token用量",
+    "newCustomModel": "新建自訂模型",
+    "editCustomModel": "編輯自訂模型",
+    "customModelLabel": "模型名稱（自訂）",
+    "customModelLabelPlaceholder": "例如：我的 DeepSeek",
+    "saveCustomModel": "儲存模型",
+    "deleteCustomModel": "刪除此自訂模型",
+    "cancel": "取消",
+    "testAndListModels": "測試並取得可用模型",
+    "listingModels": "正在取得可用模型...",
+    "availableModels": "可用模型（共 {{count}} 個）",
+    "currentModel": "目前使用"
   },
   "opml": {
     "importProgress": "OPML 匯入進度",

@@ -4,10 +4,10 @@
  */
 
 import OpenAI from 'openai'
-import { getLlmConfig, getApiKeyForModel, AI_API_TIMEOUT, AI_FIRST_TOKEN_TIMEOUT, type LlmConfig } from './configService'
+import { getLlmConfig, getApiKeyForModel, getEffectiveConfig, getFunctionConfig, AI_API_TIMEOUT, AI_FIRST_TOKEN_TIMEOUT, type LlmConfig } from './configService'
 import { getDb, articles as articlesTable, insertTokenUsage } from './db'
 import { eq } from 'drizzle-orm'
-import type { LlmStreamChunk, LlmStreamDone, LlmStreamError, LlmErrorDetail, LlmErrorType, SummarizeRequest, TranslateRequest, SelectiveTranslateRequest, SelectiveSummarizeRequest } from '../shared/types'
+import type { LlmStreamChunk, LlmStreamDone, LlmStreamError, LlmErrorDetail, LlmErrorType, SummarizeRequest, TranslateRequest, SelectiveTranslateRequest, SelectiveSummarizeRequest, LlmFunctionType, LlmModelItem } from '../shared/types'
 import { splitIntoParagraphs } from '../shared/paragraphSplitter'
 
 // ============================================================
@@ -61,6 +61,21 @@ async function recordTokens(params: TokenRecordParams): Promise<void> {
 // ============================================================
 // Client 创建
 // ============================================================
+
+function createClientFromEffectiveConfig(funcType: LlmFunctionType): OpenAI {
+  const effective = getEffectiveConfig(funcType)
+  if (!effective.apiKey) throw new Error('API Key 未配置。请在设置中填写 LLM API Key。')
+  const baseUrl = effective.baseUrl || 'https://api.deepseek.com/v1'
+  return new OpenAI({
+    apiKey: effective.apiKey,
+    baseURL: baseUrl,
+    timeout: 120_000,
+    defaultHeaders: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+      'Origin': new URL(baseUrl).origin,
+    },
+  })
+}
 
 function createClient(config: LlmConfig, activeKey: string): OpenAI {
   if (!activeKey) throw new Error('API Key 未配置。请在设置中填写 LLM API Key。')
@@ -354,32 +369,48 @@ function buildParagraphTranslatePrompt(paragraph: string, targetLang: string): s
 }
 
 // ============================================================
-// 段落翻译
+// 预设模型 Base URL 映射
+// ============================================================
+
+const PRESET_BASE_URLS: Record<string, string> = {
+  'deepseek-v4-flash': 'https://api.deepseek.com/v1',
+  'ecnu-max': 'https://chat.ecnu.edu.cn/open/api/v1',
+  'kimi-k2.7-code': 'https://api.moonshot.cn/v1',
+  'gpt-5.6-luna': 'https://codeapi.icu/v1',
+}
+
+/** 获取函数级有效配置 */
+function getFuncConfig(funcType: LlmFunctionType): { baseUrl: string; apiKey: string; model: string } {
+  const effective = getEffectiveConfig(funcType)
+  if (!effective.baseUrl) {
+    effective.baseUrl = PRESET_BASE_URLS[effective.model] || 'https://api.deepseek.com/v1'
+  }
+  return effective
+}
+
+// ============================================================
+// 段落翻译（全文翻译 → fullTranslate 配置）
 // ============================================================
 
 export async function translateParagraphs(request: TranslateRequest, callback: StreamCallback): Promise<void> {
   const { articleId, content, targetLang } = request
   if (!content?.trim()) { callback({ type: 'translate', articleId, message: '文章内容为空，无法翻译。' }); return }
 
-  let config: LlmConfig
-  try { config = getLlmConfig() } catch (err) {
-    const detail = classifyError(err, undefined, undefined, undefined)
+  const effective = getEffectiveConfig('fullTranslate')
+  if (!effective.apiKey) {
+    const detail: LlmErrorDetail = { errorType: 'auth', message: '未配置 API Key', url: effective.baseUrl, timestamp: new Date().toISOString() }
+    callback({ type: 'translate', articleId, message: formatErrorDetail(detail), detail }); return
+  }
+  const model = effective.model
+  const temp = getTemperature(model)
+
+  let client: OpenAI
+  try { client = createClientFromEffectiveConfig('fullTranslate') } catch (err) {
+    const detail = classifyError(err, effective.baseUrl)
     detail.errorType = 'config'
     callback({ type: 'translate', articleId, message: formatErrorDetail(detail), detail }); return
   }
 
-  const activeKey = getApiKeyForModel(config.model)
-  if (!activeKey) {
-    const detail: LlmErrorDetail = { errorType: 'auth', message: '未配置 API Key', url: config.baseUrl, timestamp: new Date().toISOString() }
-    callback({ type: 'translate', articleId, message: formatErrorDetail(detail), detail }); return
-  }
-
-  const temp = getTemperature(config.model)
-
-  // 复用 client 实例，避免每段都重新创建连接
-  const client = createClient(config, activeKey)
-
-  // ★ 逐段翻译，每段一个 API 调用 — 保证严格 1:1 对照
   const paragraphs = splitIntoParagraphs(content)
   const allTranslations: string[] = new Array(paragraphs.length).fill('')
 
@@ -390,30 +421,23 @@ export async function translateParagraphs(request: TranslateRequest, callback: S
       callback({ type: 'translateParagraph', articleId, paragraphIndex: i, fullText: paragraphs[i] })
       continue
     }
-
     try {
       const stream = await client.chat.completions.create({
-        model: config.model, messages: [{ role: 'user', content: prompt }],
-        temperature: temp,
-        stream: true,
+        model, messages: [{ role: 'user', content: prompt }], temperature: temp, stream: true,
       })
-
       const { fullText } = await consumeStreamWithCallback(stream,
         (delta) => callback({ type: 'translateParagraph', articleId, paragraphIndex: i, delta }),
         (errorMsg) => {
-          const detail = classifyError(new Error(errorMsg), config.baseUrl, i, paragraphs[i]?.slice(0, 50))
+          const detail = classifyError(new Error(errorMsg), effective.baseUrl, i, paragraphs[i]?.slice(0, 50))
           allTranslations[i] = `[${detail.errorType === 'timeout' ? '超时' : detail.errorType === 'network' ? '网络错误' : '错误'}] ${errorMsg}`
           callback({ type: 'translateParagraph', articleId, paragraphIndex: i, message: formatErrorDetail(detail), detail })
         }
       )
-
       if (fullText) {
-        const restored = restoreMedia(fullText)
-        // ★ 去掉 LLM 多翻的内容：只保留第一段（双换行之前或第一个块级标签之前）
-        const single = stripExtraParagraphs(restored)
+        const single = stripExtraParagraphs(restoreMedia(fullText))
         allTranslations[i] = single
         callback({ type: 'translateParagraph', articleId, paragraphIndex: i, fullText: single })
-        await recordTokens({ model: config.model, operation: 'translateParagraphs', prompt, completion: single })
+        await recordTokens({ model, operation: 'translateParagraphs', prompt, completion: single })
       }
     } catch (err) {
       const detail = classifyError(err, config.baseUrl, i, paragraphs[i]?.slice(0, 50))
@@ -421,23 +445,15 @@ export async function translateParagraphs(request: TranslateRequest, callback: S
       allTranslations[i] = `[${errLabel}] ${detail.message}`
       callback({ type: 'translateParagraph', articleId, paragraphIndex: i, message: formatErrorDetail(detail), detail })
     }
-
-    if (i < paragraphs.length - 1) {
-      await new Promise(r => setTimeout(r, 300))
-    }
+    if (i < paragraphs.length - 1) await new Promise(r => setTimeout(r, 300))
   }
 
-  // 写入 DB 翻译缓存
   try {
     const row = getDb().select({ translations: articlesTable.translations }).from(articlesTable).where(eq(articlesTable.id, articleId)).get()
     const existingMap: Record<string, unknown> = row?.translations ? JSON.parse(row.translations) : {}
-    existingMap._v = 2
-    existingMap[targetLang] = allTranslations
+    existingMap._v = 2; existingMap[targetLang] = allTranslations
     getDb().update(articlesTable).set({ translations: JSON.stringify(existingMap) }).where(eq(articlesTable.id, articleId)).run()
-    console.log(`[llmService] 翻译缓存已写入 DB: articleId=${articleId} lang=${targetLang} 段落数=${allTranslations.length}`)
-  } catch(err) {
-    console.error(`[llmService] 翻译缓存写入 DB 失败:`, err)
-  }
+  } catch {}
 
   callback({ type: 'translateComplete', articleId, fullText: '' })
 }
@@ -465,13 +481,12 @@ export async function summarizeArticle(request: SummarizeRequest, callback: Stre
   const type = 'summarize' as const
   if (!content?.trim()) { callback({ type, articleId, message: '文章内容为空' }); return }
 
-  let config: LlmConfig
-  try { config = getLlmConfig() } catch (err) { callback({ type, articleId, message: `配置失败：${err}` }); return }
-  const activeKey = getApiKeyForModel(config.model)
-  if (!activeKey) { callback({ type, articleId, message: '未配置 API Key' }); return }
+  const effective = getFuncConfig('fullSummary')
+  if (!effective.apiKey) { callback({ type, articleId, message: '未配置 API Key' }); return }
+  const model = effective.model
 
   let client: OpenAI
-  try { client = createClient(config, activeKey) } catch (err) { callback({ type, articleId, message: String(err) }); return }
+  try { client = createClientFromEffectiveConfig('fullSummary') } catch (err) { callback({ type, articleId, message: String(err) }); return }
 
   const prompt = buildSummarizePrompt(title, content, targetLang, detailLevel)
   const maxTokens = detailLevel === 'compact' ? 300 : detailLevel === 'detailed' ? 1500 : 800
@@ -480,18 +495,16 @@ export async function summarizeArticle(request: SummarizeRequest, callback: Stre
 
   try {
     const stream = await client.chat.completions.create({
-      model: config.model,
+      model,
       messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: prompt }],
-      temperature: getTemperature(config.model),
+      temperature: getTemperature(model),
       max_tokens: maxTokens,
       stream: true,
     })
-
     const { fullText } = await consumeStreamWithCallback(stream,
       (delta) => callback({ type, articleId, delta }),
       (errorMsg) => callback({ type, articleId, message: errorMsg })
     )
-
     if (fullText) {
       const trimmed = fullText.trim()
       if (trimmed) {
@@ -504,7 +517,7 @@ export async function summarizeArticle(request: SummarizeRequest, callback: Stre
         } catch {}
       }
       callback({ type, articleId, fullText: trimmed })
-      await recordTokens({ model: config.model, operation: 'summarize', prompt: totalPrompt, completion: trimmed })
+      await recordTokens({ model, operation: 'summarize', prompt: totalPrompt, completion: trimmed })
     }
   } catch (err) {
     const detail = classifyError(err, config.baseUrl)
@@ -522,34 +535,33 @@ export async function summarizeSelection(request: SelectiveSummarizeRequest, cal
   const content = selectedParagraphs?.join('\n\n')?.trim()
   if (!content) { callback({ type, articleId, message: '未选中任何段落' }); return }
 
-  let config: LlmConfig
-  try { config = getLlmConfig() } catch (err) { callback({ type, articleId, message: `配置失败：${err}` }); return }
-  const activeKey = getApiKeyForModel(config.model)
-  if (!activeKey) { callback({ type, articleId, message: '未配置 API Key' }); return }
+  const effective = getFuncConfig('selectiveSummary')
+  if (!effective.apiKey) { callback({ type, articleId, message: '未配置 API Key' }); return }
+  const model = effective.model
+
+  let client: OpenAI
+  try { client = createClientFromEffectiveConfig('selectiveSummary') } catch (err) { callback({ type, articleId, message: String(err) }); return }
 
   const prompt = buildSummarizePrompt(title, content, targetLang, detailLevel)
   const maxTokens = detailLevel === 'compact' ? 300 : detailLevel === 'detailed' ? 1500 : 800
 
   try {
-    const client = createClient(config, activeKey)
     const stream = await client.chat.completions.create({
-      model: config.model,
+      model,
       messages: [{ role: 'system', content: '你是一个专业的文章摘要助手。' }, { role: 'user', content: prompt }],
-      temperature: getTemperature(config.model),
+      temperature: getTemperature(model),
       max_tokens: maxTokens,
       stream: true,
     })
-
     const { fullText } = await consumeStreamWithCallback(stream,
       (delta) => callback({ type, articleId, delta }),
       (errorMsg) => callback({ type, articleId, message: errorMsg })
     )
-
     if (fullText) {
       const trimmed = fullText.trim()
       if (trimmed) {
         callback({ type, articleId, fullText: trimmed })
-        await recordTokens({ model: config.model, operation: 'selectiveSummarize', prompt, completion: trimmed })
+        await recordTokens({ model, operation: 'selectiveSummarize', prompt, completion: trimmed })
       }
     }
   } catch (err) {
@@ -735,6 +747,83 @@ ${truncated}
 }
 
 // ============================================================
+// 模型列表查询
+// ============================================================
+
+/** 从模型列表中推荐3款最快最稳的模型 */
+function recommendModels(models: LlmModelItem[]): string[] {
+  const fastKeywords = ['turbo', 'flash', 'mini', 'nano', 'lite', 'fast', 'quick', 'efficient', 'cheap', '4o', 'haiku']
+  const avoidKeywords = ['preview', 'beta', 'alpha', 'instruct', 'embedding', 'whisper', 'tts', 'dall-e', 'vision', 'audio', 'moderation', 'babbage', 'davinci', 'ada']
+  const candidates = models.filter(m => {
+    const name = m.id.toLowerCase()
+    return !avoidKeywords.some(k => name.includes(k))
+  })
+  candidates.sort((a, b) => {
+    const an = a.id.toLowerCase(); const bn = b.id.toLowerCase()
+    const aFast = fastKeywords.findIndex(k => an.includes(k))
+    const bFast = fastKeywords.findIndex(k => bn.includes(k))
+    if (aFast !== -1 && bFast === -1) return -1
+    if (aFast === -1 && bFast !== -1) return 1
+    return an.length - bn.length
+  })
+  return candidates.slice(0, 3).map(m => m.id)
+}
+
+/** 拉取服务商的可用模型列表 */
+export async function listModels(baseUrl: string, apiKey: string): Promise<import('../shared/types').ListModelsResult> {
+  if (!baseUrl || !apiKey) return { success: false, models: [], recommended: [], error: 'Base URL 和 API Key 不能为空' }
+
+  const client = new OpenAI({
+    apiKey,
+    baseURL: baseUrl,
+    timeout: 15_000,
+    defaultHeaders: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+      'Origin': new URL(baseUrl).origin,
+    },
+  })
+
+  try {
+    const response = await client.models.list()
+    const models: LlmModelItem[] = (response.data || []).map(m => ({
+      id: m.id,
+      name: m.id,
+    }))
+    const priorityOrder = ['gpt', 'claude', 'deepseek', 'kimi', 'ecnu', 'gemini', 'qwen', 'glm']
+    models.sort((a, b) => {
+      const ai = priorityOrder.findIndex(p => a.id.toLowerCase().includes(p))
+      const bi = priorityOrder.findIndex(p => b.id.toLowerCase().includes(p))
+      if (ai !== -1 && bi !== -1) return ai - bi
+      if (ai !== -1) return -1
+      if (bi !== -1) return 1
+      return a.id.localeCompare(b.id)
+    })
+
+    // ★ 模型列表为空时，用一条轻量 chat 请求验证连接
+    if (models.length === 0) {
+      try {
+        await client.chat.completions.create({
+          model: 'gpt-3.5-turbo',
+          messages: [{ role: 'user', content: 'hi' }],
+          max_tokens: 1,
+          temperature: 0,
+        })
+        // chat 成功但无模型列表 — 可能是 Base URL 正确但不支持 models.list
+      } catch (chatErr) {
+        const msg = chatErr instanceof Error ? chatErr.message : String(chatErr)
+        return { success: false, models: [], recommended: [], error: `连接成功但无可用模型列表（可能 Base URL 不正确）: ${msg}` }
+      }
+    }
+
+    const recommended = recommendModels(models)
+    return { success: true, models, recommended, error: '' }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return { success: false, models: [], recommended: [], error: msg }
+  }
+}
+
+// ============================================================
 // 选择文本翻译
 // ============================================================
 
@@ -753,35 +842,32 @@ export async function translateSelection(request: SelectiveTranslateRequest, cal
   if (!trimmed) { callback({ type, articleId, message: '选中文本为空' }); return }
   if (trimmed.length > 8000) { callback({ type, articleId, message: '选中文本过长（最多 8000 字符）' }); return }
 
-  let config: LlmConfig
-  try { config = getLlmConfig() } catch (err) { callback({ type, articleId, message: `配置失败：${err}` }); return }
-  const activeKey = getApiKeyForModel(config.model)
-  if (!activeKey) { callback({ type, articleId, message: '未配置 API Key' }); return }
+  const effective = getFuncConfig('selectiveTranslate')
+  if (!effective.apiKey) { callback({ type, articleId, message: '未配置 API Key' }); return }
+  const model = effective.model
 
   let client: OpenAI
-  try { client = createClient(config, activeKey) } catch (err) { callback({ type, articleId, message: String(err) }); return }
+  try { client = createClientFromEffectiveConfig('selectiveTranslate') } catch (err) { callback({ type, articleId, message: String(err) }); return }
 
   const prompt = buildSelectiveTranslatePrompt(trimmed, targetLang)
   if (!prompt) { callback({ type, articleId, message: '无法构建翻译 Prompt' }); return }
 
   try {
     const stream = await client.chat.completions.create({
-      model: config.model,
+      model,
       messages: [{ role: 'user', content: prompt }],
-      temperature: getTemperature(config.model),
+      temperature: getTemperature(model),
       max_tokens: 4096,
       stream: true,
     })
-
     const { fullText } = await consumeStreamWithCallback(stream,
       (delta) => callback({ type, articleId, delta }),
       (errorMsg) => callback({ type, articleId, message: errorMsg })
     )
-
     if (fullText) {
       const restored = restoreMedia(fullText.trim())
       callback({ type, articleId, fullText: restored })
-      await recordTokens({ model: config.model, operation: 'selectiveTranslate', prompt, completion: restored })
+      await recordTokens({ model, operation: 'selectiveTranslate', prompt, completion: restored })
     }
   } catch (err) {
     const detail = classifyError(err, config.baseUrl)

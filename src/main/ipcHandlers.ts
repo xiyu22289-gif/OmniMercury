@@ -3,8 +3,8 @@ import { addFeed, listFeeds, getArticles, getArticlesByIdList, searchArticles, f
 import { parseOpmlFile, parseSubscriptionFile, importOpmlFile, exportOpmlFile } from './opmlService'
 import { getDb, getFeedById, feeds as feedsTable, articles as articlesTable, getTokenStats } from './db'
 import { eq } from 'drizzle-orm'
-import { summarizeArticle, translateArticle, translateParagraphs, testConnection, suggestTagsForArticle, translateSelection, summarizeSelection } from './llmService'
-import { getLlmConfig, setLlmConfig, resetLlmConfig } from './configService'
+import { summarizeArticle, translateArticle, translateParagraphs, testConnection, suggestTagsForArticle, translateSelection, summarizeSelection, listModels } from './llmService'
+import { getLlmConfig, getLlmGlobalConfig, setFunctionConfig, getFunctionConfig, setLlmConfig, resetLlmConfig } from './configService'
 import { getOrFetchArticleContent } from './contentService'
 import {
   getAllTags, getTagById, createTag, updateTag, deleteTag,
@@ -271,6 +271,19 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('llm:resetConfig', async () => { resetLlmConfig(); return { success: true } })
   ipcMain.handle('llm:testConnection', async (_event, config?: { baseUrl: string; apiKey: string; model: string }) => {
     return await testConnection(config)
+  })
+
+  // 函数级 LLM 配置（新版）
+  ipcMain.handle('llm:getGlobalConfig', async () => getLlmGlobalConfig())
+  ipcMain.handle('llm:getFunctionConfig', async (_event, funcType: string) => getFunctionConfig(funcType as import('../shared/types').LlmFunctionType))
+  ipcMain.handle('llm:setFunctionConfig', async (_event, funcType: string, config: import('../shared/types').LlmFunctionConfig) => {
+    setFunctionConfig(funcType as import('../shared/types').LlmFunctionType, config)
+    return { success: true }
+  })
+
+  // 模型列表查询
+  ipcMain.handle('llm:listModels', async (_event, baseUrl: string, apiKey: string) => {
+    return await listModels(baseUrl, apiKey)
   })
 
   // 流式摘要

@@ -1475,7 +1475,7 @@ export default function ReaderView() {
                     {LANG_OPTIONS.map(l => (
                       <button
                         key={l.value}
-                        onClick={() => confirmSummary(l.value)}
+                        onClick={(e) => { e.stopPropagation(); setSelectedSummaryLang(l.value) }}
                         className={`w-full text-left px-3 py-1.5 text-sm flex items-center justify-between transition-colors
                           ${selectedSummaryLang === l.value
                             ? 'bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
@@ -1505,6 +1505,15 @@ export default function ReaderView() {
                         </button>
                       ))}
                     </div>
+                  </div>
+                  {/* 确定按钮 */}
+                  <div className="border-t border-gray-100 dark:border-gray-700 px-3 py-2">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); confirmSummary(selectedSummaryLang) }}
+                      className="w-full py-1.5 text-xs font-medium text-white bg-purple-500 rounded-lg hover:bg-purple-600 transition-colors"
+                    >
+                      {t('reader.confirm')}
+                    </button>
                   </div>
                 </div>
               )}
@@ -1588,12 +1597,7 @@ export default function ReaderView() {
                       {LANG_OPTIONS.map(l => (
                         <button
                           key={l.value}
-                          onClick={() => {
-                            setSelectedTargetLang(l.value)
-                            setTranslateTargetLang(l.value)
-                            setShowTranslateLangPicker(false)
-                            handleStartTranslate(l.value)
-                          }}
+                          onClick={(e) => { e.stopPropagation(); setSelectedTargetLang(l.value); setTranslateTargetLang(l.value) }}
                           className={`w-full text-left px-3 py-1.5 text-sm flex items-center justify-between transition-colors
                             ${selectedTargetLang === l.value
                               ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
@@ -1604,6 +1608,15 @@ export default function ReaderView() {
                           {selectedTargetLang === l.value && <Check size={13} className="text-blue-500" />}
                         </button>
                       ))}
+                    </div>
+                    {/* 确定按钮 */}
+                    <div className="border-t border-gray-100 dark:border-gray-700 px-3 py-2">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setShowTranslateLangPicker(false); handleStartTranslate(selectedTargetLang) }}
+                        className="w-full py-1.5 text-xs font-medium text-white bg-blue-500 rounded-lg hover:bg-blue-600 transition-colors"
+                      >
+                        {t('reader.confirm')}
+                      </button>
                     </div>
                   </div>
                 )}
@@ -2232,7 +2245,7 @@ export default function ReaderView() {
               const containerHeight = window.innerHeight - 200
               const deltaPct = (delta / (containerHeight || 1)) * 100
               setNotePanelWidth((prev) =>
-                Math.min(60, Math.max(20, prev + deltaPct))
+                Math.min(60, Math.max(20, prev - deltaPct))
               )
             }}
           />
