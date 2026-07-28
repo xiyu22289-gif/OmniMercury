@@ -43,7 +43,6 @@ const FONT_SIZE_STEP = 2
  */
 function SafeImage({ src, alt, baseUrl }: { src?: string; alt?: string; baseUrl?: string | null }) {
   const [error, setError] = useState<string | false>(false)
-  const [errorDetail, setErrorDetail] = useState<{ errorType: LlmErrorType; url?: string; position?: number; context?: string; statusCode?: number } | null>(null)
 
   const resolvedSrc = useMemo(() => {
     if (!src) return src
@@ -92,11 +91,19 @@ const LANG_OPTIONS = [
 ]
 
 const DISPLAY_MODES = [
-  { value: 'replace' as const, icon: Replace, label: '覆盖' },
-  { value: 'sideBySide' as const, icon: Columns, label: '左右' },
-  { value: 'topBottom' as const, icon: AlignJustify, label: '上下' },
-  { value: 'newTab' as const, icon: Monitor, label: '新标签' },
+  { value: 'replace' as const, icon: Replace },
+  { value: 'sideBySide' as const, icon: Columns },
+  { value: 'topBottom' as const, icon: AlignJustify },
+  { value: 'newTab' as const, icon: Monitor },
 ] as const
+
+/** 显示模式 label 映射（用于 i18n） */
+const DISPLAY_MODE_LABEL_KEYS: Record<string, string> = {
+  replace: 'reader.cover',
+  sideBySide: 'reader.sideBySide',
+  topBottom: 'reader.topBottom',
+  newTab: 'reader.newTab',
+}
 
 const PRESET_COLORS = [
   '#ef4444', '#f97316', '#eab308', '#22c55e',
@@ -316,6 +323,9 @@ export default function ReaderView() {
   const [aiSuggesting, setAiSuggesting] = useState(false)
   const [aiSuggestions, setAiSuggestions] = useState<string[]>([])
   const [aiCheckedNames, setAiCheckedNames] = useState<Set<string>>(new Set())
+
+  // LLM 错误详情（用于显示错误类型标签、URL、位置等上下文信息）
+  const [errorDetail, setErrorDetail] = useState<{ errorType: LlmErrorType; url?: string; position?: number; context?: string; statusCode?: number } | null>(null)
 
   const [showSummaryLangPicker, setShowSummaryLangPicker] = useState(false)
   const [showTranslateLangPicker, setShowTranslateLangPicker] = useState(false)
@@ -1515,7 +1525,7 @@ export default function ReaderView() {
             </div>
 
             {/* 翻译按钮（来自远程） */}
-            {hasTranslation ? (
+              {hasTranslation ? (
               <>
                 {DISPLAY_MODES.map(m => (
                   <button
@@ -1528,7 +1538,7 @@ export default function ReaderView() {
                       }`}
                   >
                     <m.icon size={12} />
-                    {m.label}
+                    {t(DISPLAY_MODE_LABEL_KEYS[m.value])}
                   </button>
                 ))}
                 <button
@@ -1552,7 +1562,7 @@ export default function ReaderView() {
                       }`}
                   >
                     <m.icon size={12} />
-                    {m.label}
+                    {t(DISPLAY_MODE_LABEL_KEYS[m.value])}
                   </button>
                 ))}
                 <div className="flex items-center gap-1.5 px-2 py-1.5 text-xs text-blue-500 dark:text-blue-400">

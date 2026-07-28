@@ -65,7 +65,7 @@ async function recordTokens(params: TokenRecordParams): Promise<void> {
 function createClientFromEffectiveConfig(funcType: LlmFunctionType): OpenAI {
   const effective = getEffectiveConfig(funcType)
   if (!effective.apiKey) throw new Error('API Key 未配置。请在设置中填写 LLM API Key。')
-  const baseUrl = effective.baseUrl || 'https://api.deepseek.com/v1'
+  const baseUrl = effective.baseUrl || PRESET_BASE_URLS[effective.model] || 'https://api.deepseek.com/v1'
   return new OpenAI({
     apiKey: effective.apiKey,
     baseURL: baseUrl,
@@ -396,7 +396,7 @@ export async function translateParagraphs(request: TranslateRequest, callback: S
   const { articleId, content, targetLang } = request
   if (!content?.trim()) { callback({ type: 'translate', articleId, message: '文章内容为空，无法翻译。' }); return }
 
-  const effective = getEffectiveConfig('fullTranslate')
+  const effective = getFuncConfig('fullTranslate')
   if (!effective.apiKey) {
     const detail: LlmErrorDetail = { errorType: 'auth', message: '未配置 API Key', url: effective.baseUrl, timestamp: new Date().toISOString() }
     callback({ type: 'translate', articleId, message: formatErrorDetail(detail), detail }); return
@@ -440,7 +440,7 @@ export async function translateParagraphs(request: TranslateRequest, callback: S
         await recordTokens({ model, operation: 'translateParagraphs', prompt, completion: single })
       }
     } catch (err) {
-      const detail = classifyError(err, config.baseUrl, i, paragraphs[i]?.slice(0, 50))
+      const detail = classifyError(err, effective.baseUrl, i, paragraphs[i]?.slice(0, 50))
       const errLabel = detail.errorType === 'timeout' ? '翻译超时' : detail.errorType === 'network' ? '网络错误' : detail.errorType === 'rate_limit' ? '请求限流' : '翻译失败'
       allTranslations[i] = `[${errLabel}] ${detail.message}`
       callback({ type: 'translateParagraph', articleId, paragraphIndex: i, message: formatErrorDetail(detail), detail })
@@ -520,7 +520,7 @@ export async function summarizeArticle(request: SummarizeRequest, callback: Stre
       await recordTokens({ model, operation: 'summarize', prompt: totalPrompt, completion: trimmed })
     }
   } catch (err) {
-    const detail = classifyError(err, config.baseUrl)
+    const detail = classifyError(err, effective.baseUrl)
     callback({ type, articleId, message: formatErrorDetail(detail), detail })
   }
 }
@@ -565,7 +565,7 @@ export async function summarizeSelection(request: SelectiveSummarizeRequest, cal
       }
     }
   } catch (err) {
-    const detail = classifyError(err, config.baseUrl)
+    const detail = classifyError(err, effective.baseUrl)
     callback({ type, articleId, message: formatErrorDetail(detail), detail })
   }
 }
@@ -870,7 +870,7 @@ export async function translateSelection(request: SelectiveTranslateRequest, cal
       await recordTokens({ model, operation: 'selectiveTranslate', prompt, completion: restored })
     }
   } catch (err) {
-    const detail = classifyError(err, config.baseUrl)
+    const detail = classifyError(err, effective.baseUrl)
     callback({ type, articleId, message: formatErrorDetail(detail), detail })
   }
 }
