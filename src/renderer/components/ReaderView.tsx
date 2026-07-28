@@ -1100,7 +1100,7 @@ export default function ReaderView() {
           const checked = selectedParagraphIndices.has(idx)
           const Icon = checked ? CheckSquare : Square
           return (
-            <div key={idx} data-para-index={idx} className={`group flex gap-2 items-start ${checked ? 'bg-green-50/40 dark:bg-green-900/10 rounded px-2 -mx-2 py-1' : ''}`}>
+            <div key={idx} data-para-index={idx} className={`group flex gap-2 items-start mb-6 last:mb-0 ${checked ? 'bg-green-50/40 dark:bg-green-900/10 rounded px-2 -mx-2 py-1' : ''}`}>
               <button
                 onClick={(e) => { e.stopPropagation(); toggleSelectedParagraph(idx) }}
                 className="flex-shrink-0 mt-1 opacity-30 group-hover:opacity-100 transition-opacity"
@@ -1163,11 +1163,14 @@ export default function ReaderView() {
         className={containerBg}
         style={{
           flex: hasSummary ? `0 0 ${100 - summaryPanelWidth}%` : '1 1 100%',
-          overflowY: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
           paddingRight: hasSummary ? 16 : 0,
         }}
       >
-        <div className="max-w-3xl mx-auto">
+        {/* ===== 顶部固定区域 ===== */}
+        <div className="max-w-3xl mx-auto w-full flex-shrink-0 px-4 pt-3">
           {/* 标题 */}
           <h1 className="text-2xl font-bold leading-tight mb-2 dark:text-white">
             {selectedArticle.title || t('articleList.untitled')}
@@ -1835,7 +1838,9 @@ export default function ReaderView() {
             </div>
           )}
 
-          {/* ===== 内容主体 ===== */}
+        </div>
+        {/* ===== 内容主体（可滚动） ===== */}
+        <div className="max-w-3xl mx-auto w-full flex-1 overflow-y-auto px-4 pb-6">
           {!isLoading && (
             <div
               style={{
