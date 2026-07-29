@@ -59,10 +59,10 @@ function ModelDetailView({ modelId, baseUrl, initialApiKey, showKey, onShowKeyTo
   )
 }
 
-function CustomModelEditor({ editingIndex, customForm, showKey, listingModels, availableModels, recommendedModels, modelListError, onFormChange, onCancel, onTestModels, onSave, onSelectModel }: {
+function CustomModelEditor({ editingIndex, customForm, showKey, listingModels, availableModels, recommendedModels, modelListError, modelListSuggestV1, duplicateHint, onFormChange, onCancel, onTestModels, onSave, onSelectModel, onSuggestV1Confirm, onSuggestV1Cancel }: {
   editingIndex: number; customForm: CustomModelConfig; showKey: boolean; listingModels: boolean; availableModels: LlmModelItem[]
-  recommendedModels: string[]; modelListError: string; onFormChange: (form: CustomModelConfig) => void; onCancel: () => void
-  onTestModels: () => void; onSave: () => void; onSelectModel: (id: string) => void
+  recommendedModels: string[]; modelListError: string; modelListSuggestV1: boolean; duplicateHint: string; onFormChange: (form: CustomModelConfig) => void; onCancel: () => void
+  onTestModels: () => void; onSave: () => void; onSelectModel: (id: string) => void; onSuggestV1Confirm: () => void; onSuggestV1Cancel: () => void
 }) {
   const { t } = useTranslation()
   return (
@@ -85,6 +85,8 @@ function CustomModelEditor({ editingIndex, customForm, showKey, listingModels, a
       </div>
       <button onClick={onTestModels} disabled={listingModels || !customForm.baseUrl.trim() || !customForm.apiKey.trim()} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:bg-emerald-900/20 dark:text-emerald-400 dark:hover:bg-emerald-900/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">{listingModels ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}{listingModels ? t('llmSettings.listingModels') : t('llmSettings.testAndListModels')}</button>
       {modelListError && (<div className="text-xs text-red-500 bg-red-50 dark:bg-red-900/20 px-3 py-1.5 rounded border border-red-200 dark:border-red-700">{modelListError}</div>)}
+      {modelListSuggestV1 && (<div className="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 px-3 py-1.5 rounded border border-amber-300 dark:border-amber-700 space-y-1.5"><p>{t('llmSettings.suggestV1')}</p><div className="flex gap-2"><button onClick={onSuggestV1Confirm} className="px-2 py-1 text-xs font-medium text-white bg-amber-500 rounded hover:bg-amber-600 transition-colors">{t('llmSettings.confirm')}</button><button onClick={onSuggestV1Cancel} className="px-2 py-1 text-xs text-amber-600 dark:text-amber-400 border border-amber-300 dark:border-amber-600 rounded hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors">{t('llmSettings.cancel')}</button></div></div>)}
+      {duplicateHint && (<div className="text-xs text-blue-500 dark:text-blue-400 italic">{duplicateHint}</div>)}
       {availableModels.length > 0 && (
         <div>
           <label className="block text-xs font-medium text-gray-600 dark:text-white/80 mb-1">{t('llmSettings.availableModels', { count: availableModels.length })}</label>
@@ -128,8 +130,28 @@ function LlmConfigPanel({ funcType, config, onSave }: LlmConfigPanelProps) {
   const [availableModels, setAvailableModels] = useState<LlmModelItem[]>([])
   const [recommendedModels, setRecommendedModels] = useState<string[]>([])
   const [modelListError, setModelListError] = useState('')
+  const [modelListSuggestV1, setModelListSuggestV1] = useState(false)
+  const [deleteMode, setDeleteMode] = useState(false)
+  const [checkedForDelete, setCheckedForDelete] = useState<Set<number>>(new Set())
+  const [confirmDialog, setConfirmDialog] = useState<{ message: string; onConfirm: () => void } | null>(null)
+  const [duplicateHint, setDuplicateHint] = useState('')
 
   useEffect(() => { setSelectedModel(config.model); setApiKeys({ ...config.apiKeys }); setCustomModels([...config.customModels]) }, [config])
+
+  // 重复检测：当 customForm 的 baseUrl + apiKey + model 与已有自定义模型完全一致时提示
+  useEffect(() => {
+    const u = customForm.baseUrl.trim().replace(/\/+$/, '')
+    const k = customForm.apiKey.trim()
+    const m = customForm.model.trim()
+    if (!u || !k || !m) { setDuplicateHint(''); return }
+    const dup = customModels.find((c, i) => {
+      if (i === editingCustomIndex) return false
+      const eu = c.baseUrl.trim().replace(/\/+$/, '')
+      return eu === u && c.apiKey.trim() === k && c.model === m
+    })
+    if (dup) setDuplicateHint(t('llmSettings.duplicateModelHint', { name: dup.label }))
+    else setDuplicateHint('')
+  }, [customForm.baseUrl, customForm.apiKey, customForm.model, customModels, editingCustomIndex, t])
 
   const currentModel = selectedModel; const preset = PRESET_MODELS.find(p => p.model === currentModel)
   const currentCustom = customModels.find(c => c.model === currentModel || c.label === currentModel)
@@ -162,13 +184,14 @@ function LlmConfigPanel({ funcType, config, onSave }: LlmConfigPanelProps) {
   }
 
   const startEditCustom = (index: number) => { setEditingCustomIndex(index); setCustomForm(index >= 0 ? { ...customModels[index] } : { label: '', baseUrl: '', apiKey: '', model: '' }); setTestResult(null) }
-  const cancelEditCustom = () => { setEditingCustomIndex(null); setAvailableModels([]); setRecommendedModels([]); setModelListError('') }
+  const cancelEditCustom = () => { setEditingCustomIndex(null); setAvailableModels([]); setRecommendedModels([]); setModelListError(''); setDeleteMode(false); setCheckedForDelete(new Set()) }
 
-  const handleListModels = async () => {
-    if (!customForm.baseUrl.trim() || !customForm.apiKey.trim()) { setModelListError('请先填写 Base URL 和 API Key'); return }
-    setModelListError(''); setListingModels(true); setAvailableModels([]); setRecommendedModels([])
-    try { const r = await window.api.listLlmModels(customForm.baseUrl, customForm.apiKey); if (r.success) { if (r.models.length === 0) setModelListError('连接成功但未返回可用模型，请检查 Base URL 或 API Key 是否正确'); else { setAvailableModels(r.models); setRecommendedModels(r.recommended || []) } } else setModelListError(r.error) }
-    catch (err) { setModelListError(String(err)) }
+  const handleListModels = async (baseUrlOverride?: string) => {
+    const url = baseUrlOverride || customForm.baseUrl
+    if (!url.trim() || !customForm.apiKey.trim()) { setModelListError(t('llmSettings.fillBaseUrlAndKey')); return }
+    setModelListError(''); setModelListSuggestV1(false); setListingModels(true); setAvailableModels([]); setRecommendedModels([])
+    try { const r = await window.api.listLlmModels(url, customForm.apiKey); if (r.success) { if (r.models.length === 0) { if (!url.includes('/v1')) { setModelListSuggestV1(true); setModelListError(''); } else { setModelListError(t('llmSettings.noModelsFound')) } } else { setAvailableModels(r.models); setRecommendedModels(r.recommended || []) } } else { if (!url.includes('/v1')) { setModelListSuggestV1(true); setModelListError(''); } else { setModelListError(r.error) } } }
+    catch (err) { if (!url.includes('/v1')) { setModelListSuggestV1(true); setModelListError(''); } else { setModelListError(String(err)) } }
     finally { setListingModels(false) }
   }
 
@@ -177,17 +200,60 @@ function LlmConfigPanel({ funcType, config, onSave }: LlmConfigPanelProps) {
     if (!customForm.baseUrl.trim() || !customForm.apiKey.trim()) { setModelListError('请填写 Base URL 和 API Key'); return }
     if (!customForm.model.trim()) { setModelListError('请选择或输入模型名称'); return }
     const isNew = editingCustomIndex === null || editingCustomIndex < 0; const updated = isNew ? [...customModels, { ...customForm }] : customModels.map((cm, i) => i === editingCustomIndex ? { ...customForm } : cm)
-    if (updated.length > 2) { setModelListError('最多只能添加 2 个自定义模型'); return }
     const sa = { ...apiKeys, [customForm.model]: customForm.apiKey }; const fc: LlmFunctionConfig = { model: customForm.model, apiKeys: sa, customModels: updated }
     setCustomModels(updated); setSelectedModel(customForm.model); setEditingCustomIndex(null); setAvailableModels([]); setRecommendedModels([]); setModelListError(''); setListingModels(false); setTestResult(null)
     const success = await onSave(fc)
     if (success) {
-      for (const otherFunc of ALL_FUNC_TYPES) { if (otherFunc === funcType) continue; try { const oc = await window.api.getLlmFunctionConfig(otherFunc); const ei = oc.customModels.findIndex(c => c.label === customForm.label || c.model === customForm.model); let nc: CustomModelConfig[]; if (ei >= 0) nc = oc.customModels.map((c, i) => i === ei ? { ...customForm } : c); else nc = [...oc.customModels, { ...customForm }].slice(0, 2); const sk = { ...oc.apiKeys, [customForm.model]: customForm.apiKey }; await window.api.setLlmFunctionConfig(otherFunc, { model: customForm.model, apiKeys: sk, customModels: nc }) } catch {} }
+      for (const otherFunc of ALL_FUNC_TYPES) { if (otherFunc === funcType) continue; try { const oc = await window.api.getLlmFunctionConfig(otherFunc); const ei = oc.customModels.findIndex(c => c.label === customForm.label || c.model === customForm.model); let nc: CustomModelConfig[]; if (ei >= 0) nc = oc.customModels.map((c, i) => i === ei ? { ...customForm } : c); else nc = [...oc.customModels, { ...customForm }]; const sk = { ...oc.apiKeys, [customForm.model]: customForm.apiKey }; await window.api.setLlmFunctionConfig(otherFunc, { model: customForm.model, apiKeys: sk, customModels: nc }) } catch {} }
       await useStore.getState().loadLlmGlobalConfig(); setSaved(true); setTimeout(() => setSaved(false), 400)
     }
   }
 
-  const deleteCustomModel = (index: number) => { const updated = customModels.filter((_, i) => i !== index); setCustomModels(updated); if (selectedModel === customModels[index].model && updated.length > 0) setSelectedModel(updated[0].model); else if (updated.length === 0) setSelectedModel(PRESET_MODELS[0].model) }
+  const enterDeleteMode = () => { setDeleteMode(true); setCheckedForDelete(new Set()) }
+  const exitDeleteMode = () => { setDeleteMode(false); setCheckedForDelete(new Set()) }
+  const toggleDeleteCheck = (idx: number) => {
+    setCheckedForDelete(prev => {
+      const next = new Set(prev)
+      if (next.has(idx)) next.delete(idx)
+      else next.add(idx)
+      return next
+    })
+  }
+  const selectAllForDelete = () => setCheckedForDelete(new Set(customModels.map((_, i) => i)))
+  const deselectAllForDelete = () => setCheckedForDelete(new Set())
+
+  const executeBatchDelete = () => {
+    const toDelete = customModels.filter((_, i) => checkedForDelete.has(i))
+    if (toDelete.length === 0) return
+    const names = toDelete.map(c => `「${c.label}」`).join('\n')
+    setConfirmDialog({
+      message: t('llmSettings.deleteSelectedWarning', { names }),
+      onConfirm: async () => {
+        setConfirmDialog(null)
+        const remaining = customModels.filter((_, i) => !checkedForDelete.has(i))
+        const deletedLabels = new Set(toDelete.map(c => c.label))
+        const deletedModels = new Set(toDelete.map(c => c.model))
+        setCustomModels(remaining)
+        if (deletedModels.has(selectedModel) || deletedLabels.has(selectedModel)) {
+          if (remaining.length > 0) setSelectedModel(remaining[0].model)
+          else setSelectedModel(PRESET_MODELS[0].model)
+        }
+        setDeleteMode(false); setCheckedForDelete(new Set())
+        for (const ft of ALL_FUNC_TYPES) {
+          try {
+            const oc = await window.api.getLlmFunctionConfig(ft)
+            const nc = oc.customModels.filter(c => !deletedLabels.has(c.label) && !deletedModels.has(c.model))
+            if (nc.length !== oc.customModels.length) {
+              const needNewModel = deletedLabels.has(oc.model) || deletedModels.has(oc.model)
+              const newModel = needNewModel ? (nc.length > 0 ? nc[0].model : PRESET_MODELS[0].model) : oc.model
+              await window.api.setLlmFunctionConfig(ft, { model: newModel, apiKeys: oc.apiKeys, customModels: nc })
+            }
+          } catch {}
+        }
+        await useStore.getState().loadLlmGlobalConfig()
+      }
+    })
+  }
   const showDetail = (isPresetModel || showingCustomDetail) && editingCustomIndex === null && !listingModels
 
   return (
@@ -203,13 +269,55 @@ function LlmConfigPanel({ funcType, config, onSave }: LlmConfigPanelProps) {
             <button key={p.model} onClick={() => handlePresetClick(p.model)} className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${isActive ? 'bg-blue-500 text-white border-blue-500 dark:bg-blue-600 dark:border-blue-500 dark:text-white' : 'border-gray-400 text-gray-600 hover:bg-gray-100 dark:border-white/30 dark:text-white/80 dark:hover:bg-gray-700'}`}>{p.label}</button>)})}
           {customModels.map((cm, idx) => { const isActive = currentModel === cm.model || currentModel === cm.label; return (
             <button key={`custom-${idx}`} onClick={() => handleCustomModelClick(cm)} className={`px-2.5 py-1 text-xs rounded-full border transition-colors flex items-center gap-1 ${isActive ? 'bg-indigo-500 text-white border-indigo-500 dark:bg-indigo-600 dark:border-indigo-500 dark:text-white' : 'border-indigo-300 text-indigo-600 hover:bg-indigo-50 dark:border-indigo-600 dark:text-indigo-300 dark:hover:bg-indigo-900/30'}`}>{cm.label}</button>)})}
-          {customModels.length < 2 && editingCustomIndex === null && (
+          {editingCustomIndex === null && (
             <button onClick={() => startEditCustom(-1)} className="px-2.5 py-1 text-xs rounded-full border border-dashed border-indigo-400 text-indigo-500 hover:bg-indigo-50 dark:border-indigo-600 dark:text-indigo-400 dark:hover:bg-indigo-900/20 transition-colors">+ 自定义</button>)}
         </div>
       </div>
       {showDetail && (<ModelDetailView modelId={currentModelId} baseUrl={currentBaseUrl} initialApiKey={isPresetModel ? (apiKeys[currentModelId] || '') : (currentCustom?.apiKey || '')} showKey={showKey} onShowKeyToggle={() => setShowKey(!showKey)} onApiKeyChange={(value) => { if (isPresetModel) handleApiKeyChange(currentModelId, value); else if (currentCustom) setCustomModels(prev => prev.map(c => { if (c.model === currentCustom.model || c.label === currentCustom.label) return { ...c, apiKey: value }; return c })) }} testing={testing} onTest={handleTest} testResult={testResult} isPreset={isPresetModel} />)}
-      {editingCustomIndex !== null && (<CustomModelEditor editingIndex={editingCustomIndex} customForm={customForm} showKey={showKey} listingModels={listingModels} availableModels={availableModels} recommendedModels={recommendedModels} modelListError={modelListError} onFormChange={setCustomForm} onCancel={cancelEditCustom} onTestModels={handleListModels} onSave={saveCustomModel} onSelectModel={(id) => setCustomForm(p => ({ ...p, model: id }))} />)}
-      {customModels.length > 0 && editingCustomIndex === null && (<div className="flex flex-wrap gap-1.5">{customModels.map((cm, idx) => (<button key={`del-${idx}`} onClick={() => deleteCustomModel(idx)} className="px-2 py-0.5 text-[11px] text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors" title={t('llmSettings.deleteCustomModel')}>删除「{cm.label}」</button>))}</div>)}
+      {editingCustomIndex !== null && (<CustomModelEditor editingIndex={editingCustomIndex} customForm={customForm} showKey={showKey} listingModels={listingModels} availableModels={availableModels} recommendedModels={recommendedModels} modelListError={modelListError} modelListSuggestV1={modelListSuggestV1} duplicateHint={duplicateHint} onFormChange={setCustomForm} onCancel={cancelEditCustom} onTestModels={() => handleListModels()} onSave={saveCustomModel} onSelectModel={(id) => setCustomForm(p => ({ ...p, model: id }))} onSuggestV1Confirm={() => { const newUrl = customForm.baseUrl.replace(/\/+$/, '') + '/v1'; setCustomForm(p => ({ ...p, baseUrl: newUrl })); handleListModels(newUrl) }} onSuggestV1Cancel={() => { setModelListSuggestV1(false); setModelListError(t('llmSettings.noModelsFound')) }} />)}
+      {!deleteMode && customModels.length > 0 && editingCustomIndex === null && (
+        <button onClick={enterDeleteMode} className="px-2 py-0.5 text-[11px] text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors">{t('llmSettings.deleteCustomModels')}</button>
+      )}
+      {deleteMode && editingCustomIndex === null && (
+        <div className="space-y-2 border-2 border-red-300 dark:border-red-700 rounded-lg p-3 bg-red-50/30 dark:bg-red-900/10">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-red-700 dark:text-red-300">{t('llmSettings.selectModelsToDelete')}</span>
+            <button onClick={exitDeleteMode} className="text-gray-400 hover:text-gray-600"><X size={14} /></button>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {customModels.map((cm, idx) => {
+              const checked = checkedForDelete.has(idx)
+              return (
+                <button key={`del-${idx}`} onClick={() => toggleDeleteCheck(idx)} className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${checked ? 'bg-red-500 text-white border-red-500 dark:bg-red-600 dark:border-red-500 dark:text-white' : 'border-red-300 text-red-500 hover:bg-red-50 dark:border-red-600 dark:text-red-400 dark:hover:bg-red-900/30'}`}>
+                  {checked ? '☒ ' : '☐ '}{cm.label}
+                </button>
+              )
+            })}
+          </div>
+          <div className="flex gap-2">
+            <button onClick={selectAllForDelete} className="text-[11px] text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300">{t('llmSettings.selectAll')}</button>
+            <button onClick={deselectAllForDelete} className="text-[11px] text-gray-400 hover:text-gray-500 dark:text-white/60 dark:hover:text-white/80">{t('llmSettings.deselectAll')}</button>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={exitDeleteMode} className="flex-1 py-1.5 text-xs text-gray-600 dark:text-white/80 border-2 border-gray-500 dark:border-white/20 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">{t('llmSettings.cancel')}</button>
+            <button onClick={executeBatchDelete} disabled={checkedForDelete.size === 0} className="flex-1 py-1.5 text-xs font-medium text-white bg-red-500 rounded-lg hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">{t('llmSettings.confirmDelete', { count: checkedForDelete.size })}</button>
+          </div>
+        </div>
+      )}
+      {confirmDialog && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50" onClick={() => setConfirmDialog(null)}>
+          <div className="bg-white dark:bg-gray-800 border-2 border-red-400 dark:border-red-600 rounded-xl p-5 max-w-md mx-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-start gap-3 mb-4">
+              <X size={20} className="flex-shrink-0 mt-0.5 text-red-500" />
+              <p className="text-sm text-gray-800 dark:text-white whitespace-pre-wrap leading-relaxed">{confirmDialog.message}</p>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setConfirmDialog(null)} className="px-4 py-1.5 text-xs font-medium rounded-lg border-2 border-gray-300 dark:border-white/20 text-gray-600 dark:text-white/80 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">{t('llmSettings.cancel')}</button>
+              <button onClick={confirmDialog.onConfirm} className="px-4 py-1.5 text-xs font-medium text-white bg-red-500 rounded-lg hover:bg-red-600 transition-colors">{t('llmSettings.confirm')}</button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="pt-3 border-t-2 border-gray-300 dark:border-white/20 flex justify-end">
         <button onClick={handleSave} disabled={testing || listingModels} className="flex items-center gap-1.5 px-5 py-2 text-xs font-medium text-white bg-blue-500 rounded-lg hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">{saved ? <><Check size={14} />{t('llmSettings.saved')}</> : t('llmSettings.save')}</button>
       </div>

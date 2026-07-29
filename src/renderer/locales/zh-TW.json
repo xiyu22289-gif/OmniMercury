@@ -110,7 +110,8 @@
     "unorderedList": "無序列表",
     "orderedList": "有序列表",
     "fontSizeLabel": "字型大小",
-    "confirm": "確定"
+    "confirm": "確定",
+    "deleteCustomModelConfirm": "確定要完全刪除「{{name}}」嗎？此操作將從所有功能中移除該模型，不可撤銷。"
   },
   "tagManager": {
     "title": "管理標籤",
@@ -160,11 +161,22 @@
     "customModelLabelPlaceholder": "例如：我的 DeepSeek",
     "saveCustomModel": "儲存模型",
     "deleteCustomModel": "刪除此自訂模型",
+    "deleteCustomModels": "刪除自訂模型...",
+    "selectModelsToDelete": "選擇要刪除的模型",
+    "selectAll": "全選",
+    "deselectAll": "取消全選",
+    "confirmDelete": "刪除（{{count}}）",
+    "deleteSelectedWarning": "以下模型將被永久刪除，且從所有功能中移除：\n{{names}}\n\n此操作不可撤銷，確定要繼續嗎？",
     "cancel": "取消",
     "testAndListModels": "測試並取得可用模型",
     "listingModels": "正在取得可用模型...",
     "availableModels": "可用模型（共 {{count}} 個）",
-    "currentModel": "目前使用"
+    "currentModel": "目前使用",
+    "noModelsFound": "連線成功但未返回可用模型，請檢查 Base URL 或 API Key 是否正確",
+    "suggestV1": "連線未成功，Base URL 是否缺少 /v1？建議自動新增 /v1 後重試。",
+    "fillBaseUrlAndKey": "請先填寫 Base URL 和 API Key",
+    "confirm": "確定",
+    "duplicateModelHint": "此設定與已有模型「{{name}}」完全相同，建議直接使用已有模型或選擇其他可用模型。"
   },
   "opml": {
     "importProgress": "OPML 匯入進度",

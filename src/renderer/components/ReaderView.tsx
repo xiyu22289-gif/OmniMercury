@@ -519,23 +519,28 @@ export default function ReaderView() {
   /** ★ 翻译结果锚点：插入在选中文本正下方 */
   const selectionResultAnchorRef = useRef<HTMLDivElement | null>(null)
 
-  /** mouseup 监听 → React state 控制浮动按钮 */
+  /** mouseup 监听 → React state 控制浮动按钮（仅限阅读区域） */
   useEffect(() => {
-    const onMouseUp = () => {
+    const onMouseUp = (e: MouseEvent) => {
       const sel = window.getSelection()
       const text = sel?.toString().trim() ?? ''
-      if (text && sel && !sel.isCollapsed) {
-        try {
-          const range = sel.getRangeAt(0)
-          const rect = range.getBoundingClientRect()
-          selectedTextRef.current = text
-          setFloatBtnPos({ top: rect.bottom + 8, left: rect.left })
-          setShowFloatBtn(true)
-          return
-        } catch { /* fall through */ }
+      if (!text || !sel || sel.isCollapsed) { setShowFloatBtn(false); selectedTextRef.current = ''; return }
+      // 边界检查：选区必须在阅读区域内（readingAreaRef 或新标签翻译容器）
+      const area = readingAreaRef.current
+      if (!area) { setShowFloatBtn(false); selectedTextRef.current = ''; return }
+      const target = e.target as Node | null
+      const inReadingArea = target && (area.contains(target) || document.getElementById('new-tab-translation-root')?.contains(target) || document.getElementById('translation-output-area')?.contains(target))
+      if (!inReadingArea) { setShowFloatBtn(false); selectedTextRef.current = ''; return }
+      try {
+        const range = sel.getRangeAt(0)
+        const rect = range.getBoundingClientRect()
+        selectedTextRef.current = text
+        setFloatBtnPos({ top: rect.bottom + 8, left: rect.left })
+        setShowFloatBtn(true)
+      } catch {
+        setShowFloatBtn(false)
+        selectedTextRef.current = ''
       }
-      setShowFloatBtn(false)
-      selectedTextRef.current = ''
     }
     document.addEventListener('mouseup', onMouseUp)
     return () => document.removeEventListener('mouseup', onMouseUp)

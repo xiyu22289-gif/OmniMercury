@@ -90,7 +90,7 @@ export interface LlmFunctionConfig {
   model: string
   /** 每个模型对应的 API Key 映射（便捷预设模型使用） */
   apiKeys: Record<string, string>
-  /** 用户自定义模型列表（最多2个） */
+  /** 用户自定义模型列表 */
   customModels: CustomModelConfig[]
 }
 
