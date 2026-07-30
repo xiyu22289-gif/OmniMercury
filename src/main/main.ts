@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, session, shell } from 'electron'
 import { join } from 'path'
 import { initDatabase } from './db'
 import { registerIpcHandlers } from './ipcHandlers'
@@ -48,6 +48,25 @@ function createWindow(): void {
     mainWindow?.show()
   })
 
+  // ★ 图片请求拦截：移除 Referer/Origin 避免第三方服务器返回 403
+  //   部分服务器检查 Referer/Origin 头，拒绝来自 localhost/file:// 的请求
+  mainWindow.webContents.session.webRequest.onBeforeSendHeaders(
+    {
+      urls: ['*://*/*'],
+      types: ['image'],
+    },
+    (details, callback) => {
+      // 仅对跨站请求生效：请求来自本地 origin 但 URL 是外部站点
+      const urlHost = new URL(details.url).host
+      const refererHost = details.referrer ? new URL(details.referrer).host : ''
+      if (urlHost !== refererHost) {
+        delete details.requestHeaders['Referer']
+        delete details.requestHeaders['Origin']
+      }
+      callback({ requestHeaders: details.requestHeaders })
+    },
+  )
+
   // 开发模式加载 Vite dev server，生产模式加载打包文件
   if (!app.isPackaged && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
@@ -66,10 +85,15 @@ function createWindow(): void {
 
 // ---- 应用生命周期 ----
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // 初始化 SQLite 数据库（用户数据目录下）
   const dbPath = join(app.getPath('userData'), 'summer-rss.db')
   initDatabase(dbPath)
+
+  // 清除缓存的图片响应（避免旧 403 缓存残留）
+  try {
+    await session.defaultSession.clearCache()
+  } catch { /* 静默 */ }
 
   // ⚠️ 临时：打包前清空测试数据，执行一次后请删除或注释掉此行
   // clearAllData()

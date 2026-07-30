@@ -75,8 +75,17 @@ export function registerIpcHandlers(): void {
         }
       }
 
+      // ★ 诊断日志 Stage 3b: IPC 直接 DB 查询后
+      console.log(`[DIAG] Stage3b: IPC DB查询后 — article.content 存在: ${!!article.content}, 长度: ${article.content?.length ?? 0}`)
+      console.log(`[DIAG] Stage3b: article.contentMd 存在: ${!!article.contentMd}, 长度: ${article.contentMd?.length ?? 0}`)
+      if (article.content) {
+        console.log(`[DIAG] Stage3b: article.content 含 <table: ${article.content.includes('<table')}, 含 \\n: ${article.content.includes('\n')}`)
+      }
+
       if (article.contentMd) {
         // 返回缓存的翻译和摘要数据，供前端检查避免重复 API 调用
+        // ★ 诊断日志 3a: 缓存路径返回前端前
+        console.log(`[DIAG] IPC缓存路径 — contentHtml(article.content) 存在: ${!!article.content}, 长度: ${article.content?.length ?? 0}`)
         return {
           type: 'get_article_content',
           payload: {
@@ -84,6 +93,7 @@ export function registerIpcHandlers(): void {
             content: {
               id: article.id,
               content: article.contentMd,
+              contentHtml: article.content ?? undefined,
               summary: article.summary,
               translations: article.translations,
             }
@@ -94,9 +104,11 @@ export function registerIpcHandlers(): void {
       if (article.link) {
         try {
           const result = await getOrFetchArticleContent(articleId, article.link)
+          // ★ 诊断日志 3b: 流水线路径返回前端前
+          console.log(`[DIAG] IPC流水线路径 — contentHtml 存在: ${!!result.contentHtml}, 长度: ${result.contentHtml?.length ?? 0}`)
           return {
             type: 'get_article_content',
-            payload: { error: 0, content: { id: articleId, content: result.content }, message: result.degraded ? result.reason : undefined }
+            payload: { error: 0, content: { id: articleId, content: result.content, contentHtml: result.contentHtml }, message: result.degraded ? result.reason : undefined }
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
@@ -113,6 +125,31 @@ export function registerIpcHandlers(): void {
       return {
         type: 'get_article_content',
         payload: { error: 0, content: { id: article.id, content: body } }
+      }
+    }
+  )
+
+  // ================================================================
+  // backend:refreshArticleContent — 强制重新抓取文章正文
+  // ================================================================
+  ipcMain.handle(
+    'backend:refreshArticleContent',
+    async (_event, articleId: number): Promise<IpcResponse> => {
+      const article = getDb()
+        .select({ id: articlesTable.id, link: articlesTable.link })
+        .from(articlesTable)
+        .where(eq(articlesTable.id, articleId))
+        .get()
+
+      if (!article || !article.link) {
+        return { type: 'get_article_content', payload: { error: 1, message: '文章不存在或无链接' } }
+      }
+
+      console.log(`[DIAG] forceRefresh: 强制重新抓取 articleId=${articleId}, url=${article.link}`)
+      const result = await getOrFetchArticleContent(articleId, article.link, true)
+      return {
+        type: 'get_article_content',
+        payload: { error: 0, content: { id: articleId, content: result.content, contentHtml: result.contentHtml }, message: result.degraded ? result.reason : undefined }
       }
     }
   )

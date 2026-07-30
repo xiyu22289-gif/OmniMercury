@@ -75,11 +75,103 @@ const turndownService = new TurndownService({
 
 /** 移除 Readability 输出中可能残留的无关元素 */
 function sanitizeHtml(html: string): string {
-  // 基本清理：移除内联样式、脚本标签（Readability 已做大部分清理）
+  // 基本清理：移除脚本、样式标签，剥离隐藏属性的内联样式
   return html
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    // ★ 剥离内联 visibility:hidden（原页面隐藏元素被 Readability 保留）
+    .replace(/style="[^"]*visibility\s*:\s*hidden[^"]*"/gi, '')
+    .replace(/style='[^']*visibility\s*:\s*hidden[^']*'/gi, '')
+    // ★ 剥离内联 display:none
+    .replace(/style="[^"]*display\s*:\s*none[^"]*"/gi, '')
+    .replace(/style='[^']*display\s*:\s*none[^']*'/gi, '')
     .trim()
+}
+
+/** 清理属性值中的换行符、首尾空白、尾部无效字符 */
+function normalizeSrc(raw: string): string {
+  return raw
+    .replace(/[\r\n]+/g, '')       // 移除换行符
+    .replace(/\s+/g, ' ')          // 多余空白合并为单个空格（不删，URL 中空格合法但罕见）
+    .trim()                         // 首尾空白
+    .replace(/[-]+$/, '')          // 尾部连字符（行尾断词残留）
+    .replace(/[.,;:!?]+$/, '')     // 尾部标点（非 URL 组成部分）
+    .trim()
+}
+
+/** 清理 HTML 中所有属性值的换行符和多余空白 */
+function sanitizeHtmlAttributes(html: string): string {
+  // 匹配属性值中带换行符的模式：attr="...\n..." 或 attr='...\n...'
+  // 对 src/href/alt 等高危属性进行全局清理
+  return html
+    .replace(/src="([^"]*)"/gi, (_m, val: string) => `src="${normalizeSrc(val)}"`)
+    .replace(/src='([^']*)'/gi, (_m, val: string) => `src='${normalizeSrc(val)}'`)
+    .replace(/href="([^"]*)"/gi, (_m, val: string) => `href="${normalizeSrc(val)}"`)
+    .replace(/href='([^']*)'/gi, (_m, val: string) => `href='${normalizeSrc(val)}'`)
+}
+
+/** 将 HTML 中所有 img 标签的 src 补全为绝对 URL */
+function resolveImageUrls(html: string, baseUrl: string): string {
+  console.log(`[DIAG] resolveImageUrls 开始 — baseUrl="${baseUrl}"`)
+  console.log(`[DIAG] resolveImageUrls — 输入 HTML 长度: ${html.length}`)
+  // 快速检查是否有 img 标签
+  const imgTagCount = (html.match(/<img[\s>]/gi) || []).length
+  console.log(`[DIAG] resolveImageUrls — 粗略 img 标签数: ${imgTagCount}`)
+
+  if (imgTagCount === 0) {
+    console.log(`[DIAG] resolveImageUrls — 无 img 标签，跳过`)
+    return html
+  }
+
+  try {
+    const dom = new JSDOM(html)
+    const imgs = dom.window.document.querySelectorAll('img')
+    console.log(`[DIAG] resolveImageUrls — querySelectorAll 找到 ${imgs.length} 个 img`)
+
+    let count = 0
+    for (const img of imgs) {
+      const raw = img.getAttribute('src')
+      if (!raw) {
+        console.log(`[DIAG] resolveImageUrls — img 无 src 属性，跳过`)
+        continue
+      }
+      // ★ 先标准化 src（移除换行符、尾部断词连字符等）
+      const cleaned = normalizeSrc(raw)
+      if (cleaned !== raw) {
+        console.log(`[DIAG] resolveImageUrls — src 清理: "${raw.replace(/\n/g, '\\n')}" → "${cleaned}"`)
+        img.setAttribute('src', cleaned)
+      }
+      try {
+        // new URL(cleaned, baseUrl) 自动处理三种情况:
+        //   /foo/bar.jpg  → 根相对 → origin + path
+        //   bar.jpg       → 路径相对 → baseUrl目录 + path
+        //   https://...   → 已是绝对 → 保持不变
+        const absolute = new URL(cleaned, baseUrl).href
+        console.log(`[DIAG] resolveImageUrls — src: "${cleaned}" → "${absolute}"`)
+        if (absolute !== cleaned) {
+          img.setAttribute('src', absolute)
+          count++
+        }
+      } catch {
+        console.log(`[DIAG] resolveImageUrls — 无法解析 src: "${cleaned}"，保持原样`)
+      }
+    }
+
+    if (count > 0) {
+      console.log(`[DIAG] resolveImageUrls: 补全了 ${count}/${imgs.length} 个图片 URL`)
+    } else {
+      console.log(`[DIAG] resolveImageUrls: 所有 ${imgs.length} 个图片已是绝对 URL，无需补全`)
+    }
+
+    // ★ 关键修复：用 body.innerHTML 取回 HTML 片段
+    //    dom.serialize() 会包裹 <html><head></head><body>...</body></html>
+    const result = dom.window.document.body.innerHTML
+    console.log(`[DIAG] resolveImageUrls — 输出 HTML 长度: ${result.length}`)
+    return result
+  } catch (err) {
+    console.warn(`[contentService] resolveImageUrls 失败:`, err)
+    return html // 降级返回原始 HTML
+  }
 }
 
 /** 移除文章末尾的截断标记（如 "Continue reading" 等） */
@@ -209,8 +301,18 @@ export async function fetchAndCleanArticle(url: string): Promise<ContentResult> 
       .replace(/<p[^>]*>\s*Read\s+more[^<]*<\/p>/gi, '')
       .replace(/<a[^>]*>\s*Continue\s+reading[^<]*<\/a>/gi, '')
       .replace(/<a[^>]*>\s*Read\s+more[^<]*<\/a>/gi, '')
+    // ★ 清理属性值中的换行符/尾部断词连字符，防止 URL 截断
+    cleanHtml = sanitizeHtmlAttributes(cleanHtml)
+    // ★ 补全图片相对路径为绝对 URL
+    cleanHtml = resolveImageUrls(cleanHtml, url)
     extractedTitle = result.title?.trim() || null
     textContent = result.textContent?.trim() || null
+
+    // ★ 诊断日志 1: Readability 提取后首次检查
+    console.log(`[DIAG] Readability 提取完成 — cleanHtml.length=${cleanHtml.length}`)
+    console.log(`[DIAG] cleanHtml 前300字符:`, cleanHtml.slice(0, 300))
+    console.log(`[DIAG] 含 <table:`, cleanHtml.includes('<table'))
+    console.log(`[DIAG] 含 \\n:`, cleanHtml.includes('\n'))
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error(`[contentService] Readability 提取正文失败 (${url})：${message}`)
@@ -279,7 +381,7 @@ export async function getOrFetchArticleContent(
   articleId: number,
   articleUrl: string,
   forceRefresh = false,
-): Promise<{ content: string; isCached: boolean; degraded?: boolean; reason?: string }> {
+): Promise<{ content: string; contentHtml?: string; isCached: boolean; degraded?: boolean; reason?: string }> {
   // 1. 先查本地缓存
   if (!forceRefresh) {
     try {
@@ -294,20 +396,44 @@ export async function getOrFetchArticleContent(
         .get()
 
       if (row && row.contentMd) {
-        return { content: row.contentMd, isCached: true }
+        // ★ 短内容检测：contentMd < 500 字符且 contentHtml(即content列) < 800 字符时，
+        //    说明是 RSS 摘要而非完整正文，自动触发清洗流水线抓取完整内容
+        const htmlLen = row.content?.length ?? 0
+        const mdLen = row.contentMd.length
+        if ((mdLen < 500 || htmlLen < 800) && articleUrl) {
+          console.log(`[contentService] 缓存内容过短 (contentMd=${mdLen}字符, content=${htmlLen}字符)，自动触发完整抓取`)
+          // 跳过缓存，直接走流水线（见下方 forceRefresh 逻辑之前的部分）
+        } else {
+          console.log(`[DIAG] Stage3a: DB缓存命中 — row.content 存在: ${!!row.content}, 长度: ${htmlLen}`)
+          if (row.content) {
+            console.log(`[DIAG] Stage3a: row.content 含 <table: ${row.content.includes('<table')}, 含 \\n: ${row.content.includes('\n')}`)
+            console.log(`[DIAG] Stage3a: row.content 前200字符:`, row.content.slice(0, 200))
+          }
+          const fixedHtml = row.content ? resolveImageUrls(row.content, articleUrl) : undefined
+          return { content: row.contentMd, contentHtml: fixedHtml, isCached: true }
+        }
       }
       // 有原始 content 但无 contentMd（RSS 原始摘要等）
       if (row && row.content && !row.contentMd) {
-        // 尝试直接使用原始内容（可能是 RSS 全文或 HTML 片段）
-        try {
-          const md = turndownService.turndown(row.content)
-          if (md.trim()) {
-            return { content: md, isCached: true, degraded: true, reason: '使用 RSS 原始内容（未经清洗）' }
+        // ★ 短内容检测：content < 500 字符且没有 contentMd，肯定是 RSS 摘要片段
+        const rawLen = row.content.length
+        if (rawLen < 800 && articleUrl) {
+          console.log(`[contentService] 缓存仅含原始摘要 (${rawLen}字符, 无contentMd)，自动触发完整抓取`)
+          // 跳过此路径，直接走清洗流水线
+        } else {
+          const fixedHtml = resolveImageUrls(row.content, articleUrl)
+          try {
+            const md = turndownService.turndown(row.content)
+            if (md.trim()) {
+              console.log(`[DIAG] Stage1: 缓存有原始content无contentMd — 返回 contentHtml=resolveImageUrls结果, 长度=${fixedHtml.length}`)
+              return { content: md, contentHtml: fixedHtml, isCached: true, degraded: true, reason: '使用 RSS 原始内容（未经清洗）' }
+            }
+          } catch {
+            // turndown 失败，继续走流水线
           }
-        } catch {
-          // turndown 失败，继续走流水线
+          console.log(`[DIAG] Stage1: turndown失败或为空 — 返回 contentHtml=resolveImageUrls结果, 长度=${fixedHtml.length}`)
+          return { content: row.content, contentHtml: fixedHtml, isCached: true, degraded: true, reason: '使用 RSS 原始内容' }
         }
-        return { content: row.content, isCached: true, degraded: true, reason: '使用 RSS 原始内容' }
       }
     } catch (err) {
       console.error(`[contentService] 查询本地缓存失败 (articleId=${articleId})：`, err)
@@ -320,10 +446,17 @@ export async function getOrFetchArticleContent(
 
   // 3. 将结果写入数据库缓存
   try {
+    // ★ 诊断日志 2: 写入 DB 前检查 contentHtml
+    const htmlToStore = 'contentHtml' in result ? result.contentHtml : undefined
+    console.log(`[DIAG] 写入DB前 — contentHtml 存在: ${!!htmlToStore}, 长度: ${htmlToStore?.length ?? 0}`)
+    if (htmlToStore) {
+      console.log(`[DIAG] 写入DB前 — contentHtml 前300字符:`, htmlToStore.slice(0, 300))
+    }
+
     getDb()
       .update(articlesTable)
       .set({
-        content: 'contentHtml' in result ? result.contentHtml : undefined,
+        content: htmlToStore,
         contentMd: result.contentMd,
       })
       .where(eq(articlesTable.id, articleId))
@@ -336,11 +469,12 @@ export async function getOrFetchArticleContent(
   if ('degraded' in result && result.degraded) {
     return {
       content: result.contentMd,
+      contentHtml: result.contentHtml,
       isCached: false,
       degraded: true,
       reason: result.reason,
     }
   }
 
-  return { content: result.contentMd, isCached: false }
+  return { content: result.contentMd, contentHtml: result.contentHtml, isCached: false }
 }

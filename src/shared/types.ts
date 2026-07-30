@@ -27,6 +27,8 @@ export interface Article {
 export interface ArticleContent {
   id: number
   content: string
+  /** 清洗后的 HTML（Readability 输出），用于阅读器渲染，保留表格/换行/代码块等格式 */
+  contentHtml?: string
 }
 
 export interface IpcRequest {

@@ -133,6 +133,7 @@ interface NewTabTranslationProps {
   targetLang: string
   darkMode: boolean
   onClose: () => void
+  markdownComponents: Record<string, any>
 }
 
 /** 新标签模式：左侧原文 + 右侧译文分开两栏，段落级流式展示 */
@@ -142,7 +143,8 @@ function NewTabTranslation({
   translateLoading,
   targetLang,
   darkMode,
-  onClose
+  onClose,
+  markdownComponents,
 }: NewTabTranslationProps) {
   const { t } = useTranslation()
   const proseCls = darkMode ? 'prose-invert' : 'prose-gray'
@@ -241,6 +243,7 @@ export default function ReaderView() {
     // 文章状态
     selectedArticleId,
     articleContent,
+    articleContentHtml,
     articles,
     isLoading,
     error,
@@ -374,13 +377,29 @@ export default function ReaderView() {
   const [currentHitIndex, setCurrentHitIndex] = useState(0)
   const inArticleSearchRef = useRef<HTMLInputElement>(null)
 
-  /** 计算所有匹配位置（段落索引 + 段落内偏移），用于高亮 + 跳转 */
+  /** 计算所有匹配位置 — Markdown 路径按段落，HTML 路径按纯文本 */
   const searchHits = useMemo(() => {
-    if (!inArticleSearch.trim() || !articleContent) return [] as { paraIdx: number; offset: number }[]
+    if (!inArticleSearch.trim()) return [] as { paraIdx: number; offset: number }[]
     const query = inArticleSearch.trim()
     const lowerQ = query.toLowerCase()
-    const hits: { paraIdx: number; offset: number }[] = []
+
+    // HTML 路径：用纯文本偏移
+    if (articleContentHtml) {
+      const plainText = articleContentHtml.replace(/<[^>]+>/g, '')
+      const hits: { paraIdx: number; offset: number }[] = []
+      let idx = 0
+      const lower = plainText.toLowerCase()
+      while ((idx = lower.indexOf(lowerQ, idx)) !== -1) {
+        hits.push({ paraIdx: 0, offset: idx })
+        idx += query.length
+      }
+      return hits
+    }
+
+    // Markdown 路径：按段落
+    if (!articleContent) return []
     const paras = splitContent(articleContent)
+    const hits: { paraIdx: number; offset: number }[] = []
     for (let i = 0; i < paras.length; i++) {
       const lower = paras[i].toLowerCase()
       let idx = 0
@@ -390,9 +409,9 @@ export default function ReaderView() {
       }
     }
     return hits
-  }, [inArticleSearch, articleContent])
+  }, [inArticleSearch, articleContentHtml, articleContent])
 
-  /** 高亮搜索词的段落渲染函数 */
+  /** 高亮搜索词的段落渲染函数（Markdown 降级路径用） */
   const renderParagraphWithHighlights = useCallback((para: string, paraIdx: number) => {
     if (!inArticleSearch.trim()) {
       return (
@@ -401,7 +420,6 @@ export default function ReaderView() {
     }
 
     const query = inArticleSearch.trim()
-    // 使用 mark 标签包裹匹配词（带唯一 id 用于跳转）
     const hitsInThisPara = searchHits.filter(h => h.paraIdx === paraIdx)
     if (hitsInThisPara.length === 0) {
       return (
@@ -409,14 +427,13 @@ export default function ReaderView() {
       )
     }
 
-    // 按偏移量从后往前替换（避免索引偏移）
     let result = para
     const sorted = [...hitsInThisPara].sort((a, b) => b.offset - a.offset)
     for (const hit of sorted) {
       const globalIdx = searchHits.findIndex(h => h.paraIdx === hit.paraIdx && h.offset === hit.offset)
       const matched = result.slice(hit.offset, hit.offset + query.length)
       result = result.slice(0, hit.offset) +
-        `<mark id="search-hit-${globalIdx}" class="bg-yellow-300 dark:bg-yellow-700 rounded px-0.5 scroll-mt-20">${matched}</mark>` +
+        `<mark id="search-hit-${globalIdx}" class="search-highlight">${matched}</mark>` +
         result.slice(hit.offset + query.length)
     }
 
@@ -424,6 +441,47 @@ export default function ReaderView() {
       <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins} components={markdownComponents}>{result}</ReactMarkdown>
     )
   }, [inArticleSearch, searchHits])
+
+  /** 在 HTML 中高亮搜索词（HTML 优先路径用） */
+  const highlightHtml = useCallback((html: string): string => {
+    if (!inArticleSearch.trim() || searchHits.length === 0) return html
+    const query = inArticleSearch.trim()
+
+    // 分离标签和文本
+    const parts: { type: 'tag' | 'text'; value: string }[] = []
+    let remaining = html
+    let tagMatch: RegExpExecArray | null
+    const tagRe = /<[^>]*>/g
+    while ((tagMatch = tagRe.exec(remaining)) !== null) {
+      const idx = tagMatch.index
+      if (idx > 0) parts.push({ type: 'text', value: remaining.slice(0, idx) })
+      parts.push({ type: 'tag', value: tagMatch[0] })
+      remaining = remaining.slice(idx + tagMatch[0].length)
+      tagRe.lastIndex = 0 // reset since we sliced
+    }
+    if (remaining) parts.push({ type: 'text', value: remaining })
+
+    let globalIdx = 0
+    const result = parts.map(part => {
+      if (part.type === 'tag') return part.value
+      let text = part.value
+      const lower = text.toLowerCase()
+      const lowerQ = query.toLowerCase()
+      let out = ''
+      let pos = 0
+      let searchIdx: number
+      while ((searchIdx = lower.indexOf(lowerQ, pos)) !== -1) {
+        out += text.slice(pos, searchIdx)
+        const matched = text.slice(searchIdx, searchIdx + query.length)
+        out += `<mark id="search-hit-${globalIdx++}" class="search-highlight">${matched}</mark>`
+        pos = searchIdx + query.length
+      }
+      out += text.slice(pos)
+      return out
+    }).join('')
+
+    return result
+  }, [inArticleSearch, searchHits.length])
 
   /** 跳转到第 N 个匹配 */
   const scrollToHit = useCallback((idx: number) => {
@@ -650,7 +708,7 @@ export default function ReaderView() {
     }
   }, [selectedArticle?.url])
 
-  /** markdownComponents — 使用 articleBaseUrl 闭包传递给 SafeImage */
+  /** markdownComponents — 使用 articleBaseUrl 闭包传递给 SafeImage，覆盖关键 HTML 元素渲染 */
   const markdownComponents = useMemo(() => ({
     img: (props: any) => <SafeImage {...props} baseUrl={articleBaseUrl} />,
     a: ({ href, children, ...props }: any) => (
@@ -663,6 +721,40 @@ export default function ReaderView() {
       >
         {children}
       </a>
+    ),
+    pre: ({ children, ...props }: any) => (
+      <pre className="overflow-x-auto max-w-full rounded-lg" {...props}>{children}</pre>
+    ),
+    code: ({ children, className, ...props }: any) => {
+      // inline code: no language class on <code> → wrap with backtick-style
+      const isBlock = className && /language-/.test(className)
+      if (isBlock) {
+        return <code className={className} {...props}>{children}</code>
+      }
+      return <code className="px-1 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-pink-600 dark:text-pink-300 text-[0.85em]" {...props}>{children}</code>
+    },
+    table: ({ children, ...props }: any) => (
+      <div className="overflow-x-auto my-4">
+        <table className="border-collapse w-full" {...props}>{children}</table>
+      </div>
+    ),
+    th: ({ children, ...props }: any) => (
+      <th className="border border-gray-300 dark:border-gray-600 px-3 py-2 text-left font-semibold bg-gray-50 dark:bg-gray-800" {...props}>{children}</th>
+    ),
+    td: ({ children, ...props }: any) => (
+      <td className="border border-gray-300 dark:border-gray-600 px-3 py-2 align-top" {...props}>{children}</td>
+    ),
+    ul: ({ children, ...props }: any) => (
+      <ul className="list-disc pl-6 my-2" {...props}>{children}</ul>
+    ),
+    ol: ({ children, ...props }: any) => (
+      <ol className="list-decimal pl-6 my-2" {...props}>{children}</ol>
+    ),
+    li: ({ children, ...props }: any) => (
+      <li className="my-1" {...props}>{children}</li>
+    ),
+    blockquote: ({ children, ...props }: any) => (
+      <blockquote className="border-l-3 border-gray-300 dark:border-gray-600 pl-4 my-3 text-gray-600 dark:text-gray-400 italic" {...props}>{children}</blockquote>
     ),
   }), [articleBaseUrl])
 
@@ -783,6 +875,99 @@ export default function ReaderView() {
 
     return () => { cleanup?.() }
   }, [])
+
+  // ★ 图片诊断：监听 articleContentHtml 变化，定位图片加载失败原因
+  useEffect(() => {
+    console.log('[图片诊断] useEffect 触发, articleContentHtml 长度:', articleContentHtml?.length ?? 0)
+
+    if (!articleContentHtml) {
+      console.log('[图片诊断] articleContentHtml 为空，跳过')
+      return
+    }
+
+    // 延迟执行：等 React 完成 dangerouslySetInnerHTML 渲染
+    const timer = setTimeout(() => {
+      console.log('[图片诊断] --- 开始图片诊断 ---')
+
+      // 1. 检查 contentHtml 中的原始 img 标签
+      const imgTagMatches = articleContentHtml.match(/<img[\s>]/gi)
+      console.log('[图片诊断] contentHtml 中 img 标签数:', imgTagMatches?.length ?? 0)
+
+      // 2. 提取 contentHtml 中所有 src 值
+      const srcMatches = articleContentHtml.match(/src="([^"]*)"/gi)
+      if (srcMatches) {
+        console.log('[图片诊断] contentHtml 中 src 值:')
+        srcMatches.forEach((m, i) => console.log(`  [${i}] ${m}`))
+      }
+
+      // 3. 查找 DOM 中的图片
+      const images = document.querySelectorAll('.prose img')
+      console.log('[图片诊断] DOM 中找到图片数量:', images.length)
+
+      // 4. 尝试更宽的选择器
+      const allPageImages = document.querySelectorAll('img')
+      console.log('[图片诊断] 页面总共 img 数量:', allPageImages.length)
+      if (allPageImages.length > 0) {
+        console.log('[图片诊断] 页面所有 img:')
+        allPageImages.forEach((img, i) => {
+          console.log(`  [${i}] src="${img.getAttribute('src')}" complete=${(img as HTMLImageElement).complete} naturalWidth=${(img as HTMLImageElement).naturalWidth}`)
+        })
+      }
+
+      // 5. 逐个诊断 .prose img
+      let reloaded = 0
+      images.forEach((img, i) => {
+        const el = img as HTMLImageElement
+        console.log(`[图片诊断] .prose img${i}:`)
+        console.log(`  src: ${el.getAttribute('src')}`)
+        console.log(`  complete: ${el.complete}`)
+        console.log(`  naturalWidth: ${el.naturalWidth}`)
+        console.log(`  naturalHeight: ${el.naturalHeight}`)
+        console.log(`  currentSrc: ${el.currentSrc}`)
+        console.log(`  offsetWidth: ${el.offsetWidth}`)
+        console.log(`  style.display: ${el.style.display || getComputedStyle(el).display}`)
+
+        // 检查父元素可见性
+        let parent: HTMLElement | null = el.parentElement
+        let hidden = false
+        while (parent) {
+          const style = getComputedStyle(parent)
+          if (style.display === 'none' || style.visibility === 'hidden') {
+            hidden = true
+            console.log(`  父元素隐藏: <${parent.tagName.toLowerCase()} class="${parent.className}"> display=${style.display}`)
+            break
+          }
+          parent = parent.parentElement
+        }
+        if (!hidden) console.log('  所有父元素可见')
+
+        // 三种失效模式分别处理：
+        // A. complete=true + naturalWidth=0 → 浏览器声称加载完成但数据无效（首次请求失败）
+        // B. complete=false → 仍在加载中
+        const src = el.getAttribute('src')
+        if (src && src.startsWith('http')) {
+          if (el.complete && el.naturalWidth === 0) {
+            // 模式 A：已"完成"但无有效数据 → 缓存穿透重试
+            const sep = src.includes('?') ? '&' : '?'
+            const newSrc = src + sep + '_t=' + Date.now()
+            console.log(`[图片诊断] 加载完成但 naturalWidth=0，缓存穿透重试: ${newSrc}`)
+            el.src = newSrc
+            reloaded++
+          } else if (!el.complete) {
+            // 模式 B：仍在加载 → 简单重试
+            console.log(`[图片诊断] 图片未完成加载，重试: ${src}`)
+            el.src = src
+            reloaded++
+          }
+        }
+      })
+
+      console.log(`[图片诊断] 重新加载图片数量: ${reloaded}`)
+      console.log('[图片诊断] --- 图片诊断结束 ---')
+    }, 500)
+
+    return () => clearTimeout(timer)
+  }, [articleContentHtml, articleContent])
 
   // 切换文章时重置翻译状态 + 拉取文章标签 + 清除段落选中
   useEffect(() => {
@@ -1118,6 +1303,18 @@ export default function ReaderView() {
 
   // ============ 渲染函数 ============
 
+  /** ★ HTML 渲染（优先使用，保留原始表格/换行/代码块结构） */
+  const renderHtmlContent = () => {
+    if (!articleContentHtml) return null
+    const html = inArticleSearch.trim() ? highlightHtml(articleContentHtml) : articleContentHtml
+    return (
+      <div
+        className={`prose prose-sm ${darkMode ? 'prose-invert' : 'prose-gray'} max-w-none leading-relaxed`}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    )
+  }
+
   /** ★ 按段落拆分渲染，每段带复选框（适用于任何 HTML 结构） */
   const renderParagraphsWithCheckboxes = () => {
     const displayContent = articleContent || selectedArticle?.summary || ''
@@ -1237,6 +1434,32 @@ export default function ReaderView() {
               <ExternalLink size={14} />
               {t('reader.openOriginal')}
             </a>
+            {/* ★ 强制刷新按钮：重新走清洗流水线（含 resolveImageUrls） */}
+            <button
+              onClick={async () => {
+                if (!selectedArticleId) return
+                useStore.setState({ isLoading: true, articleContent: null, articleContentHtml: null })
+                try {
+                  const res = await window.api.refreshArticleContent(selectedArticleId)
+                  if (res.payload.error === 0) {
+                    useStore.setState({
+                      articleContent: res.payload.content?.content || '',
+                      articleContentHtml: res.payload.content?.contentHtml || null,
+                      isLoading: false
+                    })
+                  } else {
+                    useStore.setState({ isLoading: false })
+                  }
+                } catch (err) {
+                  console.error('[ReaderView] forceRefresh 失败:', err)
+                  useStore.setState({ isLoading: false })
+                }
+              }}
+              className="flex items-center gap-1 text-xs text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300 bg-amber-50 dark:bg-amber-900/20 px-2 py-1 rounded transition-colors"
+              title="强制重新抓取文章（修复图片/格式）"
+            >
+              🔄 刷新正文
+            </button>
           </div>
 
           {/* ===== M5 标签区域 ===== */}
@@ -1963,6 +2186,7 @@ export default function ReaderView() {
                   targetLang={translateTargetLangRef.current}
                   darkMode={darkMode}
                   onClose={handleBackToOriginal}
+                  markdownComponents={markdownComponents}
                 />
               )}
 
@@ -2024,7 +2248,10 @@ export default function ReaderView() {
                 ref={readingAreaRef}
                 className={`rounded-lg p-6 ${containerBg}`}
               >
-                {readerMode === 'reader' ? renderParagraphsWithCheckboxes() : renderOriginalContent()}
+                {readerMode === 'reader'
+                  ? (articleContentHtml && articleContentHtml.length > 50 ? renderHtmlContent() : renderParagraphsWithCheckboxes())
+                  : renderOriginalContent()
+                }
               </div>
               )}
 

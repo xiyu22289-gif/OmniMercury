@@ -102,6 +102,27 @@ html, body, #root {
   word-break: break-word !important;
 }
 
+/* 代码高亮行元素 — 每行代码包在 span.line 中，必须块级显示 */
+.prose .line {
+  display: block !important;
+}
+
+/* 文章内搜索高亮 */
+.prose mark,
+.prose .search-highlight {
+  background-color: #fef08a !important;
+  color: #1a1a1a !important;
+  padding: 0 2px !important;
+  border-radius: 2px !important;
+  scroll-margin-top: 80px !important;
+}
+
+.dark .prose mark,
+.dark .prose .search-highlight {
+  background-color: #ca8a04 !important;
+  color: #fff !important;
+}
+
 /* 行内代码 */
 .prose :not(pre) > code {
   padding: 2px 5px !important;
@@ -154,16 +175,20 @@ html, body, #root {
   color: #9ca3af !important;
 }
 
-/* 表格 */
+/* 表格 — 同时支持 Markdown (ReactMarkdown) 和 HTML (dangerouslySetInnerHTML) 渲染 */
 .prose table {
-  display: block !important;
+  border-collapse: collapse !important;
+  width: 100% !important;
+  margin: 1em 0 !important;
   overflow-x: auto !important;
   max-width: 100% !important;
 }
 
 .prose th, .prose td {
-  padding: 6px 12px !important;
+  padding: 8px 12px !important;
   border: 1px solid #d1d5db !important;
+  text-align: left !important;
+  vertical-align: top !important;
 }
 
 .dark .prose th, .dark .prose td {
@@ -177,6 +202,14 @@ html, body, #root {
 
 .dark .prose th {
   background: #1f2937 !important;
+}
+
+.prose tbody tr:nth-child(even) {
+  background: #f9fafb !important;
+}
+
+.dark .prose tbody tr:nth-child(even) {
+  background: #1a1a2e !important;
 }
 
 /* 代码块深色模式覆盖 */

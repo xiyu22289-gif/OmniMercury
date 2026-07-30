@@ -40,6 +40,8 @@ const api = {
     ipcRenderer.invoke('backend:getArticles', feedId, offset, limit),
   getArticleContent: (articleId: number) =>
     ipcRenderer.invoke('backend:getArticleContent', articleId),
+  refreshArticleContent: (articleId: number) =>
+    ipcRenderer.invoke('backend:refreshArticleContent', articleId),
   removeFeed: (feedId: number) =>
     ipcRenderer.invoke('backend:removeFeed', feedId),
   searchArticles: (query: string, feedId?: number, offset?: number, limit?: number, useFts?: boolean) =>

@@ -9,6 +9,8 @@ interface AppState {
   selectedFeedId: number | null
   selectedArticleId: number | null
   articleContent: string | null
+  /** 清洗后的 HTML（Readability 输出），优先用于阅读器渲染，保留表格/换行/代码块 */
+  articleContentHtml: string | null
   searchQuery: string
   searchResults: Article[]
   searchSuggestions: Article[]
@@ -91,6 +93,8 @@ interface AppState {
   /** 从搜索结果直接跳转到文章，无需额外 API 请求 */
   jumpToArticle: (article: Article) => Promise<void>
   setArticleContent: (content: string) => void
+  /** 设置文章正文 HTML（优先用于阅读器渲染） */
+  setArticleContentHtml: (html: string | null) => void
   setSearchQuery: (query: string) => void
   setSearchResults: (articles: Article[]) => void
   setSearchSuggestions: (articles: Article[]) => void
@@ -214,6 +218,7 @@ export const useStore = create<AppState>((set, get) => {
     selectedFeedId: null,
     selectedArticleId: null,
     articleContent: null,
+    articleContentHtml: null,
     searchQuery: '',
     searchResults: [],
     searchSuggestions: [],
@@ -283,7 +288,7 @@ export const useStore = create<AppState>((set, get) => {
     setFeeds: (feeds) => set({ feeds }),
     setArticles: (articles) => set({ articles }),
     selectFeed: async (feedId) => {
-      set({ selectedFeedId: feedId, selectedArticleId: null, articleContent: null, isLoading: true, currentFilterTagId: null })
+      set({ selectedFeedId: feedId, selectedArticleId: null, articleContent: null, articleContentHtml: null, isLoading: true, currentFilterTagId: null })
       try {
         const response = await window.api.getArticles(feedId)
         if (response.payload.error === 0) {
@@ -306,6 +311,7 @@ export const useStore = create<AppState>((set, get) => {
           selectedFeedId: feedId,
           isLoading: true,
           articleContent: null,
+          articleContentHtml: null,
           summaryStream: '',
           summaryLoading: false,
           summarizingArticleId: null,
@@ -335,6 +341,7 @@ export const useStore = create<AppState>((set, get) => {
           selectedArticleId: articleId,
           isLoading: true,
           articleContent: null,
+          articleContentHtml: null,
           summaryStream: '',
           summaryLoading: false,
           summarizingArticleId: null,
@@ -357,8 +364,20 @@ export const useStore = create<AppState>((set, get) => {
       try {
         const response = await window.api.getArticleContent(articleId)
         if (response.payload.error === 0) {
+          // ★ 诊断日志 Stage 5: Store 接收 IPC 响应
+          const receivedContent = response.payload.content?.content || ''
+          const receivedContentHtml = response.payload.content?.contentHtml || null
+          console.log(`[DIAG] Stage5: Store接收 — articleContent 长度: ${receivedContent.length}`)
+          console.log(`[DIAG] Stage5: Store接收 — articleContentHtml 存在: ${!!receivedContentHtml}, 长度: ${receivedContentHtml?.length ?? 0}`)
+          if (receivedContentHtml) {
+            console.log(`[DIAG] Stage5: articleContentHtml 含 <table: ${receivedContentHtml.includes('<table')}, 含 \\n: ${receivedContentHtml.includes('\n')}`)
+            console.log(`[DIAG] Stage5: articleContentHtml 前200字符:`, receivedContentHtml.slice(0, 200))
+          }
+          // 检查 payload.content 所有字段
+          console.log(`[DIAG] Stage5: payload.content 所有keys:`, Object.keys(response.payload.content || {}))
           set({
-            articleContent: response.payload.content?.content || '',
+            articleContent: receivedContent,
+            articleContentHtml: receivedContentHtml,
             isLoading: false
           })
           return
@@ -370,6 +389,7 @@ export const useStore = create<AppState>((set, get) => {
         if (cachedResponse.payload.error === 0 && cachedResponse.payload.content?.content) {
           set({
             articleContent: '[离线模式] ' + cachedResponse.payload.content.content,
+            articleContentHtml: null,
             isLoading: false
           })
           return
@@ -387,6 +407,7 @@ export const useStore = create<AppState>((set, get) => {
         selectedArticleId: article.id,
         isLoading: true,
         articleContent: null,
+        articleContentHtml: null,
         summaryStream: '',
         summaryLoading: false,
         summarizingArticleId: null,
@@ -410,8 +431,17 @@ export const useStore = create<AppState>((set, get) => {
       try {
         const response = await window.api.getArticleContent(article.id)
         if (response.payload.error === 0) {
+          // ★ 诊断日志 Stage 5b: jumpToArticle Store 接收 IPC 响应
+          const jReceivedContent = response.payload.content?.content || ''
+          const jReceivedContentHtml = response.payload.content?.contentHtml || null
+          console.log(`[DIAG] Stage5b(jumpToArticle): Store接收 — articleContent 长度: ${jReceivedContent.length}`)
+          console.log(`[DIAG] Stage5b(jumpToArticle): articleContentHtml 存在: ${!!jReceivedContentHtml}, 长度: ${jReceivedContentHtml?.length ?? 0}`)
+          if (jReceivedContentHtml) {
+            console.log(`[DIAG] Stage5b: articleContentHtml 含 <table: ${jReceivedContentHtml.includes('<table')}`)
+          }
           set({
-            articleContent: response.payload.content?.content || '',
+            articleContent: jReceivedContent,
+            articleContentHtml: jReceivedContentHtml,
             isLoading: false
           })
           return
@@ -423,6 +453,7 @@ export const useStore = create<AppState>((set, get) => {
         if (cachedResponse.payload.error === 0 && cachedResponse.payload.content?.content) {
           set({
             articleContent: '[离线模式] ' + cachedResponse.payload.content.content,
+            articleContentHtml: null,
             isLoading: false
           })
           return
@@ -432,6 +463,7 @@ export const useStore = create<AppState>((set, get) => {
       set({ isLoading: false })
     },
     setArticleContent: (content) => set({ articleContent: content }),
+    setArticleContentHtml: (html) => set({ articleContentHtml: html }),
     setSearchQuery: (query) => set({ searchQuery: query }),
     setSearchResults: (articles) => set({ searchResults: articles }),
     setSearchSuggestions: (articles) => set({ searchSuggestions: articles }),
@@ -496,7 +528,7 @@ export const useStore = create<AppState>((set, get) => {
           const state = get();
           // 如果删除的是当前选中的文章，清除选中状态
           if (state.selectedArticleId === articleId) {
-            set({ selectedArticleId: null, articleContent: null });
+            set({ selectedArticleId: null, articleContent: null, articleContentHtml: null });
           }
           // 从文章列表和搜索结果中移除
           set({
@@ -537,7 +569,7 @@ export const useStore = create<AppState>((set, get) => {
     },
 
     loadAllArticles: async () => {
-      set({ selectedFeedId: -1, currentFilterTagId: null, selectedArticleId: null, articleContent: null, isLoading: true })
+      set({ selectedFeedId: -1, currentFilterTagId: null, selectedArticleId: null, articleContent: null, articleContentHtml: null, isLoading: true })
       try {
         const res = await window.api.getAllArticles()
         if (res.payload.error === 0) {
@@ -814,3 +846,7 @@ export const useStore = create<AppState>((set, get) => {
     }
   }
 })
+// 暴露 store 到 window 方便调试
+if (typeof window !== 'undefined') {
+  window.__STORE__ = useStore
+}
