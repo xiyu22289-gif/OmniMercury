@@ -193,5 +193,24 @@
     "dark": "夜間模式",
     "system": "跟隨系統",
     "eyeCare": "護眼模式"
+  },
+  "systemSettings": {
+    "title": "系統設定",
+    "tabGeneral": "通用",
+    "tabLLM": "LLM 設定",
+    "tabTags": "標籤管理",
+    "theme": "主題",
+    "language": "語言",
+    "font": "字型設定",
+    "fontSize": "字型大小",
+    "shortcuts": "快速鍵",
+    "shortcutSearch": "聚焦搜尋",
+    "shortcutRefresh": "重新整理訂閱源",
+    "shortcutLlmSettings": "開啟設定",
+    "shortcutSidebar": "切換側邊欄",
+    "shortcutStar": "星標文章",
+    "shortcutPrev": "上一篇文章",
+    "shortcutNext": "下一篇文章",
+    "shortcutFind": "文章內搜尋"
   }
 }

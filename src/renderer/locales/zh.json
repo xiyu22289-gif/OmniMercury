@@ -194,5 +194,24 @@
     "dark": "夜间模式",
     "system": "跟随系统",
     "eyeCare": "护眼模式"
+  },
+  "systemSettings": {
+    "title": "系统设置",
+    "tabGeneral": "通用",
+    "tabLLM": "LLM 设置",
+    "tabTags": "标签管理",
+    "theme": "主题",
+    "language": "语言",
+    "font": "字体设置",
+    "fontSize": "字号",
+    "shortcuts": "快捷键",
+    "shortcutSearch": "聚焦搜索",
+    "shortcutRefresh": "刷新订阅源",
+    "shortcutLlmSettings": "打开设置",
+    "shortcutSidebar": "切换侧边栏",
+    "shortcutStar": "星标文章",
+    "shortcutPrev": "上一篇文章",
+    "shortcutNext": "下一篇文章",
+    "shortcutFind": "文章内搜索"
   }
 }

@@ -192,5 +192,24 @@
     "dark": "Dark mode",
     "system": "Follow system",
     "eyeCare": "Eye care"
+  },
+  "systemSettings": {
+    "title": "Settings",
+    "tabGeneral": "General",
+    "tabLLM": "LLM",
+    "tabTags": "Tags",
+    "theme": "Theme",
+    "language": "Language",
+    "font": "Font",
+    "fontSize": "Font Size",
+    "shortcuts": "Shortcuts",
+    "shortcutSearch": "Search",
+    "shortcutRefresh": "Refresh feeds",
+    "shortcutLlmSettings": "Open settings",
+    "shortcutSidebar": "Toggle sidebar",
+    "shortcutStar": "Star article",
+    "shortcutPrev": "Previous article",
+    "shortcutNext": "Next article",
+    "shortcutFind": "Find in article"
   }
 }

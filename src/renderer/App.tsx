@@ -5,9 +5,9 @@ import Sidebar from './components/Sidebar'
 import ArticleList from './components/ArticleList'
 import ReaderView from './components/ReaderView'
 import SearchBar from './components/SearchBar'
-import LLMSettings from './components/LLMSettings'
+import SystemSettings from './components/SystemSettings'
 import ResizeHandle from './components/ResizeHandle'
-import { Menu as MenuIcon, Sun, Moon, Monitor, Eye, X, CheckCircle, XCircle, Loader2, ChevronDown, Keyboard } from 'lucide-react'
+import { Menu as MenuIcon, Settings, X, CheckCircle, XCircle, Loader2 } from 'lucide-react'
 
 class ErrorBoundary extends Component<{ children: React.ReactNode }, { hasError: boolean; error: Error | null }> {
   constructor(props: { children: React.ReactNode }) {
@@ -48,7 +48,7 @@ export default function App() {
   const { t } = useTranslation()
   const {
     sidebarOpen, toggleSidebar,
-    themeMode, systemPrefersDark, setThemeMode, setSystemPrefersDark,
+    themeMode, systemPrefersDark, setSystemPrefersDark,
     setFeeds, selectFeed, setError, isLoading, loadLlmConfig,
     opmlImporting, opmlProgress, opmlDialogOpen, setOpmlDialogOpen,
     showSettings, setShowSettings,
@@ -68,29 +68,13 @@ export default function App() {
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH)
   const [listWidth, setListWidth] = useState(DEFAULT_LIST_WIDTH)
 
-  // 主题选择器
-  const [showThemePicker, setShowThemePicker] = useState(false)
-  // 快捷键提示
-  const [showShortcuts, setShowShortcuts] = useState(false)
-
-  const THEME_OPTIONS = useMemo(() => [
-    { value: 'light' as const, icon: Sun, label: t('theme.light') },
-    { value: 'dark' as const, icon: Moon, label: t('theme.dark') },
-    { value: 'system' as const, icon: Monitor, label: t('theme.system') },
-    { value: 'eyeCare' as const, icon: Eye, label: t('theme.eyeCare') },
-  ], [t])
-
   // 侧边栏收起/展开
   const handleToggleSidebar = useCallback(() => {
     if (sidebarOpen) {
-      // 收起前记住当前宽度
-      setSidebarWidth((prev) => {
-        return prev
-      })
+      setSidebarWidth((prev) => { return prev })
       toggleSidebar()
     } else {
       toggleSidebar()
-      // 恢复默认宽度（如果上次宽度 < 最小值则用默认）
       setSidebarWidth((prev) => (prev < MIN_SIDEBAR_WIDTH ? DEFAULT_SIDEBAR_WIDTH : prev))
     }
   }, [sidebarOpen, toggleSidebar])
@@ -102,7 +86,6 @@ export default function App() {
         const response = await window.api.listFeeds()
         if (response.payload.error === 0 && response.payload.feeds) {
           setFeeds(response.payload.feeds)
-          // 自动选中第一个订阅源
           if (response.payload.feeds.length > 0) {
             selectFeed(response.payload.feeds[0].id)
           }
@@ -112,7 +95,6 @@ export default function App() {
       }
     }
     loadFeeds()
-    // 启动时加载 LLM 配置，确保重启后 API Key 等设置仍存在
     loadLlmConfig()
   }, [])
 
@@ -134,10 +116,9 @@ export default function App() {
     }
   }, [themeMode])
 
-  // 监听系统主题变化（仅在 themeMode === 'system' 时读取）
+  // 监听系统主题变化
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
-    // 初始值
     setSystemPrefersDark(mq.matches)
     const handler = (e: MediaQueryListEvent) => setSystemPrefersDark(e.matches)
     mq.addEventListener('change', handler)
@@ -155,13 +136,12 @@ export default function App() {
 
       const mod = e.ctrlKey || e.metaKey
 
-      // Ctrl/Cmd + K — 打开/聚焦全局搜索（始终可用，除编辑区外）
+      // Ctrl/Cmd + K — 打开/聚焦全局搜索
       if (mod && e.key === 'k') {
         e.preventDefault()
         const btn = document.getElementById('global-search-btn') as HTMLButtonElement | null
         if (btn) {
           btn.click()
-          // 点击后延迟聚焦输入框
           setTimeout(() => {
             const input = document.querySelector('.app-layout input[placeholder*="搜索"]') as HTMLInputElement | null
             input?.focus()
@@ -183,7 +163,7 @@ export default function App() {
         return
       }
 
-      // Ctrl/Cmd + , — LLM 设置
+      // Ctrl/Cmd + , — 系统设置
       if (mod && e.key === ',') {
         e.preventDefault()
         setShowSettings(!showSettings)
@@ -215,7 +195,7 @@ export default function App() {
       }
 
       // s — 星标/取消星标当前文章
-      if (mod) return // 不与 Ctrl+S 等组合键冲突
+      if (mod) return
       if (e.key === 's') {
         e.preventDefault()
         const state = useStore.getState()
@@ -255,75 +235,14 @@ export default function App() {
         <div className="flex-1" />
         <SearchBar />
 
-        {/* 快捷键提示按钮 */}
-        <div className="relative">
-          <button
-            onClick={() => setShowShortcuts(!showShortcuts)}
-            className="p-1 rounded bg-transparent hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
-            title="快捷键 (⌨)"
-          >
-            <Keyboard size={16} />
-          </button>
-          {showShortcuts && (
-            <div
-              className="absolute top-full right-0 mt-1 z-50 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 w-52 overflow-hidden"
-              onClick={e => e.stopPropagation()}
-            >
-              <div className="px-3 py-1.5 border-b border-gray-200 dark:border-gray-700">
-                <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">快捷键</span>
-              </div>
-              <div className="py-1.5 px-2 text-xs space-y-1 text-gray-600 dark:text-gray-300">
-                <div className="flex justify-between"><span>聚焦搜索</span><kbd>Ctrl+K</kbd></div>
-                <div className="flex justify-between"><span>刷新源</span><kbd>Ctrl+R</kbd></div>
-                <div className="flex justify-between"><span>LLM 设置</span><kbd>Ctrl+,</kbd></div>
-                <div className="flex justify-between"><span>侧边栏</span><kbd>Ctrl+B</kbd></div>
-                <div className="flex justify-between"><span>星标文章</span><kbd>s</kbd></div>
-                <div className="flex justify-between"><span>上一篇文章</span><kbd>k/↑</kbd></div>
-                <div className="flex justify-between"><span>下一篇文章</span><kbd>j/↓</kbd></div>
-                <div className="flex justify-between"><span>文章内搜索</span><kbd>Ctrl+F</kbd></div>
-              </div>
-            </div>
-          )}
-        </div>
-        {showShortcuts && (
-          <div className="fixed inset-0 z-40" onClick={() => setShowShortcuts(false)} />
-        )}
-
-        <div className="relative">
-          <button
-            onClick={() => setShowThemePicker(!showThemePicker)}
-            className="flex items-center gap-0.5 p-1 rounded bg-transparent hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
-            title={`${t('theme.label')}：${THEME_OPTIONS.find(o => o.value === themeMode)?.label}`}
-          >
-            {themeMode === 'light' ? <Sun size={16} /> : themeMode === 'dark' ? <Moon size={16} /> : themeMode === 'eyeCare' ? <Eye size={16} /> : <Monitor size={16} />}
-            <ChevronDown size={10} />
-          </button>
-          {showThemePicker && (
-            <div
-              className="absolute top-full right-0 mt-1 z-50 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 w-36 overflow-hidden"
-              onClick={e => e.stopPropagation()}
-            >
-              {THEME_OPTIONS.map(o => (
-                <button
-                  key={o.value}
-                  onClick={() => { setThemeMode(o.value); setShowThemePicker(false) }}
-                  className={`w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 transition-colors
-                    ${themeMode === o.value
-                      ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-                      : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 text-gray-700 dark:text-gray-200'
-                    }`}
-                >
-                  <o.icon size={14} />
-                  <span>{o.label}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-        {/* 主题选择器遮罩 */}
-        {showThemePicker && (
-          <div className="fixed inset-0 z-40" onClick={() => setShowThemePicker(false)} />
-        )}
+        {/* 系统设置按钮 */}
+        <button
+          onClick={() => setShowSettings(true)}
+          className="p-1 rounded bg-transparent hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+          title={t('systemSettings.title')}
+        >
+          <Settings size={16} />
+        </button>
       </div>
 
       {/* 主内容区 — 三栏 + 拖拽分隔条 */}
@@ -383,14 +302,13 @@ export default function App() {
         </div>
       )}
 
-      {/* LLM 设置对话框 */}
-      <LLMSettings />
+      {/* 系统设置对话框（统一入口） */}
+      <SystemSettings />
 
       {/* OPML 导入进度对话框 */}
       {opmlDialogOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-2xl w-full max-w-md mx-4 max-h-[80vh] flex flex-col">
-            {/* 标题栏 */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
               <h2 className="text-base font-semibold text-gray-800 dark:text-gray-200">
                 {t('opml.importProgress')}
@@ -404,11 +322,9 @@ export default function App() {
               </button>
             </div>
 
-            {/* 进度内容 */}
             <div className="flex-1 overflow-y-auto p-4">
               {opmlProgress ? (
                 <div className="space-y-3">
-                  {/* 进度条 */}
                   <div>
                     <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
                       <span>{t('opml.progress')}</span>
@@ -424,7 +340,6 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* 当前处理 */}
                   <div className="flex items-start gap-2 text-sm">
                     {opmlProgress.success ? (
                       <CheckCircle size={16} className="text-green-500 flex-shrink-0 mt-0.5" />
@@ -453,7 +368,6 @@ export default function App() {
               )}
             </div>
 
-            {/* 底部按钮 */}
             {!opmlImporting && (
               <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 flex justify-end">
                 <button

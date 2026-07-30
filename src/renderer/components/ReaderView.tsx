@@ -345,6 +345,29 @@ export default function ReaderView() {
   const [dividerPos, setDividerPos] = useState(50)
   const isDragging = useRef(false)
 
+  // ============ 滚动控制 ============
+  const contentScrollRef = useRef<HTMLDivElement | null>(null)
+  const [showScrollToTop, setShowScrollToTop] = useState(false)
+
+  const scrollToTop = useCallback(() => {
+    contentScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+  }, [])
+
+  // 监听滚动容器（contentScrollRef 在 selectedArticle 存在时才被绑定）
+  useEffect(() => {
+    const el = contentScrollRef.current
+    if (!el) return
+    const onScroll = () => {
+      setShowScrollToTop(el.scrollTop > 300)
+    }
+    onScroll() // 初始检查
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      el.removeEventListener('scroll', onScroll)
+      setShowScrollToTop(false)
+    }
+  }, [selectedArticleId])
+
   // ============ 文章内搜索 ============
   const [inArticleSearch, setInArticleSearch] = useState('')
   const [showInArticleSearch, setShowInArticleSearch] = useState(false)
@@ -1651,54 +1674,6 @@ export default function ReaderView() {
 
             <div className="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1" />
 
-            {/* ===== 字体控制 ===== */}
-            {/* 字号缩小 */}
-            <button
-              onClick={() => setReaderFontSize(Math.max(FONT_SIZE_MIN, readerFontSize - FONT_SIZE_STEP))}
-              disabled={readerFontSize <= FONT_SIZE_MIN}
-              className="flex items-center justify-center w-7 h-7 rounded text-xs text-gray-500 bg-transparent hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-              title={t('reader.fontSizeReduce')}
-            >
-              <Minus size={12} />
-            </button>
-
-            {/* 当前字号显示 */}
-            <span
-              className="text-xs font-medium text-gray-600 dark:text-gray-300 min-w-[28px] text-center select-none cursor-default"
-              title={t('reader.fontSize')}
-            >
-              {readerFontSize}
-            </span>
-
-            {/* 字号放大 */}
-            <button
-              onClick={() => setReaderFontSize(Math.min(FONT_SIZE_MAX, readerFontSize + FONT_SIZE_STEP))}
-              disabled={readerFontSize >= FONT_SIZE_MAX}
-              className="flex items-center justify-center w-7 h-7 rounded text-xs text-gray-500 bg-transparent hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-              title={t('reader.fontSizeIncrease')}
-            >
-              <Plus size={12} />
-            </button>
-
-            {/* 字体选择 */}
-            <button
-              ref={fontBtnRef}
-              onClick={() => {
-                const btn = fontBtnRef.current
-                if (btn) {
-                  const rect = btn.getBoundingClientRect()
-                  setFontPickerPos({ top: rect.bottom + 4, left: rect.right - 160 })
-                }
-                setShowFontPicker(!showFontPicker)
-              }}
-              className="flex items-center gap-1 px-2 py-1.5 text-xs rounded-lg text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700 transition-colors"
-              title={t('reader.selectFont')}
-            >
-              <Type size={13} />
-              {FONT_FAMILIES.find(f => f.value === readerFontFamily)?.label || t('reader.font')}
-              <ChevronDown size={10} />
-            </button>
-
             {/* ===== 文章内搜索按钮 ===== */}
             <button
               onClick={() => { setShowInArticleSearch(!showInArticleSearch); requestAnimationFrame(() => requestAnimationFrame(() => inArticleSearchRef.current?.focus())) }}
@@ -1824,7 +1799,7 @@ export default function ReaderView() {
                     </div>
                   )}
                 </div>
-                <button onClick={() => { setError(false); setErrorDetail(null) }} className="flex-shrink-0 text-red-400 hover:text-red-600 text-xs p-0.5">✕</button>
+                <button onClick={() => { setError(null); setErrorDetail(null) }} className="flex-shrink-0 text-red-400 hover:text-red-600 text-xs p-0.5">✕</button>
               </div>
             </div>
           )}
@@ -1855,7 +1830,17 @@ export default function ReaderView() {
 
         </div>
         {/* ===== 内容主体（可滚动） ===== */}
-        <div className="max-w-3xl mx-auto w-full flex-1 overflow-y-auto px-4 pb-6">
+        <div ref={contentScrollRef} className="max-w-3xl mx-auto w-full flex-1 overflow-y-auto px-4 pb-6">
+          {/* 返回顶部按钮 - 固定在内容区右侧顶部 */}
+          {showScrollToTop && (
+            <button
+              onClick={scrollToTop}
+              className="sticky top-6 float-right z-40 ml-4 w-10 h-10 rounded-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-lg hover:shadow-xl transition-all hover:scale-110 flex items-center justify-center text-gray-500 hover:text-blue-500 dark:text-gray-400 dark:hover:text-blue-400 shrink-0"
+              title={t('reader.backToTop')}
+            >
+              <ArrowUp size={18} />
+            </button>
+          )}
           {!isLoading && (
             <div
               style={{

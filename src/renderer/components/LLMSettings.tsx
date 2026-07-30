@@ -27,7 +27,7 @@ function formatTokens(n: number): string {
   return String(n)
 }
 
-function ModelDetailView({ modelId, baseUrl, initialApiKey, showKey, onShowKeyToggle, onApiKeyChange, testing, onTest, testResult, isPreset }: {
+export function ModelDetailView({ modelId, baseUrl, initialApiKey, showKey, onShowKeyToggle, onApiKeyChange, testing, onTest, testResult, isPreset }: {
   modelId: string; baseUrl: string; initialApiKey: string; showKey: boolean; onShowKeyToggle: () => void
   onApiKeyChange: (value: string) => void; testing: boolean; onTest: () => void
   testResult: { success: boolean; latencyMs: number; message: string } | null; isPreset: boolean
