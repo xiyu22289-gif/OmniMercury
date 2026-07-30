@@ -97,7 +97,7 @@ export default function SearchBar() {
     return (
       <button
         onClick={() => { setIsOpen(true); setTimeout(() => inputRef.current?.focus(), 100) }}
-        className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+        className="p-1 rounded bg-transparent hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
         title="搜索文章"
         id="global-search-btn"
       >

@@ -1656,7 +1656,7 @@ export default function ReaderView() {
             <button
               onClick={() => setReaderFontSize(Math.max(FONT_SIZE_MIN, readerFontSize - FONT_SIZE_STEP))}
               disabled={readerFontSize <= FONT_SIZE_MIN}
-              className="flex items-center justify-center w-7 h-7 rounded text-xs text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              className="flex items-center justify-center w-7 h-7 rounded text-xs text-gray-500 bg-transparent hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               title={t('reader.fontSizeReduce')}
             >
               <Minus size={12} />
@@ -1674,7 +1674,7 @@ export default function ReaderView() {
             <button
               onClick={() => setReaderFontSize(Math.min(FONT_SIZE_MAX, readerFontSize + FONT_SIZE_STEP))}
               disabled={readerFontSize >= FONT_SIZE_MAX}
-              className="flex items-center justify-center w-7 h-7 rounded text-xs text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              className="flex items-center justify-center w-7 h-7 rounded text-xs text-gray-500 bg-transparent hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               title={t('reader.fontSizeIncrease')}
             >
               <Plus size={12} />
@@ -1702,7 +1702,7 @@ export default function ReaderView() {
             {/* ===== 文章内搜索按钮 ===== */}
             <button
               onClick={() => { setShowInArticleSearch(!showInArticleSearch); requestAnimationFrame(() => requestAnimationFrame(() => inArticleSearchRef.current?.focus())) }}
-              className={`flex items-center justify-center w-7 h-7 rounded text-xs transition-colors
+              className={`flex items-center justify-center w-7 h-7 rounded text-xs transition-colors bg-transparent
                 ${showInArticleSearch
                   ? 'bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400'
                   : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700'
@@ -1717,7 +1717,7 @@ export default function ReaderView() {
             {/* 设置按钮 */}
             <button
               onClick={() => setShowSettings(true)}
-              className="flex items-center gap-1 px-2 py-1.5 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+              className="flex items-center gap-1 px-2 py-1.5 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded bg-transparent hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
               title={t('reader.llmSettings')}
             >
               <Settings size={13} />

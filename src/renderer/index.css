@@ -233,29 +233,28 @@ body.eye-care .prose li::marker {
 
 /* ========== 护眼模式 ========== */
 
-/* 侧边栏 + 文章列表 + 顶栏：浅米黄 */
-body.eye-care .app-layout,
+/* ================================================================ */
+/*  1. 结构层 — 三大面板 + 顶栏底色                                    */
+/* ================================================================ */
 body.eye-care .sidebar,
 body.eye-care .article-list,
 body.eye-care .fixed.top-0 {
   background: #FFF8E6 !important;
 }
-
-/* 阅读区外层：深色，和文本卡片融为一体 */
 body.eye-care .reader-view {
   background: #E8DBC2 !important;
 }
-
 body.eye-care .sidebar { border-right-color: #E6DDC9 !important; }
 body.eye-care .fixed.top-0 { border-bottom-color: #E6DDC9 !important; }
 
-/* 正文文字 */
+/* ================================================================ */
+/*  2. 正文排版 — 固定深棕文字                                        */
+/* ================================================================ */
 body.eye-care h1, body.eye-care h2, body.eye-care h3,
 body.eye-care h4, body.eye-care h5, body.eye-care h6,
 body.eye-care .prose, body.eye-care .prose * {
   color: #3C3328 !important;
 }
-
 body.eye-care .text-gray-300,
 body.eye-care .text-gray-400,
 body.eye-care .text-gray-500,
@@ -264,67 +263,280 @@ body.eye-care .dark\:text-gray-400 {
   color: #605648 !important;
 }
 
-/* ---- 所有彩色背景 → 按钮底色 ---- */
-body.eye-care [class*="bg-blue"],
-body.eye-care [class*="bg-purple"],
-body.eye-care [class*="bg-green"],
-body.eye-care [class*="bg-red"],
-body.eye-care [class*="bg-amber"],
-body.eye-care [class*="bg-gray"],
-body.eye-care [class*="bg-white"],
-body.eye-care [class*="dark:bg-"] {
+/* ================================================================ */
+/*  3. 主界面彩色元素 → 统一麦色（只做 sidebar / article-list /       */
+/*     reader-view / 顶栏这四个容器里的元素）                          */
+/* ================================================================ */
+body.eye-care .sidebar [class*="bg-blue"],
+body.eye-care .sidebar [class*="bg-purple"],
+body.eye-care .sidebar [class*="bg-green"],
+body.eye-care .sidebar [class*="bg-red"],
+body.eye-care .sidebar [class*="bg-amber"],
+body.eye-care .sidebar [class*="bg-gray"],
+body.eye-care .sidebar [class*="bg-white"],
+body.eye-care .sidebar [class*="dark:bg-"],
+body.eye-care .fixed.top-0 [class*="bg-blue"],
+body.eye-care .fixed.top-0 [class*="bg-purple"],
+body.eye-care .fixed.top-0 [class*="bg-green"],
+body.eye-care .fixed.top-0 [class*="bg-red"],
+body.eye-care .fixed.top-0 [class*="bg-amber"],
+body.eye-care .fixed.top-0 [class*="bg-gray"],
+body.eye-care .fixed.top-0 [class*="bg-white"],
+body.eye-care .fixed.top-0 [class*="dark:bg-"],
+body.eye-care .article-list [class*="bg-blue"],
+body.eye-care .article-list [class*="bg-purple"],
+body.eye-care .article-list [class*="bg-green"],
+body.eye-care .article-list [class*="bg-red"],
+body.eye-care .article-list [class*="bg-amber"],
+body.eye-care .article-list [class*="bg-gray"],
+body.eye-care .article-list [class*="bg-white"],
+body.eye-care .article-list [class*="dark:bg-"],
+body.eye-care .reader-view [class*="bg-blue"],
+body.eye-care .reader-view [class*="bg-emerald"],
+body.eye-care .reader-view [class*="bg-green"],
+body.eye-care .reader-view [class*="bg-red"],
+body.eye-care .reader-view [class*="bg-amber"],
+body.eye-care .reader-view [class*="bg-gray"],
+body.eye-care .reader-view [class*="bg-white"],
+body.eye-care .reader-view [class*="dark:bg-"] {
   background-color: #E8DBC2 !important;
 }
-
 body.eye-care .article-item.selected,
 body.eye-care .feed-item.selected {
   background-color: #E8DBC2 !important;
 }
 
-body.eye-care [class*="hover:bg-"]:hover {
+/* hover */
+body.eye-care .sidebar [class*="hover:bg-"]:hover,
+body.eye-care .fixed.top-0 [class*="hover:bg-"]:hover,
+body.eye-care .article-list [class*="hover:bg-"]:hover,
+body.eye-care .reader-view [class*="hover:bg-"]:hover {
   background-color: #D9C8AA !important;
 }
 
-body.eye-care [class*="text-blue"],
-body.eye-care [class*="text-purple"],
-body.eye-care [class*="text-green"],
-body.eye-care [class*="text-amber"],
-body.eye-care [class*="dark:text-blue"],
-body.eye-care [class*="dark:text-purple"],
-body.eye-care [class*="dark:text-green"],
-body.eye-care [class*="dark:text-amber"] {
-  color: #3C3328 !important;
+/* 彩色文字 → 深棕 */
+body.eye-care .sidebar [class*="text-blue"],
+body.eye-care .sidebar [class*="text-purple"],
+body.eye-care .sidebar [class*="text-green"],
+body.eye-care .sidebar [class*="text-amber"],
+body.eye-care .sidebar [class*="dark:text-blue"],
+body.eye-care .sidebar [class*="dark:text-purple"],
+body.eye-care .sidebar [class*="dark:text-green"],
+body.eye-care .sidebar [class*="dark:text-amber"],
+body.eye-care .fixed.top-0 [class*="text-blue"],
+body.eye-care .fixed.top-0 [class*="text-purple"],
+body.eye-care .fixed.top-0 [class*="text-green"],
+body.eye-care .fixed.top-0 [class*="text-amber"],
+body.eye-care .fixed.top-0 [class*="dark:text-blue"],
+body.eye-care .fixed.top-0 [class*="dark:text-purple"],
+body.eye-care .fixed.top-0 [class*="dark:text-green"],
+body.eye-care .fixed.top-0 [class*="dark:text-amber"],
+body.eye-care .article-list [class*="text-blue"],
+body.eye-care .article-list [class*="text-purple"],
+body.eye-care .article-list [class*="text-green"],
+body.eye-care .article-list [class*="text-amber"],
+body.eye-care .article-list [class*="dark:text-blue"],
+body.eye-care .article-list [class*="dark:text-purple"],
+body.eye-care .article-list [class*="dark:text-green"],
+body.eye-care .article-list [class*="dark:text-amber"],
+body.eye-care .reader-view [class*="text-blue"],
+body.eye-care .reader-view [class*="text-purple"],
+body.eye-care .reader-view [class*="text-green"],
+body.eye-care .reader-view [class*="text-amber"],
+body.eye-care .reader-view [class*="dark:text-blue"],
+body.eye-care .reader-view [class*="dark:text-purple"],
+body.eye-care .reader-view [class*="dark:text-green"],
+body.eye-care .reader-view [class*="dark:text-amber"] {
+  color: #4A3620 !important;
 }
 
-body.eye-care [class*="border-blue"],
-body.eye-care [class*="border-purple"],
-body.eye-care [class*="border-green"],
-body.eye-care [class*="border-gray"],
-body.eye-care [class*="border-red"],
-body.eye-care [class*="dark:border-"],
-body.eye-care .border-b {
-  border-color: #E6DDC9 !important;
+/* 边框 → 暖棕 */
+body.eye-care .sidebar [class*="border-"],
+body.eye-care .sidebar .border-b,
+body.eye-care .fixed.top-0 [class*="border-"],
+body.eye-care .fixed.top-0 .border-b,
+body.eye-care .article-list [class*="border-"],
+body.eye-care .article-list .border-b,
+body.eye-care .reader-view [class*="border-"],
+body.eye-care .reader-view .border-b {
+  border-color: #C4AE8A !important;
 }
 
 body.eye-care .article-item.selected { border-left: 3px solid #a68a5c !important; }
-
 body.eye-care .article-item { border-bottom-color: #E6DDC9 !important; }
 body.eye-care .article-item:hover { background-color: #D9C8AA !important; }
 body.eye-care .article-item.read { opacity: 0.55; }
-
 body.eye-care .feed-item:hover { background-color: #D9C8AA !important; }
 body.eye-care .feed-item.selected { color: #3C3328 !important; }
-
 body.eye-care ::-webkit-scrollbar-thumb { background: #D9C8AA !important; }
 
+/* 输入框 */
 body.eye-care input,
 body.eye-care textarea,
 body.eye-care select {
-  background-color: #FFF8E6 !important; border-color: #E6DDC9 !important; color: #3C3328 !important;
+  background-color: #FFF8E6 !important;
+  border-color: #C4AE8A !important;
+  color: #3C3328 !important;
 }
 body.eye-care input::placeholder,
 body.eye-care textarea::placeholder { color: #605648 !important; }
 
-body.eye-care .bg-blue-500 { background-color: #a68a5c !important; }
-body.eye-care .hover\:bg-blue-600:hover { background-color: #8b7048 !important; }
-body.eye-care .text-white { color: #FFF8E6 !important; }
+/* ================================================================ */
+/*  4. 主界面按钮底色                                         */
+/* ================================================================ */
+body.eye-care .sidebar button,
+body.eye-care .fixed.top-0 button,
+body.eye-care .article-list button,
+body.eye-care .reader-view button {
+  background-color: #D9C8AA !important;
+}
+body.eye-care .sidebar button:hover,
+body.eye-care .fixed.top-0 button:hover,
+body.eye-care .article-list button:hover,
+body.eye-care .reader-view button:hover {
+  background-color: #C4AE8A !important;
+}
+/* 实心亮色按钮保持深棕（如"添加订阅"、"AI摘要"等） */
+body.eye-care .sidebar .bg-blue-500,
+body.eye-care .sidebar [class*="bg-blue-500"],
+body.eye-care .fixed.top-0 .bg-blue-500,
+body.eye-care .fixed.top-0 [class*="bg-blue-500"],
+body.eye-care .article-list .bg-blue-500,
+body.eye-care .article-list [class*="bg-blue-500"],
+body.eye-care .reader-view .bg-blue-500,
+body.eye-care .reader-view [class*="bg-blue-500"],
+body.eye-care .reader-view [class*="bg-purple-500"],
+body.eye-care .reader-view [class*="bg-green-500"] {
+  background-color: #a68a5c !important;
+}
+body.eye-care .sidebar .bg-blue-500:hover,
+body.eye-care .sidebar [class*="bg-blue-500"]:hover,
+body.eye-care .fixed.top-0 .bg-blue-500:hover,
+body.eye-care .fixed.top-0 [class*="bg-blue-500"]:hover,
+body.eye-care .article-list .bg-blue-500:hover,
+body.eye-care .article-list [class*="bg-blue-500"]:hover,
+body.eye-care .reader-view .bg-blue-500:hover,
+body.eye-care .reader-view [class*="bg-blue-500"]:hover,
+body.eye-care .reader-view [class*="bg-purple-500"]:hover,
+body.eye-care .reader-view [class*="bg-green-500"]:hover {
+  background-color: #8b7048 !important;
+}
+body.eye-care .sidebar .text-white,
+body.eye-care .fixed.top-0 .text-white,
+body.eye-care .article-list .text-white,
+body.eye-care .reader-view .text-white {
+  color: #FFF8E6 !important;
+}
+
+/* 透明背景按钮（纯图标按钮） */
+body.eye-care .sidebar button.bg-transparent,
+body.eye-care .sidebar button[class*="bg-transparent"],
+body.eye-care .fixed.top-0 button.bg-transparent,
+body.eye-care .fixed.top-0 button[class*="bg-transparent"],
+body.eye-care .article-list button.bg-transparent,
+body.eye-care .article-list button[class*="bg-transparent"],
+body.eye-care .reader-view button.bg-transparent,
+body.eye-care .reader-view button[class*="bg-transparent"] {
+  background-color: transparent !important;
+}
+body.eye-care .sidebar button.bg-transparent:hover,
+body.eye-care .sidebar button[class*="bg-transparent"]:hover,
+body.eye-care .fixed.top-0 button.bg-transparent:hover,
+body.eye-care .fixed.top-0 button[class*="bg-transparent"]:hover,
+body.eye-care .article-list button.bg-transparent:hover,
+body.eye-care .article-list button[class*="bg-transparent"]:hover,
+body.eye-care .reader-view button.bg-transparent:hover,
+body.eye-care .reader-view button[class*="bg-transparent"]:hover {
+  background-color: #C4AE8A !important;
+}
+
+/* ================================================================ */
+/*  5. LLM 设置弹窗 — 独立控制（不被主界面规则污染）                    */
+/* ================================================================ */
+/* 弹窗容器底色 */
+body.eye-care .fixed.inset-0.z-50 > div {
+  background-color: #FFF8E6 !important;
+  border-color: #C4AE8A !important;
+}
+
+/* LLM 弹窗：标题栏 & Tab 栏上下横线去掉 */
+body.eye-care .fixed.inset-0.z-50 .border-b-2 {
+  border-bottom-width: 0 !important;
+}
+body.eye-care .fixed.inset-0.z-50 .border-t-2 {
+  border-top-width: 0 !important;
+}
+/* 弹窗内部分隔线（LLM 配置面板内部保留） */
+body.eye-care .fixed.inset-0.z-50 [class*="border-b"],
+body.eye-care .fixed.inset-0.z-50 [class*="border-t"] {
+  border-color: #C4AE8A !important;
+}
+
+/* 弹窗输入框 */
+body.eye-care .fixed.inset-0.z-50 input,
+body.eye-care .fixed.inset-0.z-50 textarea {
+  background-color: #FFF8E6 !important;
+  border-color: #C4AE8A !important;
+  color: #3C3328 !important;
+}
+
+/* 弹窗内所有按钮：仅边框，无底色 */
+body.eye-care .fixed.inset-0.z-50 button {
+  background-color: transparent !important;
+}
+body.eye-care .fixed.inset-0.z-50 button:hover {
+  background-color: #D9C8AA !important;
+}
+
+/* 弹窗内 Token 统计卡片 */
+body.eye-care .fixed.inset-0.z-50 [class*="bg-gray-50"] {
+  background-color: #EBE0CC !important;
+}
+body.eye-care .fixed.inset-0.z-50 [class*="bg-white"] {
+  background-color: #FFF8E6 !important;
+}
+
+/* 弹窗："当前模型"信息条 */
+body.eye-care .fixed.inset-0.z-50 [class*="bg-blue-50"] {
+  background-color: #EBE0CC !important;
+  border-color: #C4AE8A !important;
+}
+
+/* 弹窗：Tab 选中/未选中 */
+body.eye-care .fixed.inset-0.z-50 button.border-blue-500 {
+  border-bottom-color: #a68a5c !important;
+  color: #4A3620 !important;
+  font-weight: 700 !important;
+  background-color: #D9C8AA !important;
+}
+body.eye-care .fixed.inset-0.z-50 button.border-transparent {
+  border-bottom-color: transparent !important;
+  color: #9B8E7A !important;
+  font-weight: 400 !important;
+  background-color: transparent !important;
+}
+
+/* 弹窗："当前模型"标签文字 */
+body.eye-care .fixed.inset-0.z-50 span.text-blue-600,
+body.eye-care .fixed.inset-0.z-50 span.text-blue-700 {
+  color: #605648 !important;
+}
+body.eye-care .fixed.inset-0.z-50 span.font-semibold,
+body.eye-care .fixed.inset-0.z-50 span.font-bold {
+  color: #4A3620 !important;
+}
+
+/* ================================================================ */
+/*  6. ReaderView 专属微调                                            */
+/* ================================================================ */
+body.eye-care .reader-view .w-px {
+  background-color: #C4AE8A !important;
+}
+
+/* ================================================================ */
+/*  7. 译文/摘要卡片边框                                              */
+/* ================================================================ */
+body.eye-care [class*="border-blue-300"],
+body.eye-care [class*="border-blue-600"] {
+  border-color: #C4AE8A !important;
+}

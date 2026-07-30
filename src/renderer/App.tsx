@@ -244,7 +244,7 @@ export default function App() {
       <div className="fixed top-0 left-0 right-0 h-10 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center px-3 gap-2 z-10">
         <button
           onClick={handleToggleSidebar}
-          className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+          className="p-1 rounded bg-transparent hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
           title="Toggle sidebar"
         >
           <MenuIcon size={18} />
@@ -259,7 +259,7 @@ export default function App() {
         <div className="relative">
           <button
             onClick={() => setShowShortcuts(!showShortcuts)}
-            className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+            className="p-1 rounded bg-transparent hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
             title="快捷键 (⌨)"
           >
             <Keyboard size={16} />
@@ -292,7 +292,7 @@ export default function App() {
         <div className="relative">
           <button
             onClick={() => setShowThemePicker(!showThemePicker)}
-            className="flex items-center gap-0.5 p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+            className="flex items-center gap-0.5 p-1 rounded bg-transparent hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
             title={`${t('theme.label')}：${THEME_OPTIONS.find(o => o.value === themeMode)?.label}`}
           >
             {themeMode === 'light' ? <Sun size={16} /> : themeMode === 'dark' ? <Moon size={16} /> : themeMode === 'eyeCare' ? <Eye size={16} /> : <Monitor size={16} />}

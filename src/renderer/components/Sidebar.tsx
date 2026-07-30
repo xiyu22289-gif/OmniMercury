@@ -192,21 +192,21 @@ export default function Sidebar() {
         </button>
         <button
           onClick={handleOpmlImport}
-          className="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+          className="p-1.5 rounded bg-transparent hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
           title="导入订阅源 (OPML/CSV/TXT/JSON)"
         >
           <Upload size={14} />
         </button>
         <button
           onClick={handleOpmlExport}
-          className="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+          className="p-1.5 rounded bg-transparent hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
           title={t('sidebar.exportOpml')}
         >
           <Download size={14} />
         </button>
         <button
           onClick={handleRefresh}
-          className="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+          className="p-1.5 rounded bg-transparent hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
           title={t('sidebar.refreshAll')}
         >
           <RefreshCw size={14} />
@@ -258,7 +258,7 @@ export default function Sidebar() {
         <div className="px-4 py-1.5">
           <button
             onClick={loadAllArticles}
-            className={`w-full flex items-center gap-2 px-2 py-1 text-sm rounded transition-colors ${
+            className={`w-full flex items-center gap-2 px-2 py-1 text-sm rounded transition-colors bg-transparent ${
               selectedFeedId === -1
                 ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
                 : 'text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20'
@@ -311,7 +311,7 @@ export default function Sidebar() {
         <div className="border-t border-gray-200 dark:border-gray-700 mt-1 pt-1">
           <button
             onClick={() => setShowTagSection(!showTagSection)}
-            className="w-full flex items-center gap-1 px-4 py-1.5 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors"
+            className="w-full flex items-center gap-1 px-4 py-1.5 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider bg-transparent hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors"
           >
             {showTagSection ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
             <Tag size={12} className="inline" />
@@ -337,7 +337,7 @@ export default function Sidebar() {
                   <button
                     key={tag.id}
                     onClick={() => setFilterTag(currentFilterTagId === tag.id ? null : tag.id)}
-                    className={`w-full flex items-center gap-2 px-2 py-1 rounded text-sm transition-colors
+                    className={`w-full flex items-center gap-2 px-2 py-1 rounded text-sm transition-colors bg-transparent
                       ${currentFilterTagId === tag.id
                         ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
                         : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50'
@@ -368,7 +368,7 @@ export default function Sidebar() {
             const next = langs[(idx + 1) % 3]
             i18n.changeLanguage(next)
           }}
-          className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+          className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-gray-500 dark:text-gray-400 bg-transparent hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
         >
           <Globe size={13} />
           <span className="flex-1 text-left">
