@@ -204,7 +204,17 @@ export function registerIpcHandlers(): void {
       markArticleRead(articleId)
       return { success: true }
     } catch (err) {
-      return { success: false, error: err instanceof Error ? err.message : String(err) }
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('backend:toggleRead', async (_event, articleId: number) => {
+    try {
+      const { toggleArticleRead } = await import('./db')
+      const result = toggleArticleRead(articleId)
+      return { success: true, data: result }
+    } catch (err) {
+      return { success: false, error: String(err) }
     }
   })
 
@@ -222,6 +232,16 @@ export function registerIpcHandlers(): void {
       return { type: 'list_articles', payload: { error: 0, articles } }
     } catch (err) {
       return { type: 'list_articles', payload: { error: 1, message: err instanceof Error ? err.message : String(err) } }
+    }
+  })
+
+  ipcMain.handle('backend:renameFeed', async (_event, feedId: number, newName: string) => {
+    try {
+      const { renameFeed } = await import('./db')
+      renameFeed(feedId, newName)
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: String(err) }
     }
   })
 

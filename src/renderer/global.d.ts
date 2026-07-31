@@ -38,6 +38,7 @@ declare global {
       getArticleContent: (articleId: number) => Promise<IpcResponse>
       refreshArticleContent: (articleId: number) => Promise<IpcResponse>
       removeFeed: (feedId: number) => Promise<IpcResponse>
+      renameFeed: (feedId: number, newName: string) => Promise<{ success: boolean; error?: string }>
       /** searchArticles: useFts=true 使用 FTS5 全文搜索（正文+标题），默认 false 使用标题模糊搜索 */
       searchArticles: (query: string, feedId?: number, offset?: number, limit?: number, useFts?: boolean) => Promise<IpcResponse>
       getCachedArticleContent: (articleId: number) => Promise<IpcResponse>
@@ -66,6 +67,14 @@ declare global {
 
       /** 测试 LLM API 连接 */
       testConnection: (config?: { baseUrl: string; apiKey: string; model: string }) => Promise<{ success: boolean; latencyMs: number; message: string }>
+
+      // ---- 收藏/已读 ----
+      deleteArticle: (articleId: number) => Promise<{ success: boolean; error?: string }>
+      toggleStar: (articleId: number) => Promise<{ success: boolean; data?: { id: number; isStarred: number }; error?: string }>
+      markRead: (articleId: number) => Promise<{ success: boolean; error?: string }>
+      toggleRead: (articleId: number) => Promise<{ success: boolean; data?: { id: number; isRead: number }; error?: string }>
+      getAllArticles: () => Promise<IpcResponse>
+      getStarredArticles: () => Promise<IpcResponse>
 
       // ---- 函数级 LLM 配置（新版） ----
       getLlmGlobalConfig: () => Promise<LlmGlobalConfig>

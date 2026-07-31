@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 REM ============================================================
 REM Summer RSS Reader — Windows 原生开发启动
 REM 在 CMD 中双击运行，或拖入 PowerShell 执行

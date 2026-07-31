@@ -109,6 +109,7 @@ interface AppState {
   setAddFeedError: (error: string | null) => void
   clearAddFeedError: () => void
   toggleStar: (articleId: number) => Promise<void>
+  toggleArticleRead: (articleId: number) => Promise<void>
   deleteArticle: (articleId: number) => Promise<void>
   markArticleRead: (articleId: number) => Promise<void>
 
@@ -353,12 +354,12 @@ export const useStore = create<AppState>((set, get) => {
         })
       }
 
-      // 自动标记已读：4 秒后标记
+      // 自动标记已读：5 秒后标记
       const state2 = get()
       if (!state2.articles.find(a => a.id === articleId)?.is_read) {
         setTimeout(() => {
           get().markArticleRead(articleId)
-        }, 4000)
+        }, 5000)
       }
 
       try {
@@ -554,6 +555,22 @@ export const useStore = create<AppState>((set, get) => {
         }))
       } catch (err) {
         console.error('[store] markArticleRead 异常：', err)
+      }
+    },
+
+    toggleArticleRead: async (articleId) => {
+      try {
+        const res = await window.api.toggleRead(articleId)
+        if (res.success && res.data) {
+          const { isRead } = res.data
+          set(state => ({
+            articles: state.articles.map(a =>
+              a.id === articleId ? { ...a, is_read: isRead === 1 } : a
+            ),
+          }))
+        }
+      } catch (err) {
+        console.error('[store] toggleArticleRead 异常：', err)
       }
     },
 

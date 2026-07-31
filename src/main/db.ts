@@ -326,6 +326,14 @@ export function insertFeed(feed: Omit<NewFeed, 'id' | 'createdAt'>): Feed {
     .get();
 }
 
+export function renameFeed(feedId: number, newName: string): void {
+  getDb()
+    .update(feeds)
+    .set({ title: newName })
+    .where(eq(feeds.id, feedId))
+    .run();
+}
+
 // ============================================================
 // Article CRUD
 // ============================================================
@@ -431,6 +439,22 @@ export function markArticleRead(articleId: number): void {
     .set({ isRead: 1 })
     .where(eq(articles.id, articleId))
     .run();
+}
+
+export function toggleArticleRead(articleId: number): { id: number; isRead: number } {
+  const row = getDb()
+    .select({ id: articles.id, isRead: articles.isRead })
+    .from(articles)
+    .where(eq(articles.id, articleId))
+    .get()
+  if (!row) throw new Error(`文章 ${articleId} 不存在`)
+  const newVal = row.isRead ? 0 : 1
+  getDb()
+    .update(articles)
+    .set({ isRead: newVal })
+    .where(eq(articles.id, articleId))
+    .run()
+  return { id: articleId, isRead: newVal }
 }
 
 export function getAllArticles(

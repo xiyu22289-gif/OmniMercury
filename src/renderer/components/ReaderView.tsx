@@ -606,11 +606,11 @@ export default function ReaderView() {
       const sel = window.getSelection()
       const text = sel?.toString().trim() ?? ''
       if (!text || !sel || sel.isCollapsed) { setShowFloatBtn(false); selectedTextRef.current = ''; return }
-      // 边界检查：选区必须在阅读区域内（readingAreaRef 或新标签翻译容器）
-      const area = readingAreaRef.current
+      // 边界检查：选区必须在阅读区域内（含翻译结果、侧边栏）
+      const area = document.querySelector('.reader-view') as HTMLElement | null
       if (!area) { setShowFloatBtn(false); selectedTextRef.current = ''; return }
       const target = e.target as Node | null
-      const inReadingArea = target && (area.contains(target) || document.getElementById('new-tab-translation-root')?.contains(target) || document.getElementById('translation-output-area')?.contains(target))
+      const inReadingArea = target && area.contains(target)
       if (!inReadingArea) { setShowFloatBtn(false); selectedTextRef.current = ''; return }
       try {
         const range = sel.getRangeAt(0)
@@ -825,6 +825,12 @@ export default function ReaderView() {
           if ('delta' in chunk) {
             appendParagraphTranslation(idx, chunk.delta)
           } else if ('fullText' in chunk) {
+            // 同步更新 UI 显示
+            useStore.setState(s => {
+              const arr = [...s.paragraphTranslations]
+              arr[idx] = chunk.fullText
+              return { paragraphTranslations: arr }
+            })
             const state = useStore.getState()
             const targetArticle = state.articles.find(a => a.id === chunk.articleId)
             if (targetArticle) {
@@ -847,7 +853,19 @@ export default function ReaderView() {
           }
         } else if (chunk.type === 'translateComplete') {
           if (chunk.articleId !== selectedArticleIdRef.current) return
-          // 段落翻译全部完成
+          // 段落翻译全部完成：标记缓存为完整
+          const cs = useStore.getState()
+          const ca = cs.articles.find(a => a.id === chunk.articleId)
+          if (ca) {
+            const lang = translateTargetLangRef.current
+            const ex: Record<string, unknown> = ca.translations ? JSON.parse(ca.translations) : {}
+            ex[lang + '_complete'] = true
+            useStore.setState({
+              articles: cs.articles.map(a =>
+                a.id === chunk.articleId ? { ...a, translations: JSON.stringify(ex) } : a
+              )
+            })
+          }
           setTranslateLoading(false)
         } else if (chunk.type === 'translate') {
           if (!translatingRef.current) return
@@ -1270,22 +1288,44 @@ export default function ReaderView() {
       targetLang,
     }))
 
-    // ★ 翻译缓存检查：优先使用已保存的翻译
+    // ★ 翻译缓存检查
     if (transMap._v === 2 && Array.isArray(transMap[targetLang]) && (transMap[targetLang] as any[]).length > 0) {
       const cached = transMap[targetLang] as string[]
-      console.log(`[缓存] ✅ 命中 ${targetLang}，${cached.length} 段`)
+      const isComplete = !!transMap[targetLang + '_complete']
+      if (isComplete) {
+        console.log(`[缓存] ✅ 命中 ${targetLang}，${cached.length} 段（已标记完整）`)
+        frozenOriginalParagraphsRef.current = splitContent(articleContent || '')
+        translatingRef.current = true
+        translateTargetLangRef.current = targetLang
+        setTranslateLoading(true)
+        useStore.setState({ paragraphTranslations: cached })
+        setTimeout(() => setTranslateLoading(false), 50)
+        return
+      }
+      // 缓存未标记完整 — 先加载已有，再补全新翻译
+      console.log(`[缓存] ⚠️ 缓存未标记完整（${cached.length} 段），先加载，再补全`)
       frozenOriginalParagraphsRef.current = splitContent(articleContent || '')
       translatingRef.current = true
       translateTargetLangRef.current = targetLang
       setTranslateLoading(true)
-      useStore.setState({ paragraphTranslations: cached })
-      setTimeout(() => setTranslateLoading(false), 50)
+      const totalParas = frozenOriginalParagraphsRef.current.length
+      const filled = [...cached]
+      while (filled.length < totalParas) filled.push('')
+      useStore.setState({ paragraphTranslations: filled })
+      try {
+        const c = articleContent || selectedArticle.summary || ''
+        if (!c.trim()) { setError('文章无内容'); setTranslateLoading(false); return }
+        await window.api.translateParagraphs(selectedArticleId, c, selectedArticle.title, targetLang)
+      } catch (err) {
+        setError(String(err))
+        setTranslateLoading(false)
+      }
       return
     }
 
     console.log('[缓存] ❌ 未命中，调用 API')
 
-    // API 翻译
+    // API 全新翻译
     translatingRef.current = true
     translateTargetLangRef.current = targetLang
     setTranslateLoading(true)
@@ -1911,15 +1951,6 @@ export default function ReaderView() {
             </button>
 
             <div className="flex-1" />
-
-            {/* 设置按钮 */}
-            <button
-              onClick={() => setShowSettings(true)}
-              className="flex items-center gap-1 px-2 py-1.5 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded bg-transparent hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-              title={t('reader.llmSettings')}
-            >
-              <Settings size={13} />
-            </button>
           </div>
 
           {/* 关闭弹出选择器的遮罩 */}
@@ -2249,7 +2280,7 @@ export default function ReaderView() {
                 className={`rounded-lg p-6 ${containerBg}`}
               >
                 {readerMode === 'reader'
-                  ? (articleContentHtml && articleContentHtml.length > 50 ? renderHtmlContent() : renderParagraphsWithCheckboxes())
+                  ? renderParagraphsWithCheckboxes()
                   : renderOriginalContent()
                 }
               </div>

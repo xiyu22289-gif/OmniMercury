@@ -44,6 +44,9 @@ const api = {
     ipcRenderer.invoke('backend:refreshArticleContent', articleId),
   removeFeed: (feedId: number) =>
     ipcRenderer.invoke('backend:removeFeed', feedId),
+
+  renameFeed: (feedId: number, newName: string): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('backend:renameFeed', feedId, newName),
   searchArticles: (query: string, feedId?: number, offset?: number, limit?: number, useFts?: boolean) =>
     ipcRenderer.invoke('backend:searchArticles', query, feedId, offset, limit, useFts),
   getCachedArticleContent: (articleId: number) =>
@@ -62,6 +65,9 @@ const api = {
     ipcRenderer.invoke('backend:toggleStar', articleId),
   markRead: (articleId: number): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke('backend:markRead', articleId),
+
+  toggleRead: (articleId: number): Promise<{ success: boolean; data?: { id: number; isRead: number }; error?: string }> =>
+    ipcRenderer.invoke('backend:toggleRead', articleId),
   getAllArticles: (): Promise<IpcResponse> =>
     ipcRenderer.invoke('backend:getAllArticles'),
   getStarredArticles: (): Promise<IpcResponse> =>

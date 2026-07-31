@@ -361,11 +361,23 @@ function buildParagraphTranslatePrompt(paragraph: string, targetLang: string): s
   const plainText = protectedText.replace(/<[^>]+>/g, '').replace(/IMG_PH_\d+/g, '').trim()
   if (!plainText) return ''
   const isHtml = isHtmlContent(paragraph)
-  const langName = targetLang === 'Chinese' ? '简体中文' : targetLang
-  if (isHtml) {
-    return `Translate this single HTML paragraph to ${langName}. CRITICAL: Output ONLY the translation of this exact paragraph — do NOT add extra paragraphs, do NOT translate anything else. Preserve ALL HTML tags. No explanations:\n\n${protectedText}`
+
+  // 语言专属翻译模板
+  const localeTemplates: Record<string, string> = {
+    Chinese: `将以下段落翻译为简体中文。只输出译文，不要任何解释：\n\n${protectedText}`,
+    Japanese: `以下の段落を日本語に翻訳してください。訳文のみを出力し、説明は不要：\n\n${protectedText}`,
+    Korean: `다음 단락을 한국어로 번역하세요. 번역문만 출력하고 설명은 하지 마세요：\n\n${protectedText}`,
+    French: `Traduisez le paragraphe suivant en français. Sortie uniquement la traduction, sans explications：\n\n${protectedText}`,
+    German: `Übersetzen Sie den folgenden Absatz ins Deutsche. Nur die Übersetzung ausgeben, keine Erklärungen：\n\n${protectedText}`,
+    English: `Translate the following paragraph to English. Output ONLY the translation, no explanations:\n\n${protectedText}`,
   }
-  return `Translate this single Markdown paragraph to ${langName}. CRITICAL: Output ONLY the translation of this exact paragraph — do NOT add extra paragraphs, do NOT translate anything else. Preserve all formatting. No explanations:\n\n${protectedText}`
+
+  if (localeTemplates[targetLang]) {
+    return localeTemplates[targetLang]
+  }
+
+  // fallback
+  return `Translate to ${targetLang}. Output ONLY the translation:\n\n${protectedText}`
 }
 
 // ============================================================
@@ -434,7 +446,7 @@ export async function translateParagraphs(request: TranslateRequest, callback: S
         }
       )
       if (fullText) {
-        const single = stripExtraParagraphs(restoreMedia(fullText))
+        const single = restoreMedia(fullText).trim()
         allTranslations[i] = single
         callback({ type: 'translateParagraph', articleId, paragraphIndex: i, fullText: single })
         await recordTokens({ model, operation: 'translateParagraphs', prompt, completion: single })
@@ -445,13 +457,15 @@ export async function translateParagraphs(request: TranslateRequest, callback: S
       allTranslations[i] = `[${errLabel}] ${detail.message}`
       callback({ type: 'translateParagraph', articleId, paragraphIndex: i, message: formatErrorDetail(detail), detail })
     }
-    if (i < paragraphs.length - 1) await new Promise(r => setTimeout(r, 300))
+    if (i < paragraphs.length - 1) await new Promise(r => setTimeout(r, 50))
   }
 
   try {
     const row = getDb().select({ translations: articlesTable.translations }).from(articlesTable).where(eq(articlesTable.id, articleId)).get()
     const existingMap: Record<string, unknown> = row?.translations ? JSON.parse(row.translations) : {}
-    existingMap._v = 2; existingMap[targetLang] = allTranslations
+    existingMap._v = 2
+    existingMap[targetLang] = allTranslations
+    existingMap[targetLang + '_complete'] = true
     getDb().update(articlesTable).set({ translations: JSON.stringify(existingMap) }).where(eq(articlesTable.id, articleId)).run()
   } catch {}
 
@@ -464,16 +478,39 @@ export async function translateParagraphs(request: TranslateRequest, callback: S
 
 function buildSummarizePrompt(title: string, content: string, targetLang: string, detailLevel: 'compact' | 'medium' | 'detailed' = 'medium'): string {
   const maxContentLen = detailLevel === 'detailed' ? 12000 : detailLevel === 'compact' ? 4000 : 8000
-  const truncated = content.length > maxContentLen ? content.slice(0, maxContentLen) + '\n\n[内容过长已截断...]' : content
-  const langName = targetLang === 'Chinese' ? '简体中文' : targetLang
+  const truncated = content.length > maxContentLen ? content.slice(0, maxContentLen) + '\n\n[Content too long, truncated...]' : content
 
-  const lengthGuide = detailLevel === 'compact'
-    ? 'a very concise summary (about 50-80 words)'
-    : detailLevel === 'detailed'
-      ? 'a detailed summary (about 300-400 words) covering key points, supporting arguments, and conclusions'
-      : 'a concise summary (about 150 words)'
+  // 语言专属模板——整个 prompt 用目标语言书写，强制模型输出目标语言
+  const templates: Record<string, (t: string, c: string, detail: string) => string> = {
+    Chinese: (t, c, d) => `请为以下文章生成${d}的摘要，用简体中文输出。只输出摘要文字，不要任何解释：\n\n标题：${t}\n\n内容：\n${c}\n\n摘要：`,
+    Japanese: (t, c, d) => `以下の記事を${d}の要約を生成してください。日本語のみで出力。解説は不要、要約文のみ出力：\n\nタイトル：${t}\n\n内容：\n${c}\n\n要約：`,
+    Korean: (t, c, d) => `다음 기사를 ${d}의 요약으로 생성해 주세요. 한국어로만 출력하세요. 요약문만 출력하고 설명은 하지 마세요：\n\n제목：${t}\n\n내용：\n${c}\n\n요약：`,
+    French: (t, c, d) => `Générez un résumé ${d} de l'article suivant en français UNIQUEMENT. Sortie texte du résumé uniquement, sans explications：\n\nTitre：${t}\n\nContenu：\n${c}\n\nRésumé：`,
+    German: (t, c, d) => `Erstellen Sie eine ${d} Zusammenfassung des folgenden Artikels NUR auf Deutsch. Nur Zusammenfassungstext ausgeben, keine Erklärungen：\n\nTitel：${t}\n\nInhalt：\n${c}\n\nZusammenfassung：`,
+    English: (t, c, d) => `Generate a ${d} summary of the following article in English ONLY. Output ONLY the summary text, no explanations：\n\nTitle：${t}\n\nContent：\n${c}\n\nSummary：`,
+  }
 
-  return `Please generate ${lengthGuide} for the following article in ${langName}. Output ONLY the summary text, no explanations:\n\nTitle: ${title}\n\nContent:\n${truncated}\n\nSummary:`
+  const detailGuide: Record<string, string> = {
+    compact: '约 50-80 词的极简',
+    medium: '约 150 词的简洁',
+    detailed: '约 300-400 词的详细（覆盖关键点、论据和结论）',
+  }
+  const detailEn: Record<string, string> = {
+    compact: 'very concise (about 50-80 words)',
+    medium: 'concise (about 150 words)',
+    detailed: 'detailed (about 300-400 words, covering key points, arguments, and conclusions)',
+  }
+
+  const fn = templates[targetLang]
+  if (fn) {
+    const detail = targetLang === 'English' ? detailEn[detailLevel] : detailGuide[detailLevel] || detailEn[detailLevel]
+    return fn(title, truncated, detail)
+  }
+
+  // 兜底：英文模板
+  const detail = detailEn[detailLevel]
+  const langName = targetLang === 'Chinese' ? 'Simplified Chinese' : targetLang
+  return `CRITICAL: You MUST output in ${langName} ONLY.\n\nGenerate a ${detail} summary of the following article in ${langName}. Output ONLY the summary text, no explanations:\n\nTitle：${title}\n\nContent：${truncated}\n\nSummary：`
 }
 
 export async function summarizeArticle(request: SummarizeRequest, callback: StreamCallback): Promise<void> {
@@ -490,7 +527,15 @@ export async function summarizeArticle(request: SummarizeRequest, callback: Stre
 
   const prompt = buildSummarizePrompt(title, content, targetLang, detailLevel)
   const maxTokens = detailLevel === 'compact' ? 300 : detailLevel === 'detailed' ? 1500 : 800
-  const systemPrompt = '你是一个专业的文章摘要助手。'
+  const systemPromptMap: Record<string, string> = {
+    Chinese: '你是一个专业的文章摘要助手。',
+    English: 'You are a professional article summarization assistant. Output ONLY in English.',
+    Japanese: 'あなたはプロの記事要約アシスタントです。日本語のみで出力してください。',
+    Korean: '당신은 전문적인 기사 요약 도우미입니다. 한국어로만 출력하세요.',
+    French: 'Vous êtes un assistant professionnel de résumé d\'article. Sortie en français uniquement.',
+    German: 'Sie sind ein professioneller Artikelzusammenfassungs-Assistent. Nur auf Deutsch ausgeben.',
+  }
+  const systemPrompt = systemPromptMap[targetLang] || `You are a professional article summarization assistant. Output ONLY in ${targetLang}.`
   const totalPrompt = systemPrompt + prompt
 
   try {
@@ -546,9 +591,18 @@ export async function summarizeSelection(request: SelectiveSummarizeRequest, cal
   const maxTokens = detailLevel === 'compact' ? 300 : detailLevel === 'detailed' ? 1500 : 800
 
   try {
+    const sysMap: Record<string, string> = {
+      Chinese: '你是一个专业的文章摘要助手。',
+      English: 'You are a professional article summarization assistant. Output ONLY in English.',
+      Japanese: 'あなたはプロの記事要約アシスタントです。日本語のみで出力してください。',
+      Korean: '당신은 전문적인 기사 요약 도우미입니다. 한국어로만 출력하세요.',
+      French: 'Vous êtes un assistant professionnel de résumé d\'article. Sortie en français uniquement.',
+      German: 'Sie sind ein professioneller Artikelzusammenfassungs-Assistent. Nur auf Deutsch ausgeben.',
+    }
+    const sysPrompt = sysMap[targetLang] || `You are a professional article summarization assistant. Output ONLY in ${targetLang}.`
     const stream = await client.chat.completions.create({
       model,
-      messages: [{ role: 'system', content: '你是一个专业的文章摘要助手。' }, { role: 'user', content: prompt }],
+      messages: [{ role: 'system', content: sysPrompt }, { role: 'user', content: prompt }],
       temperature: getTemperature(model),
       max_tokens: maxTokens,
       stream: true,
@@ -828,11 +882,23 @@ export async function listModels(baseUrl: string, apiKey: string): Promise<impor
 // ============================================================
 
 function buildSelectiveTranslatePrompt(selectedText: string, targetLang: string): string {
-  const langName = targetLang === 'Chinese' ? '简体中文' : targetLang
-  // 只保护图片。链接 [text](url) 保持原样
   const protectedText = protectMedia(selectedText)
   if (!protectedText.trim()) return ''
-  return `Translate the following text to ${langName}. Translate link text but keep URLs unchanged. Keep images unchanged. Output ONLY the translated text. No explanations:\n\n${protectedText}`
+
+  const localeTemplates: Record<string, string> = {
+    Chinese: `将以下文本翻译为简体中文。只输出译文，不要任何解释：\n\n${protectedText}`,
+    Japanese: `以下のテキストを日本語に翻訳してください。訳文のみを出力し、説明は不要：\n\n${protectedText}`,
+    Korean: `다음 텍스트를 한국어로 번역하세요. 번역문만 출력하고 설명은 하지 마세요：\n\n${protectedText}`,
+    French: `Traduisez le texte suivant en français. Sortie uniquement la traduction, sans explications：\n\n${protectedText}`,
+    German: `Übersetzen Sie den folgenden Text ins Deutsche. Nur die Übersetzung ausgeben, keine Erklärungen：\n\n${protectedText}`,
+    English: `Translate the following text to English. Output ONLY the translation, no explanations:\n\n${protectedText}`,
+  }
+
+  if (localeTemplates[targetLang]) {
+    return localeTemplates[targetLang]
+  }
+
+  return `Translate to ${targetLang}. Output ONLY the translation:\n\n${protectedText}`
 }
 
 export async function translateSelection(request: SelectiveTranslateRequest, callback: StreamCallback): Promise<void> {

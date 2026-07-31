@@ -1,13 +1,13 @@
 import { useTranslation } from 'react-i18next'
 import { useStore } from '../store'
 import { useState, useEffect } from 'react'
-import { FileText, Clock, Tag, X, Star, Search, Trash2, Filter } from 'lucide-react'
+import { FileText, Clock, Tag, X, Star, Search, Trash2, Filter, Eye, EyeOff } from 'lucide-react'
 
 export default function ArticleList() {
   const { t } = useTranslation()
   const {
     articles, selectedArticleId, selectArticle, selectedFeedId,
-    currentFilterTagId, setFilterTag, tags, toggleStar, deleteArticle, loadStarredArticles,
+    currentFilterTagId, setFilterTag, tags, toggleStar, toggleArticleRead, deleteArticle, loadStarredArticles,
     searchResults, setSearchResults, jumpToArticle,
     articleTagsMap, fetchArticleTags
   } = useStore()
@@ -258,6 +258,19 @@ export default function ArticleList() {
                   </div>
                 )}
               </div>
+
+              {/* 已读/未读切换 */}
+              <button
+                onClick={(e) => { e.stopPropagation(); toggleArticleRead(article.id) }}
+                className={`flex-shrink-0 p-1 rounded transition-all opacity-0 group-hover:opacity-100 ${
+                  isRead
+                    ? 'text-green-500 hover:text-green-600'
+                    : 'text-gray-300 dark:text-gray-600 hover:text-green-400'
+                }`}
+                title={isRead ? '标记未读' : '标记已读'}
+              >
+                {isRead ? <Eye size={14} /> : <EyeOff size={14} />}
+              </button>
 
               {/* 星标按钮 */}
               <button
