@@ -69,8 +69,77 @@ const turndownService = new TurndownService({
   codeBlockStyle: 'fenced',
   emDelimiter: '*',
   bulletListMarker: '-',
-  // 保留链接和图片
   linkStyle: 'inlined',
+  // ★ 修复代码块换行丢失：设为 false 禁用内置 fence 规则
+  //    内置规则用 textContent（无 <br> 无换行），由自定义规则接管。
+  preformattedCode: false as const,
+})
+
+/**
+ * 解码 HTML 实体。
+ * 使用 RegExp 构造器（拼接字符串）避免格式化器破坏字面量。
+ */
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(new RegExp('&' + 'amp;', 'gi'), '&')
+    .replace(new RegExp('&' + 'lt;', 'gi'), '<')
+    .replace(new RegExp('&' + 'gt;', 'gi'), '>')
+    .replace(new RegExp('&' + 'quot;', 'gi'), '"')
+    .replace(new RegExp('&' + '#0*39;', 'gi'), "'")
+    .replace(new RegExp('&' + '#x0*27;', 'gi'), "'")
+}
+
+/**
+ * ★ 自定义 turndown rule：显式接管所有 <pre><code> 转换。
+ *
+ * 关闭内置 preformattedCode 后，Turndown 不会对 <pre> 做任何特殊处理。
+ * 本规则用 outerHTML 提取原始 HTML → 多阶段正则恢复行结构 → 输出 Markdown 围栏代码块。
+ *
+ * 处理场景：
+ *   - highlight.js 输出：<span class="line">…</span> 按行分隔
+ *   - Prism 输出：<span class="token …">…</span> + 原生 \n
+ *   - 原始 HTML：用 <br> 换行、<p>/<div> 分隔代码行
+ */
+turndownService.addRule('preCodeBlock', {
+  filter: (node) => {
+    return node.nodeName === 'PRE' && !!node.querySelector('code')
+  },
+  replacement: (_content, node) => {
+    const codeEl = node.querySelector('code')
+    const lang = codeEl?.className
+      ?.replace('language-', '')
+      ?.replace('lang-', '')
+      ?.trim() || ''
+
+    // 1. 用 outerHTML 取原始 HTML 字符串
+    const targetEl = (codeEl ?? node) as HTMLElement
+    const outer = targetEl.outerHTML ?? ''
+    // 剥掉外层 <code …> 和 </code>
+    let html = outer.replace(/^<[^>]*>/i, '').replace(/<\/[^>]*>(?:\s*\n?)*$/i, '')
+
+    // 2. 恢复换行结构（优先级从高到低）
+    // 2a. <span[class*="line"]>…</span> → 行分隔符（highlight.js）
+    html = html.replace(/<\/span>\s*<span[^>]*class="[^"]*line[^"]*"[^>]*>/gi, '\n')
+    html = html.replace(/<\/span>\s*<span[^>]*class='[^']*line[^']*'[^>]*>/gi, '\n')
+    // 2b. <br> <br/> <br /> → 换行
+    html = html.replace(/<br\s*\/?>/gi, '\n')
+    // 2c. </p><p…> 或 </div><div…> → 换行
+    html = html.replace(/<\/p>\s*<p[^>]*>/gi, '\n')
+    html = html.replace(/<\/div>\s*<div[^>]*>/gi, '\n')
+    // 2d. </li><li…> → 换行（列表形代码）
+    html = html.replace(/<\/li>\s*<li[^>]*>/gi, '\n')
+
+    // 3. 剥离其余所有 HTML 标签
+    let text = html.replace(/<[^>]*>/g, '')
+
+    // 4. 解码 HTML 实体（< → <, > → >, …）
+    text = decodeHtmlEntities(text)
+
+    // 5. 清理：连续 3+ 个换行 → 最多 2 个，首尾空行去掉
+    text = text.replace(/\n{3,}/g, '\n\n')
+    const trimmed = text.replace(/^\n+|\n+$/g, '')
+    return `\n\n\`\`\`${lang}\n${trimmed}\n\`\`\`\n\n`
+  },
 })
 
 /** 移除 Readability 输出中可能残留的无关元素 */
