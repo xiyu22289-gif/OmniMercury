@@ -203,11 +203,11 @@ export default function ArticleList() {
                   }`}
                 />
               </div>
-              <FileText size={14} className={`flex-shrink-0 mt-0.5 ${isRead ? 'text-gray-300 dark:text-gray-600' : 'text-gray-400 dark:text-gray-400'}`} />
+              <FileText size={14} className={`flex-shrink-0 mt-0.5 ${isRead ? 'text-gray-400 dark:text-gray-500' : 'text-gray-400 dark:text-gray-400'}`} />
               <div className="flex-1 min-w-0">
                 <h3 className={`text-sm leading-snug line-clamp-2 ${
                   isRead
-                    ? 'font-normal text-gray-400 dark:text-gray-500'
+                    ? 'font-normal text-gray-500 dark:text-gray-400'
                     : 'font-semibold text-gray-800 dark:text-gray-200'
                 }`}>
                   {article.title || t('articleList.untitled')}
@@ -215,7 +215,7 @@ export default function ArticleList() {
                 {article.summary && (
                   <p className={`text-xs mt-1 line-clamp-2 ${
                     isRead
-                      ? 'text-gray-400 dark:text-gray-500'
+                      ? 'text-gray-500 dark:text-gray-400'
                       : 'text-gray-500 dark:text-gray-400'
                   }`}>
                     {article.summary}

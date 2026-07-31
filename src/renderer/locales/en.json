@@ -30,7 +30,7 @@
   "reader": {
     "selectArticle": "Select an article to start reading",
     "noContent": "No content",
-    "readerMode": "Reader mode",
+    "readerMode": "Show Original",
     "originalMode": "Original page",
     "openOriginal": "Open original",
     "openInBrowser": "Open in Browser",

@@ -30,7 +30,7 @@
   "reader": {
     "selectArticle": "選擇一篇文章開始閱讀",
     "noContent": "暫無內容",
-    "readerMode": "閱讀模式",
+    "readerMode": "顯示原文",
     "originalMode": "原始網頁",
     "openOriginal": "開啟原文",
     "openInBrowser": "在瀏覽器中開啟原文",

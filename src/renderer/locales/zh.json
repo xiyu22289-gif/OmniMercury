@@ -30,7 +30,7 @@
   "reader": {
     "selectArticle": "选择一篇文章开始阅读",
     "noContent": "暂无内容",
-    "readerMode": "阅读模式",
+    "readerMode": "显示原文",
     "originalMode": "原始网页",
     "openOriginal": "打开原文",
     "openInBrowser": "在浏览器中打开原文",

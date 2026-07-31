@@ -251,7 +251,7 @@ body.eye-care .prose li::marker {
 .dark .article-item:hover { background-color: #1f2937; }
 .article-item.selected { background-color: #eff6ff; border-left: 3px solid #3b82f6; }
 .dark .article-item.selected { background-color: #1e3a5f; }
-.article-item.read { opacity: 0.6; }
+.article-item.read { opacity: 0.75; }
 
 .feed-item { padding: 8px 16px; cursor: pointer; border-radius: 6px; margin: 2px 8px; transition: background-color 0.15s ease; display: flex; align-items: center; gap: 8px; }
 .feed-item:hover { background-color: #e5e7eb; }
@@ -398,7 +398,7 @@ body.eye-care .reader-view .border-b {
 body.eye-care .article-item.selected { border-left: 3px solid #a68a5c !important; }
 body.eye-care .article-item { border-bottom-color: #E6DDC9 !important; }
 body.eye-care .article-item:hover { background-color: #D9C8AA !important; }
-body.eye-care .article-item.read { opacity: 0.55; }
+body.eye-care .article-item.read { opacity: 0.65; }
 body.eye-care .feed-item:hover { background-color: #D9C8AA !important; }
 body.eye-care .feed-item.selected { color: #3C3328 !important; }
 body.eye-care ::-webkit-scrollbar-thumb { background: #D9C8AA !important; }
