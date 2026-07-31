@@ -11,7 +11,6 @@ import type {
   LlmFunctionConfig,
   LlmModelItem,
 } from '../shared/types'
-
 /** OPML 导入进度事件（类型定义同 preload/index.ts） */
 interface OpmlImportProgress {
   current: number
@@ -115,6 +114,11 @@ declare global {
       importOpml: (filePath: string) => Promise<IpcResponse>
       exportOpml: () => Promise<{ success: boolean; filePath?: string; error?: string }>
       onOpmlProgress: (callback: (progress: OpmlImportProgress) => void) => () => void
+
+      // ---- 浏览历史 ----
+      logBrowseHistory: (articleId: number) => Promise<{ success: boolean; error?: string }>
+      getBrowseHistory: (limit?: number) => Promise<{ success: boolean; data?: Array<{ id: number; articleId: number; articleTitle: string; articleLink: string | null; feedTitle: string | null; author: string | null; pubDate: string | null; viewedAt: string }>; error?: string }>
+      clearBrowseHistory: () => Promise<{ success: boolean; error?: string }>
     }
   }
 }

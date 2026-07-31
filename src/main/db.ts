@@ -78,6 +78,15 @@ export const tokenUsage = sqliteTable('token_usage', {
   createdAt: text('created_at').default(sql`(datetime('now'))`),
 });
 
+// ===== M13: 浏览历史 =====
+export const browseHistory = sqliteTable('browse_history', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  articleId: integer('article_id')
+    .notNull()
+    .references(() => articles.id, { onDelete: 'cascade' }),
+  viewedAt: text('viewed_at').default(sql`(datetime('now'))`),
+});
+
 // ============================================================
 // 类型导出
 // ============================================================
@@ -166,6 +175,12 @@ export function initDatabase(dbPath: string): BetterSQLite3Database {
       completion_tokens INTEGER NOT NULL,
       source          TEXT    NOT NULL DEFAULT 'api',
       created_at      TEXT    DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS browse_history (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      article_id  INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+      viewed_at   TEXT    DEFAULT (datetime('now'))
     );
 
     -- FTS5 全文索引（标题 + 正文）
@@ -277,6 +292,19 @@ export function initDatabase(dbPath: string): BetterSQLite3Database {
     }
   } catch {
     // 迁移失败忽略
+  }
+
+  // M13 兼容迁移：browse_history 表
+  try {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS browse_history (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        article_id  INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+        viewed_at   TEXT    DEFAULT (datetime('now'))
+      );
+    `);
+  } catch {
+    // 表已存在，忽略
   }
 
   db = drizzle(sqlite);
@@ -728,6 +756,20 @@ export function insertTokenUsage(record: { model: string; operation: string; pro
     .get();
 }
 
+export type BrowseHistory = typeof browseHistory.$inferSelect;
+export type NewBrowseHistory = typeof browseHistory.$inferInsert;
+
+export interface BrowseHistoryWithArticle {
+  id: number
+  articleId: number
+  articleTitle: string
+  articleLink: string | null
+  feedTitle: string | null
+  author: string | null
+  pubDate: string | null
+  viewedAt: string
+}
+
 export interface TokenStats {
   model: string;
   totalPromptTokens: number;
@@ -784,4 +826,56 @@ export function getTokenStats(days: number = 30): TokenStats[] {
       completion: o.completion,
     })),
   }));
+}
+
+// ============================================================
+// M13: 浏览历史 CRUD
+// ============================================================
+
+/** 记录一次浏览（同一文章多次浏览记录多条，按时间排序即为浏览历史） */
+export function logBrowseHistory(articleId: number): BrowseHistory {
+  return getDb()
+    .insert(browseHistory)
+    .values({ articleId })
+    .returning()
+    .get();
+}
+
+/** 获取浏览历史列表（按浏览时间倒序，限制条数） */
+export function getBrowseHistory(limit = 200): BrowseHistoryWithArticle[] {
+  const sqlite = getRawDb();
+  return sqlite.prepare(`
+    SELECT
+      bh.id,
+      bh.article_id AS articleId,
+      a.title AS articleTitle,
+      a.link AS articleLink,
+      f.title AS feedTitle,
+      a.author,
+      a.pub_date AS pubDate,
+      bh.viewed_at AS viewedAt
+    FROM browse_history bh
+    LEFT JOIN articles a ON a.id = bh.article_id
+    LEFT JOIN feeds f ON f.id = a.feed_id
+    ORDER BY bh.viewed_at DESC
+    LIMIT ?
+  `).all(limit) as BrowseHistoryWithArticle[];
+}
+
+/** 获取最近 N 天内按日期分组的浏览计数 */
+export function getDailyBrowseCounts(days: number = 7): { date: string; count: number }[] {
+  const sqlite = getRawDb();
+  const cutoff = new Date(Date.now() - days * 86400_000).toISOString();
+  return sqlite.prepare(`
+    SELECT date(viewed_at) AS date, COUNT(*) AS count
+    FROM browse_history
+    WHERE viewed_at >= ?
+    GROUP BY date(viewed_at)
+    ORDER BY date DESC
+  `).all(cutoff) as { date: string; count: number }[];
+}
+
+/** 清空浏览历史 */
+export function clearBrowseHistory(): void {
+  getDb().delete(browseHistory).run();
 }

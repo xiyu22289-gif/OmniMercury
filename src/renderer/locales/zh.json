@@ -213,5 +213,13 @@
     "shortcutPrev": "上一篇文章",
     "shortcutNext": "下一篇文章",
     "shortcutFind": "文章内搜索"
+  },
+  "history": {
+    "title": "浏览历史",
+    "empty": "暂无浏览记录",
+    "clear": "清空历史",
+    "clearConfirm": "确定要清空所有浏览历史吗？",
+    "today": "今天",
+    "yesterday": "昨天"
   }
 }

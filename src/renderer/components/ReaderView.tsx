@@ -315,6 +315,7 @@ export default function ReaderView() {
   const fontBtnRef = useRef<HTMLButtonElement>(null)
   const [fontPickerPos, setFontPickerPos] = useState<{ top: number; left: number } | null>(null)
   const [showTagPicker, setShowTagPicker] = useState(false)
+  const [showTagDropdown, setShowTagDropdown] = useState(false)
   // 多选模式：选中的标签 ID 集合
   const [selectedTagIds, setSelectedTagIds] = useState<Set<number>>(new Set())
   // 颜色编辑状态：{ tagId: showColorPicker }
@@ -1534,28 +1535,51 @@ export default function ReaderView() {
               </span>
             ))}
 
-            {/* 管理标签按钮 → 弹出多选面板 */}
-            <button
-              onClick={openTagPicker}
-              className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-white bg-blue-500 hover:bg-blue-600
-                       rounded-full transition-colors shadow-sm"
-              title={t('reader.manageTags')}
-            >
-              <Tag size={11} />
-              <Plus size={10} />
-            </button>
+            {/* 统一标签按钮 → 弹出下拉菜单 */}
+            <div className="relative">
+              <button
+                onClick={() => setShowTagDropdown(!showTagDropdown)}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors shadow-sm
+                  ${showTagDropdown
+                    ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                    : 'text-white bg-blue-500 hover:bg-blue-600'
+                  }`}
+                title={t('reader.addTag')}
+              >
+                <Tag size={13} />
+                <Plus size={11} />
+                <ChevronDown size={11} className={`transition-transform ${showTagDropdown ? 'rotate-180' : ''}`} />
+              </button>
 
-            {/* AI 推荐按钮 */}
-            <button
-              onClick={handleAiSuggest}
-              disabled={aiSuggesting}
-              className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] text-purple-500 hover:text-purple-600
-                       border border-dashed border-purple-300 dark:border-purple-600 rounded-full
-                       hover:border-purple-400 transition-colors disabled:opacity-50"
-            >
-              {aiSuggesting ? <Loader2 size={11} className="animate-spin" /> : <Zap size={11} />}
-              {t('reader.aiRecommend')}
-            </button>
+              {/* 下拉菜单 */}
+              {showTagDropdown && (
+                <div className="absolute top-full left-0 mt-1 z-50 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 w-48 overflow-hidden">
+                  <div className="py-1">
+                    <button
+                      onClick={() => {
+                        setShowTagDropdown(false)
+                        openTagPicker()
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                    >
+                      <Tag size={14} className="text-blue-500 flex-shrink-0" />
+                      <span>{t('reader.addTag')}</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowTagDropdown(false)
+                        handleAiSuggest()
+                      }}
+                      disabled={aiSuggesting}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors disabled:opacity-50"
+                    >
+                      {aiSuggesting ? <Loader2 size={14} className="animate-spin text-purple-500 flex-shrink-0" /> : <Zap size={14} className="text-purple-500 flex-shrink-0" />}
+                      <span>{t('reader.aiRecommend')}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* ===== 标签管理面板 ===== */}

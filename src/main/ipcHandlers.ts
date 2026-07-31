@@ -654,4 +654,37 @@ export function registerIpcHandlers(): void {
       return { success: false, error: err instanceof Error ? err.message : String(err) }
     }
   })
+
+  // ================================================================
+  // M13: 浏览历史
+  // ================================================================
+  ipcMain.handle('history:log', async (_event, articleId: number) => {
+    try {
+      const { logBrowseHistory } = await import('./db')
+      logBrowseHistory(articleId)
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('history:get', async (_event, limit?: number) => {
+    try {
+      const { getBrowseHistory } = await import('./db')
+      const data = getBrowseHistory(limit ?? 200)
+      return { success: true, data }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('history:clear', async () => {
+    try {
+      const { clearBrowseHistory } = await import('./db')
+      clearBrowseHistory()
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
 }

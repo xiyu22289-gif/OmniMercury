@@ -212,5 +212,13 @@
     "shortcutPrev": "上一篇文章",
     "shortcutNext": "下一篇文章",
     "shortcutFind": "文章內搜尋"
+  },
+  "history": {
+    "title": "瀏覽歷史",
+    "empty": "暫無瀏覽記錄",
+    "clear": "清空歷史",
+    "clearConfirm": "確定要清空所有瀏覽歷史嗎？",
+    "today": "今天",
+    "yesterday": "昨天"
   }
 }

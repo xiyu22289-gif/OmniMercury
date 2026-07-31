@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useStore } from '../store'
-import { Rss, Plus, RefreshCw, Trash2, FolderOpen, Upload, Download, AlertCircle, Info, XCircle, Tag, ChevronDown, ChevronRight, Settings, Globe, Star } from 'lucide-react'
+import { Rss, Plus, RefreshCw, Trash2, FolderOpen, Upload, Download, AlertCircle, Info, XCircle, Tag, ChevronDown, ChevronRight, Settings, Globe, Star, Clock } from 'lucide-react'
 import TagManager from './TagManager'
 
 /** 错误码 → 图标 + 颜色映射 */
@@ -198,14 +198,14 @@ export default function Sidebar() {
           className="p-1.5 rounded bg-transparent hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
           title="导入订阅源 (OPML/CSV/TXT/JSON)"
         >
-          <Upload size={14} />
+          <Download size={14} />
         </button>
         <button
           onClick={handleOpmlExport}
           className="p-1.5 rounded bg-transparent hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
           title={t('sidebar.exportOpml')}
         >
-          <Download size={14} />
+          <Upload size={14} />
         </button>
         <button
           onClick={handleRefresh}
@@ -391,6 +391,17 @@ export default function Sidebar() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* 浏览历史入口 */}
+      <div className="border-t border-gray-200 dark:border-gray-700 px-4 py-2">
+        <button
+          onClick={() => useStore.getState().setShowHistory(true)}
+          className="w-full flex items-center gap-2 px-2 py-1.5 text-xs font-medium text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 rounded transition-colors"
+        >
+          <Clock size={13} className="flex-shrink-0" />
+          {t('history.title')}
+        </button>
       </div>
 
       {/* 标签管理器 */}

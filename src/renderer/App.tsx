@@ -6,6 +6,7 @@ import ArticleList from './components/ArticleList'
 import ReaderView from './components/ReaderView'
 import SearchBar from './components/SearchBar'
 import SystemSettings from './components/SystemSettings'
+import HistoryView from './components/HistoryView'
 import ResizeHandle from './components/ResizeHandle'
 import { Menu as MenuIcon, Settings, X, CheckCircle, XCircle, Loader2 } from 'lucide-react'
 
@@ -304,6 +305,9 @@ export default function App() {
 
       {/* 系统设置对话框（统一入口） */}
       <SystemSettings />
+
+      {/* 浏览历史面板 */}
+      <HistoryView />
 
       {/* OPML 导入进度对话框 */}
       {opmlDialogOpen && (

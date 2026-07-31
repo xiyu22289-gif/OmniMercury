@@ -156,6 +156,10 @@ interface AppState {
   setSelectionSummary: (text: string) => void
   setSelectionSummaryLoading: (loading: boolean) => void
 
+  // ---- 浏览历史面板 ----
+  showHistory: boolean
+  setShowHistory: (show: boolean) => void
+
   // ---- M5 标签操作 ----
   fetchTags: () => Promise<void>
   fetchArticleTags: (articleId: number) => Promise<void>
@@ -353,6 +357,9 @@ export const useStore = create<AppState>((set, get) => {
           selectionTranslateLoading: false,
         })
       }
+
+      // 记录浏览历史（不阻塞 UI）
+      window.api.logBrowseHistory(articleId).catch(() => {})
 
       // 自动标记已读：5 秒后标记
       const state2 = get()
@@ -674,6 +681,10 @@ export const useStore = create<AppState>((set, get) => {
     clearSelectedParagraphs: () => set({ selectedParagraphIndices: new Set() }),
     setSelectionSummary: (summary) => set({ selectionSummary: summary }),
     setSelectionSummaryLoading: (loading) => set({ selectionSummaryLoading: loading }),
+
+    // ---- 浏览历史面板 ----
+    showHistory: false,
+    setShowHistory: (show) => set({ showHistory: show }),
 
     // ---- M5 标签操作 ----
     fetchTags: async () => {

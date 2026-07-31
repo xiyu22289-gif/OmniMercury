@@ -203,6 +203,14 @@ const api = {
       ipcRenderer.removeListener('opml:import-progress', handler)
     }
   },
+
+  // ---- 浏览历史 ----
+  logBrowseHistory: (articleId: number): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('history:log', articleId),
+  getBrowseHistory: (limit?: number): Promise<{ success: boolean; data?: import('../main/db').BrowseHistoryWithArticle[]; error?: string }> =>
+    ipcRenderer.invoke('history:get', limit),
+  clearBrowseHistory: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('history:clear'),
 }
 
 contextBridge.exposeInMainWorld('api', api)

@@ -211,5 +211,13 @@
     "shortcutPrev": "Previous article",
     "shortcutNext": "Next article",
     "shortcutFind": "Find in article"
+  },
+  "history": {
+    "title": "Browsing History",
+    "empty": "No browsing history",
+    "clear": "Clear History",
+    "clearConfirm": "Are you sure you want to clear all browsing history?",
+    "today": "Today",
+    "yesterday": "Yesterday"
   }
 }
