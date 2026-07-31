@@ -11,7 +11,7 @@ import {
   Globe, ExternalLink, Sparkles, Languages, Loader, Settings,
   Check, Columns, AlignJustify, Replace, X,
   BookOpen, Monitor, Type, Minus, Plus, ChevronDown, Tag, Zap, Square, CheckSquare, Loader2, PenLine, Download,
-  Search, ArrowUp, ArrowDown, Keyboard
+  Search, ArrowUp, ArrowDown, Keyboard, ArrowLeft
 } from 'lucide-react'
 import NotesPanel from './NotesPanel'
 import ResizeHandle from './ResizeHandle'
@@ -1447,9 +1447,18 @@ export default function ReaderView() {
         {/* ===== 顶部固定区域 ===== */}
         <div className="max-w-3xl mx-auto w-full flex-shrink-0 px-4 pt-3">
           {/* 标题 */}
-          <h1 className="text-2xl font-bold leading-tight mb-2 dark:text-white">
-            {selectedArticle.title || t('articleList.untitled')}
-          </h1>
+          <div className="flex items-center gap-2 mb-2">
+            <button
+              onClick={() => useStore.setState({ selectedArticleId: null, articleContent: null, articleContentHtml: null })}
+              className="flex-shrink-0 p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:text-gray-300 dark:hover:bg-gray-700 transition-colors"
+              title="关闭文章"
+            >
+              <ArrowLeft size={18} />
+            </button>
+            <h1 className="text-2xl font-bold leading-tight dark:text-white">
+              {selectedArticle.title || t('articleList.untitled')}
+            </h1>
+          </div>
 
           {/* 元信息 */}
           <div className="flex items-center gap-3 text-sm text-gray-500 dark:text-gray-400 mb-2 flex-wrap">

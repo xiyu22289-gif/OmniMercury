@@ -276,16 +276,21 @@ export function registerIpcHandlers(): void {
         pubDate: string | null
         createdAt: string | null
         isRead: number | null
+        isStarred: number | null
       }>
 
       if (_useFts) {
         results = fullTextSearch(query.trim(), limit).map(a => ({
           id: a.id, feedId: a.feedId, title: a.title, link: a.link,
           summary: a.summary, translations: a.translations, author: a.author,
-          pubDate: a.pubDate, createdAt: a.createdAt, isRead: a.isRead, isStarred: a.isStarred,
+          pubDate: a.pubDate, createdAt: a.createdAt, isRead: a.isRead, isStarred: a.isStarred ?? 0,
         }))
       } else {
-        results = searchArticles(query.trim(), limit)
+        results = searchArticles(query.trim(), limit).map(a => ({
+          id: a.id, feedId: a.feedId, title: a.title, link: a.link,
+          summary: a.summary, translations: a.translations, author: a.author,
+          pubDate: a.pubDate, createdAt: a.createdAt, isRead: a.isRead, isStarred: (a as any).isStarred ?? 0,
+        }))
       }
 
       const articles: Article[] = results.map(a => ({ id: a.id, feed_id: a.feedId, title: a.title, url: a.link ?? '', author: a.author ?? undefined, summary: a.summary ?? undefined, translations: a.translations ?? undefined, published_at: a.pubDate ?? a.createdAt ?? '', fetched_at: a.createdAt ?? '', is_read: a.isRead === 1, is_starred: a.isStarred === 1 }))

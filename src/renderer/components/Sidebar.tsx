@@ -25,13 +25,16 @@ export default function Sidebar() {
     setOpmlImporting, setOpmlProgress, setOpmlDialogOpen,
     // M5 标签
     tags, currentFilterTagId, setFilterTag, fetchTags, tagArticleCounts,
-    loadStarredArticles, loadAllArticles
+    loadStarredArticles, loadAllArticles,
+    renameFeed
   } = useStore()
 
   const [addUrl, setAddUrl] = useState('')
   const [showAdd, setShowAdd] = useState(false)
   const [showTagSection, setShowTagSection] = useState(true)
   const [showTagManager, setShowTagManager] = useState(false)
+  const [editingFeedId, setEditingFeedId] = useState<number | null>(null)
+  const [editFeedName, setEditFeedName] = useState('')
 
   // 启动时加载标签和计数
   useEffect(() => {
@@ -217,7 +220,7 @@ export default function Sidebar() {
       {showAdd && (
         <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700">
           <input
-            type="url"
+            type="text"
             value={addUrl}
             onChange={(e) => {
               setAddUrl(e.target.value)
@@ -280,7 +283,41 @@ export default function Sidebar() {
             className={`feed-item ${selectedFeedId === feed.id ? 'selected' : ''}`}
           >
             <Rss size={14} className="flex-shrink-0 text-orange-500" />
-            <span className="flex-1 text-sm truncate">{feed.title || feed.url}</span>
+            {editingFeedId === feed.id ? (
+              <input
+                value={editFeedName}
+                onChange={e => setEditFeedName(e.target.value)}
+                onKeyDown={async (e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    const name = editFeedName.trim()
+                    if (name && name !== feed.title) {
+                      await renameFeed(feed.id, name)
+                    }
+                    setEditingFeedId(null)
+                  }
+                  if (e.key === 'Escape') {
+                    setEditingFeedId(null)
+                  }
+                }}
+                onBlur={() => setEditingFeedId(null)}
+                className="flex-1 text-sm px-1 py-0.5 border border-blue-300 dark:border-blue-600 rounded bg-white dark:bg-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                autoFocus
+                onClick={(e) => e.stopPropagation()}
+              />
+            ) : (
+              <span
+                className="flex-1 text-sm truncate"
+                onDoubleClick={(e) => {
+                  e.stopPropagation()
+                  setEditingFeedId(feed.id)
+                  setEditFeedName(feed.title || '')
+                }}
+                title="双击重命名"
+              >
+                {feed.title || feed.url}
+              </span>
+            )}
             <button
               onClick={(e) => handleRemoveFeed(feed.id, e)}
               className="p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 opacity-0 group-hover:opacity-100 hover:opacity-100 transition-opacity"
