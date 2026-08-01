@@ -58,7 +58,7 @@ const FETCH_TIMEOUT = CONTENT_FETCH_TIMEOUT
 
 /** 标准 User-Agent（部分网站会拒绝无 UA 的请求） */
 const USER_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
 
 // ============================================================
 // Turndown 实例（复用，避免反复初始化）
@@ -155,6 +155,276 @@ function sanitizeHtml(html: string): string {
     .replace(/style="[^"]*display\s*:\s*none[^"]*"/gi, '')
     .replace(/style='[^']*display\s*:\s*none[^']*'/gi, '')
     .trim()
+}
+
+// ============================================================
+// 内容清洗：修复截断、格式问题
+// ============================================================
+
+/**
+ * 修复 Markdown 标题格式，确保 `## Title` 前后有空行。
+ * 如果标题紧贴前文（无空行），被 splitIntoParagraphs 合并到上一段，
+ * 导致 Readability 认为正文从标题开始、前面的全是噪音。
+ */
+function preserveMarkdownHeaders(markdown: string): string {
+  // 修复 `## title` 和 `### title` 前缺少空行
+  let result = markdown
+  // 前有空行确保标题独立成段
+  result = result.replace(/([^\n])\n(#{2,3}\s)/g, '$1\n\n$2')
+  // 后有空行确保标题与正文分开
+  result = result.replace(/(#{2,3}\s[^\n]+)\n([^\n#])/g, '$1\n\n$2')
+  return result
+}
+
+/**
+ * 推广区块正则模式 — 使用 ^ 锚点（多行模式），只匹配以关键词开头的行。
+ * 模式按优先级排列，匹配到的第一个段落之后的内容全部移除。
+ *
+ * 不再依赖 indexOf + 手动边界检查；^ 锚点天然确保行首匹配，
+ * ★ / ☆ 等分隔符开头的行不会被匹配（因为正则要求以关键词开头）。
+ */
+const PROMOTIONAL_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
+  { pattern: /^Best\s+iPhone\s+accessories/ims, label: 'Best iPhone accessories' },
+  { pattern: /^Best\s+Android\s+accessories/ims, label: 'Best Android accessories' },
+  { pattern: /^Best\s+iPad\s+accessories/ims, label: 'Best iPad accessories' },
+  { pattern: /^Best\s+Mac\s+accessories/ims, label: 'Best Mac accessories' },
+  { pattern: /^FTC[：:]/ims, label: 'FTC:' },
+  { pattern: /^Best\s+gadgets/ims, label: 'Best gadgets' },
+  { pattern: /^You\s+can\s+find\s+a\s+full\s+list\s+of/ims, label: 'full list' },
+  { pattern: /^You'?re\s+reading\s+9to5Mac/ims, label: '9to5Mac reading' },
+  { pattern: /^Check\s+out\s+our/ims, label: 'Check out our' },
+  { pattern: /^We\s+may\s+earn\s+a\s+commission/ims, label: 'commission' },
+  { pattern: /^affiliate\s+links/ims, label: 'affiliate links' },
+  { pattern: /^免责声明[：:]/ims, label: 'Disclaimer CN' },
+  { pattern: /^Disclaimer[：:]/ims, label: 'Disclaimer' },
+]
+
+/**
+ * 移除文章末尾的推广/推荐区块。
+ *
+ * ★ 防御设计：
+ * - 使用 /^keyword/m 多行锚点，只匹配以关键词开头的行
+ * - ★ ☆ ● 等分隔符开头的行永远不会被匹配（正则不允许 ^ 前有其他字符）
+ * - 仅处理文章末尾 40% 范围内的匹配（正文中间出现不触发）
+ * - 剩余内容 < 500 字符时拒绝截断
+ * - 无匹配时记录日志并原样返回
+ */
+function removePromotionalBlocks(markdown: string): string {
+  const totalLen = markdown.length
+  let bestMatch: { idx: number; label: string; patternName: string } | null = null
+
+  for (const { pattern, label } of PROMOTIONAL_PATTERNS) {
+    let match: RegExpExecArray | null
+    let lastMatch: RegExpExecArray | null = null
+
+    pattern.lastIndex = 0
+    while ((match = pattern.exec(markdown)) !== null) {
+      lastMatch = match
+    }
+
+    if (!lastMatch) continue
+
+    const idx = lastMatch.index
+    const positionRatio = idx / totalLen
+
+    // 仅处理末尾附近的匹配
+    if (positionRatio < 0.60) continue
+
+    // 取最靠后的匹配（截断最少内容）
+    if (!bestMatch || idx > bestMatch.idx) {
+      bestMatch = { idx, label, patternName: pattern.source }
+    }
+  }
+
+  if (!bestMatch) {
+    console.log(`[contentService] removePromotionalBlocks: 未匹配到推广区块（${totalLen} 字符），保留全部内容`)
+    return markdown
+  }
+
+  const { idx, label } = bestMatch
+  const truncated = markdown.slice(0, idx).trimEnd()
+
+  // 安全阀：剩余内容太少则拒绝
+  if (truncated.length < 500) {
+    console.log(
+      `[contentService] removePromotionalBlocks: 拒绝截断 "${label}" @${idx} — ` +
+      `剩余 ${truncated.length} 字符 < 500`
+    )
+    return markdown
+  }
+
+  const positionRatio = (idx / totalLen * 100).toFixed(0)
+  const removalRatio = ((totalLen - truncated.length) / totalLen * 100).toFixed(0)
+  console.log(
+    `[contentService] removePromotionalBlocks: 截断 "${label}" ` +
+    `位置 ${positionRatio}% (${idx}/${totalLen})，移除 ${removalRatio}% ` +
+    `(${totalLen} → ${truncated.length} 字符)`
+  )
+  return truncated
+}
+
+/** 需要额外处理的域名及对应的清洗规则 */
+const DOMAIN_CLEANERS: Record<string, (md: string) => string> = {
+  '9to5mac.com': (md) => {
+    // 移除 "Add 9to5Mac to your Google News feed."
+    return md.replace(/Add\s+9to5Mac\s+to\s+your\s+Google\s+News\s+feed\.?/gi, '').trim()
+  },
+  'www.9to5mac.com': (md) => {
+    return md.replace(/Add\s+9to5Mac\s+to\s+your\s+Google\s+News\s+feed\.?/gi, '').trim()
+  },
+}
+
+/**
+ * 综合内容清洗：依次调用所有清洗函数。
+ * 在 turndown 转换后、存入数据库前调用。
+ */
+function cleanArticleContent(markdown: string, url: string): string {
+  const beforeLen = markdown.length
+  const beforeParaCount = markdown.split(/\n\n+/).filter(p => p.trim()).length
+  let result = markdown
+
+  // 1. 修复 Markdown 标题格式
+  result = preserveMarkdownHeaders(result)
+  const afterHeadersLen = result.length
+  const afterHeadersParaCount = result.split(/\n\n+/).filter(p => p.trim()).length
+
+  // 2. 移除推广区块
+  result = removePromotionalBlocks(result)
+  const afterPromoLen = result.length
+  const afterPromoParaCount = result.split(/\n\n+/).filter(p => p.trim()).length
+
+  // 3. 域名特定清洗
+  try {
+    const hostname = new URL(url).hostname
+    if (DOMAIN_CLEANERS[hostname]) {
+      result = DOMAIN_CLEANERS[hostname](result)
+    }
+  } catch { /* URL 解析失败，跳过域名清洗 */ }
+
+  const afterLen = result.length
+  const afterParaCount = result.split(/\n\n+/).filter(p => p.trim()).length
+
+  // 诊断日志：逐步追踪
+  if (beforeLen !== afterLen || beforeParaCount !== afterParaCount) {
+    console.log(
+      `[contentService] cleanArticleContent (${url}): ` +
+      `总 ${beforeLen}→${afterLen} 字符, ` +
+      `段落 ${beforeParaCount}→afterHeaders=${afterHeadersParaCount}→afterPromo=${afterPromoParaCount}→final=${afterParaCount}`
+    )
+  } else {
+    console.log(
+      `[contentService] cleanArticleContent (${url}): 无需清洗 ` +
+      `(${beforeLen} 字符, ${beforeParaCount} 段)`
+    )
+  }
+
+  return result
+}
+
+// ============================================================
+// 验证页面检测：避免将 Cloudflare/JS 验证页当作正文存储
+// ============================================================
+
+/** 验证页面关键词 — HTML 正文中出现任一组合即判定为验证页 */
+const VERIFICATION_PATTERNS: Array<{ patterns: RegExp[]; label: string }> = [
+  {
+    patterns: [
+      /javascript\s+is\s+disabled/i,
+      /javascript\s+not\s+enabled/i,
+      /请启用\s*Javascript/i,
+      /请启用\s*JavaScript/i,
+      /Please\s+enable\s+JavaScript/i,
+    ],
+    label: 'JavaScript disabled'
+  },
+  {
+    patterns: [
+      /verify\s+you\s+are\s+(a\s+)?(not\s+a\s+)?(human|robot)/i,
+      /人机验证/,
+      /are\s+you\s+a\s+human/i,
+      /prove\s+you\s+are\s+human/i,
+    ],
+    label: 'CAPTCHA / human verification'
+  },
+  {
+    patterns: [
+      /Cloudflare[\s-]*(?:(?:bot|challenge|verification|security|ray\s*id|attention\s*required))/i,
+      /Attention\s+Required!?\s*\|\s*Cloudflare/i,
+      /DDoS\s+protection\s+by\s+Cloudflare/i,
+      /cf-browser-verification/i,
+      /_cf_chl_opt/i,
+    ],
+    label: 'Cloudflare challenge'
+  },
+  {
+    patterns: [
+      /checking\s+your\s+browser/i,
+      /browser\s+check/i,
+      /enable\s+cookies/i,
+      /您的浏览器/,
+      /your\s+browser\s+does\s+not\s+support/i,
+    ],
+    label: 'Browser check'
+  },
+  {
+    patterns: [
+      /enable\s+Javascript[^<>]{0,30}to\s+continue/i,
+      /Javascript[^<>]{0,30}请.*启用/i,
+      /<noscript>.*<\/noscript>/i,
+    ],
+    label: 'noscript / JS required'
+  },
+]
+
+/** 验证页面判定阈值 — HTML 极短 + 命中模式 = 验证页 */
+const VERIFICATION_MAX_HTML_LENGTH = 2000
+
+/**
+ * 检测 HTML 是否为验证/防护页面。
+ * 验证页面通常极短、包含特定警告文本、不含正文。
+ */
+function isVerificationPage(html: string, url: string): { isVerification: boolean; reason: string } {
+  const bodyText = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+  const htmlLen = html.length
+
+  // 极短 HTML — 几乎肯定是验证页/错误页
+  if (htmlLen < 300) {
+    return { isVerification: true, reason: `HTML 过短 (${htmlLen} 字符)，疑似验证/错误页` }
+  }
+
+  // 中等长度 — 需要关键词确认
+  if (htmlLen < VERIFICATION_MAX_HTML_LENGTH) {
+    const hits: string[] = []
+    for (const { patterns, label } of VERIFICATION_PATTERNS) {
+      for (const pattern of patterns) {
+        if (pattern.test(bodyText)) {
+          hits.push(label)
+          break
+        }
+      }
+    }
+
+    if (hits.length > 0) {
+      return {
+        isVerification: true,
+        reason: `疑似验证页面: [${hits.join(', ')}] (HTML ${htmlLen} 字符)`
+      }
+    }
+  }
+
+  // 长 HTML — 检查是否在 <title> 中有验证关键词
+  const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)
+  if (titleMatch) {
+    const title = titleMatch[1].trim()
+    if (/attention\s+required|just\s+a\s+moment|checking\s+your\s+browser|DDOS\s+protection|security\s+check/i.test(title)) {
+      return {
+        isVerification: true,
+        reason: `<title> 包含验证关键词: "${title}"`
+      }
+    }
+  }
+
+  return { isVerification: false, reason: '' }
 }
 
 // ============================================================
@@ -319,8 +589,18 @@ export async function fetchAndCleanArticle(url: string): Promise<ContentResult> 
       timeout: FETCH_TIMEOUT,
       headers: {
         'User-Agent': USER_AGENT,
-        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.5',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Cache-Control': 'max-age=0',
+        'Sec-Ch-Ua': '"Google Chrome";v="120", "Chromium";v="120", "Not?A_Brand";v="99"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Upgrade-Insecure-Requests': '1',
       },
       responseType: 'text',
       // 接受 2xx/3xx，拒绝 4xx/5xx
@@ -341,6 +621,21 @@ export async function fetchAndCleanArticle(url: string): Promise<ContentResult> 
     return {
       contentHtml: `<p>【正文提取失败】${friendlyMsg}<br>链接：<a href="${url}">${url}</a></p>`,
       contentMd: `【正文提取失败】${friendlyMsg}\n\n> 请尝试打开原文链接：${url}`,
+      degraded: true,
+      reason: friendlyMsg,
+    }
+  }
+
+  // ★ 验证页面检测
+  const verification = isVerificationPage(rawHtml, url)
+  if (verification.isVerification) {
+    console.warn(`[contentService] 检测到验证/防护页面 (${url}): ${verification.reason}`)
+    const friendlyMsg =
+      `该网站需要启用 JavaScript 或通过人机验证才能访问内容，请尝试在浏览器中打开原文。\n\n` +
+      `> 检测原因：${verification.reason}`
+    return {
+      contentHtml: `<p>【访问受限】该网站需要启用 JavaScript 或通过人机验证才能访问内容。<br><br>📝 请尝试：<br>1. 在浏览器中打开 <a href="${url}">原文链接</a><br>2. 完成人机验证后再试</p>`,
+      contentMd: `【访问受限】\n\n该网站需要启用 JavaScript 或通过人机验证才能访问内容。\n\n> 原文链接：${url}\n> 原因：${verification.reason}`,
       degraded: true,
       reason: friendlyMsg,
     }
@@ -457,7 +752,15 @@ export async function fetchAndCleanArticle(url: string): Promise<ContentResult> 
     }
   }
 
-  // ---- Step 4.5: 移除截断标记 ----
+  // ---- Step 4.5: 内容清洗（标题格式修复 + 推广区块移除 + 域名特定处理）----
+  const beforeCleanLen = contentMd.length
+  try {
+    contentMd = cleanArticleContent(contentMd, url)
+    console.log(`[contentService] Step 4.5 cleanArticleContent 完成 — ${beforeCleanLen} → ${contentMd.length} 字符`)
+  } catch (err) {
+    console.error(`[contentService] cleanArticleContent 抛出异常 (${url}):`, err)
+    // 清洗失败，保留原始 contentMd
+  }
   contentMd = removeTruncationMarkers(contentMd)
 
   // 空内容检查
@@ -481,114 +784,16 @@ export async function fetchAndCleanArticle(url: string): Promise<ContentResult> 
 }
 
 // ============================================================
-// 截断检测
-// ============================================================
-
-/** 截断检测结果 */
-interface TruncationCheck {
-  truncated: boolean
-  reason: string
-}
-
-/** 强制抓取的域名白名单 */
-const FORCE_FETCH_DOMAINS = new Set([
-  'soulhacker.me',
-  'www.soulhacker.me',
-])
-
-/**
- * 检测内容是否被截断（RSS 摘要等），需要触发完整抓取。
- *
- * 不再使用长度阈值（避免误判短文章），改用精确信号：
- * 0. 域名白名单 — 对特定来源强制抓取
- * 1. RSS 完整内容保护 — content 已有完整 HTML 结构时放行（不重复抓取）
- * 2. 截断标记词 — "Continue reading"、"Read more"、末尾 "..."、"[...]" 等
- * 3. HTML 结构检测 — 无 HTML 标签 + 包含省略号 → 疑似摘要
- */
-function isContentTruncated(
-  contentMd: string | null,
-  contentHtml: string | null,
-  articleUrl: string | null,
-  articleId: number,
-): TruncationCheck {
-  const md = contentMd ?? ''
-  const html = contentHtml ?? ''
-  const combinedText = `${md} ${html}`
-
-  // ---- 规则0: 域名白名单强制抓取 ----
-  if (articleUrl) {
-    try {
-      const hostname = new URL(articleUrl).hostname
-      if (FORCE_FETCH_DOMAINS.has(hostname)) {
-        const reason = `[TRUNC_DETECT] articleId=${articleId} 域名白名单强制抓取: ${hostname}`
-        console.log(reason)
-        return { truncated: true, reason }
-      }
-    } catch { /* URL 解析失败，跳过域名检测 */ }
-  }
-
-  // ---- 规则1: RSS 完整内容保护 ----
-  // 如果 content（原始 HTML）包含结构性标签且长度充足，说明已经是完整抓取结果。
-  // 即使 contentMd 较短（如只有标题的短文章），也不触发重复抓取。
-  if (html.length > 0) {
-    const hasHtmlStructure = /<(p|div|article|section|h[1-6]|table|ul|ol|blockquote|pre|figure|img)\b/i.test(html)
-    if (hasHtmlStructure && html.length > 800) {
-      console.log(
-        `[TRUNC_DETECT] articleId=${articleId} content 已有完整 HTML 结构 ` +
-        `(标签匹配=${hasHtmlStructure}, html.length=${html.length})，跳过截断检测`
-      )
-      return { truncated: false, reason: '' }
-    }
-  }
-
-  // ---- 规则2: 截断标记词 ----
-  const truncationMarkers: Array<{ pattern: RegExp; label: string }> = [
-    { pattern: /Continue\s+reading/i, label: 'Continue reading' },
-    { pattern: /Read\s+more/i, label: 'Read more' },
-    { pattern: /阅读全文/, label: '阅读全文' },
-    { pattern: /阅读更多/, label: '阅读更多' },
-    { pattern: /\.\.\.\s*$/, label: '末尾 "..."' },
-    { pattern: /…\s*$/, label: '末尾 "…"' },
-    { pattern: /\[\.\.\.\]\s*$/, label: '末尾 "[...]"' },
-    { pattern: /\[…\]\s*$/, label: '末尾 "[…]"' },
-  ]
-  for (const { pattern, label } of truncationMarkers) {
-    if (pattern.test(combinedText)) {
-      const reason = `[TRUNC_DETECT] articleId=${articleId} 内容包含截断标记: "${label}"`
-      console.log(reason)
-      return { truncated: true, reason }
-    }
-  }
-
-  // ---- 规则3: HTML 结构检测 ----
-  // 纯文本（无 HTML 标签）且包含省略号 → 很可能是 RSS 摘要片段
-  if (html.trim().length > 0) {
-    const hasHtmlTags = /<[a-zA-Z][^>]*>/i.test(html)
-    if (!hasHtmlTags) {
-      const hasEllipsis = /\.\.\.|…/.test(html)
-      if (hasEllipsis) {
-        const reason = `[TRUNC_DETECT] articleId=${articleId} 纯文本无 HTML 标签且包含省略号，疑似 RSS 摘要 (html.length=${html.length})`
-        console.log(reason)
-        return { truncated: true, reason }
-      }
-    }
-  }
-
-  console.log(
-    `[TRUNC_DETECT] articleId=${articleId} 未检测到截断信号 ` +
-    `(md.length=${md.length}, html.length=${html.length}, hasUrl=${!!articleUrl})`
-  )
-  return { truncated: false, reason: '' }
-}
-
-// ============================================================
 // 带缓存的获取（供 IPC Handler 使用）
 // ============================================================
 
 /**
  * 获取文章正文内容，优先从本地缓存读取，缓存未命中则走清洗流水线。
  *
- * 调用方（ipcHandlers）应使用本函数，它已包含完整的缓存策略和降级逻辑。
+ * 简单逻辑：
+ * 1. 如果 content（HTML）存在且 > 500 字符 → 直接返回缓存（完整内容）
+ * 2. 如果有 link → 抓取完整内容 → 更新 DB → 返回
+ * 3. 没有 link → 返回已有的 content 或 contentMd
  *
  * @param articleId - 文章 ID
  * @param articleUrl - 文章原始链接（清洗流水线需要）
@@ -600,98 +805,93 @@ export async function getOrFetchArticleContent(
   articleUrl: string,
   forceRefresh = false,
 ): Promise<{ content: string; contentHtml?: string; isCached: boolean; degraded?: boolean; reason?: string }> {
-  // 1. 先查本地缓存
-  if (!forceRefresh) {
+  // 1. 查询数据库
+  const row = getDb()
+    .select({
+      id: articlesTable.id,
+      content: articlesTable.content,
+      contentMd: articlesTable.contentMd,
+      link: articlesTable.link,
+    })
+    .from(articlesTable)
+    .where(eq(articlesTable.id, articleId))
+    .get()
+
+  // 2. 非强制刷新时，如果 contentHtml(即 content 列) 存在且 > 500 字符，直接返回
+  if (!forceRefresh && row?.content) {
+    const htmlLen = row.content.length
+    if (htmlLen > 500) {
+      console.log(`[contentService] 缓存命中 articleId=${articleId}, contentHtml=${htmlLen} 字符`)
+      const fixedHtml = resolveImageUrls(row.content, articleUrl)
+      return {
+        content: row.contentMd || '',
+        contentHtml: fixedHtml,
+        isCached: true,
+      }
+    }
+    console.log(`[contentService] contentHtml 过短 (${htmlLen} 字符)，触发完整抓取 articleId=${articleId}`)
+  }
+
+  // 3. 有 link → 抓取完整内容
+  const link = articleUrl || row?.link
+  if (link) {
+    let result: ContentResult
     try {
-      const row = getDb()
-        .select({
-          id: articlesTable.id,
-          contentMd: articlesTable.contentMd,
-          content: articlesTable.content,
-        })
-        .from(articlesTable)
-        .where(eq(articlesTable.id, articleId))
-        .get()
-
-      if (row && row.contentMd) {
-        // ★ 多维截断检测：检查内容长度、截断标记、纯文本/无标签等
-        const { truncated, reason } = isContentTruncated(row.contentMd, row.content, articleUrl || null, articleId)
-        if (truncated) {
-          console.log(`[contentService] ${reason}，自动触发完整抓取`)
-          // 跳过缓存，直接走流水线
-        } else {
-          const htmlLen = row.content?.length ?? 0
-          console.log(`[DIAG] Stage3a: DB缓存命中 — row.content 存在: ${!!row.content}, 长度: ${htmlLen}`)
-          if (row.content) {
-            console.log(`[DIAG] Stage3a: row.content 含 <table: ${row.content.includes('<table')}, 含 \\n: ${row.content.includes('\n')}`)
-            console.log(`[DIAG] Stage3a: row.content 前200字符:`, row.content.slice(0, 200))
-          }
-          const fixedHtml = row.content ? resolveImageUrls(row.content, articleUrl) : undefined
-          return { content: row.contentMd, contentHtml: fixedHtml, isCached: true }
-        }
-      }
-      // 有原始 content 但无 contentMd（RSS 原始摘要等）
-      if (row && row.content && !row.contentMd) {
-        // ★ 多维截断检测：对 RSS 原始内容也应用同样规则
-        const { truncated, reason } = isContentTruncated(null, row.content, articleUrl || null, articleId)
-        if (truncated) {
-          console.log(`[contentService] ${reason}，自动触发完整抓取`)
-          // 跳过此路径，直接走清洗流水线
-        } else {
-          const fixedHtml = resolveImageUrls(row.content, articleUrl)
-          try {
-            const md = turndownService.turndown(row.content)
-            if (md.trim()) {
-              console.log(`[DIAG] Stage1: 缓存有原始content无contentMd — 返回 contentHtml=resolveImageUrls结果, 长度=${fixedHtml.length}`)
-              return { content: md, contentHtml: fixedHtml, isCached: true, degraded: true, reason: '使用 RSS 原始内容（未经清洗）' }
-            }
-          } catch {
-            // turndown 失败，继续走流水线
-          }
-          console.log(`[DIAG] Stage1: turndown失败或为空 — 返回 contentHtml=resolveImageUrls结果, 长度=${fixedHtml.length}`)
-          return { content: row.content, contentHtml: fixedHtml, isCached: true, degraded: true, reason: '使用 RSS 原始内容' }
-        }
-      }
+      console.log(`[contentService] 开始抓取 articleId=${articleId} url=${link}`)
+      result = await fetchAndCleanArticle(link)
+      console.log(`[contentService] 抓取完成 — contentMd=${result.contentMd.length} 字符, contentHtml=${('contentHtml' in result ? result.contentHtml : '').length} 字符`)
     } catch (err) {
-      console.error(`[contentService] 查询本地缓存失败 (articleId=${articleId})：`, err)
-      // 继续尝试流水线
-    }
-  }
-
-  // 2. 走清洗流水线
-  const result = await fetchAndCleanArticle(articleUrl)
-
-  // 3. 将结果写入数据库缓存
-  try {
-    // ★ 诊断日志 2: 写入 DB 前检查 contentHtml
-    const htmlToStore = 'contentHtml' in result ? result.contentHtml : undefined
-    console.log(`[DIAG] 写入DB前 — contentHtml 存在: ${!!htmlToStore}, 长度: ${htmlToStore?.length ?? 0}`)
-    if (htmlToStore) {
-      console.log(`[DIAG] 写入DB前 — contentHtml 前300字符:`, htmlToStore.slice(0, 300))
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error(`[contentService] 抓取失败 articleId=${articleId}:`, msg)
+      // 降级：返回已有内容
+      return {
+        content: row?.contentMd || row?.content || `【正文抓取失败】${msg}`,
+        contentHtml: row?.content || undefined,
+        isCached: false,
+        degraded: true,
+        reason: `抓取失败：${msg}`,
+      }
     }
 
-    getDb()
-      .update(articlesTable)
-      .set({
-        content: htmlToStore,
-        contentMd: result.contentMd,
-      })
-      .where(eq(articlesTable.id, articleId))
-      .run()
-  } catch (err) {
-    console.error(`[contentService] 更新文章缓存失败 (articleId=${articleId})：`, err)
-    // 缓存失败不影响返回
-  }
-
-  if ('degraded' in result && result.degraded) {
-    return {
-      content: result.contentMd,
-      contentHtml: result.contentHtml,
-      isCached: false,
-      degraded: true,
-      reason: result.reason,
+    // 4. 写入数据库（验证页面除外）
+    const isVerification = 'degraded' in result && result.degraded && result.reason.includes('验证')
+    if (!isVerification) {
+      try {
+        const htmlToStore = 'contentHtml' in result ? result.contentHtml : undefined
+        getDb()
+          .update(articlesTable)
+          .set({ content: htmlToStore, contentMd: result.contentMd })
+          .where(eq(articlesTable.id, articleId))
+          .run()
+        console.log(`[contentService] DB 写入成功 articleId=${articleId}`)
+      } catch (err) {
+        console.error(`[contentService] DB 写入失败 articleId=${articleId}:`, err)
+      }
+    } else {
+      console.log(`[contentService] 跳过 DB 写入 — 验证页面不缓存`)
     }
+
+    if ('degraded' in result && result.degraded) {
+      return {
+        content: result.contentMd,
+        contentHtml: result.contentHtml,
+        isCached: false,
+        degraded: true,
+        reason: result.reason,
+      }
+    }
+
+    return { content: result.contentMd, contentHtml: result.contentHtml, isCached: false }
   }
 
-  return { content: result.contentMd, contentHtml: result.contentHtml, isCached: false }
+  // 5. 没有 link — 返回已有内容
+  const fallbackContent = row?.contentMd || row?.content || '(暂无内容)'
+  console.log(`[contentService] 无 link，返回已有内容 articleId=${articleId}, length=${fallbackContent.length}`)
+  return {
+    content: fallbackContent,
+    contentHtml: row?.content || undefined,
+    isCached: true,
+    degraded: true,
+    reason: '无原文链接，使用已有内容',
+  }
 }

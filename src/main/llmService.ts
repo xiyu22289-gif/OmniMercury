@@ -258,44 +258,86 @@ function getTemperature(model: string): number {
 }
 
 // ============================================================
-// 占位符保护（仅图片 — 链接保持原样，LLM 天生会处理 Markdown 链接）
+// 块级占位符保护 — 翻译时保护表格/代码块/图片，避免结构损坏
 // ============================================================
 
-const imgPlaceholderMap = new Map<string, string>()
-let imgCounter = 0
+const blockPlaceholderMap = new Map<string, string>()
+let blockCounters = { table: 0, code: 0, img: 0 }
 
 /**
- * 只保护图片（替换为占位符，避免 LLM 尝试"翻译"图片 URL）。
- * 链接 [text](url) 不做任何处理 — LLM 会将显示文本翻译并保留 URL。
+ * 保护不可翻译的块级元素，替换为占位符：
+ * - <table>...</table> → __BLOCK_T_N__（保留结构，不翻译）
+ * - <pre>...</pre> 或 Markdown ``` ``` → __BLOCK_C_N__（代码不翻译）
+ * - <img ...> 或 Markdown ![...](...) → __BLOCK_I_N__（图片不翻译）
+ * - 链接 [text](url) 不保护 — LLM 保留 URL 并翻译显示文本
+ *
+ * 返回保护后的文本。调用 restoreBlocks 还原。
  */
-function protectMedia(text: string): string {
-  imgPlaceholderMap.clear()
-  imgCounter = 0
+function protectBlocks(text: string): string {
+  blockPlaceholderMap.clear()
+  blockCounters = { table: 0, code: 0, img: 0 }
+  let result = text
 
-  // Markdown 图片
-  text = text.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (match) => {
-    const key = `IMG_PH_${imgCounter++}`
-    imgPlaceholderMap.set(key, match)
-    return key
-  })
-  // HTML img 标签
-  text = text.replace(/<img[^>]*\/?>/gi, (match) => {
-    const key = `IMG_PH_${imgCounter++}`
-    imgPlaceholderMap.set(key, match)
-    return key
+  // 1. 表格：<table>...</table>
+  result = result.replace(/<table[\s>][\s\S]*?<\/table>/gi, (match) => {
+    const key = `__BLOCK_T_${blockCounters.table++}__`
+    blockPlaceholderMap.set(key, match)
+    return `\n${key}\n`
   })
 
-  return text
-}
+  // 2. 代码块：<pre>...<code>...</code>...</pre>
+  result = result.replace(/<pre[\s>][\s\S]*?<\/pre>/gi, (match) => {
+    const key = `__BLOCK_C_${blockCounters.code++}__`
+    blockPlaceholderMap.set(key, match)
+    return `\n${key}\n`
+  })
+  // Markdown 围栏代码块
+  result = result.replace(/```[^\n]*[\s\S]*?```/g, (match) => {
+    const key = `__BLOCK_C_${blockCounters.code++}__`
+    blockPlaceholderMap.set(key, match)
+    return `\n${key}\n`
+  })
 
-/** 恢复图片占位符为原始 Markdown/HTML。链接无需恢复。 */
-function restoreMedia(translated: string): string {
-  let result = translated
-  for (const [key, original] of imgPlaceholderMap) {
-    result = result.split(key).join(original)
+  // 3. 图片：HTML <img>
+  result = result.replace(/<img[^>]*\/?>/gi, (match) => {
+    const key = `__BLOCK_I_${blockCounters.img++}__`
+    blockPlaceholderMap.set(key, match)
+    return key
+  })
+  // Markdown 图片 ![alt](url)
+  result = result.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (match) => {
+    const key = `__BLOCK_I_${blockCounters.img++}__`
+    blockPlaceholderMap.set(key, match)
+    return key
+  })
+
+  const total = blockCounters.table + blockCounters.code + blockCounters.img
+  if (total > 0) {
+    const parts: string[] = []
+    if (blockCounters.table > 0) parts.push(`table ${blockCounters.table}`)
+    if (blockCounters.code > 0) parts.push(`code ${blockCounters.code}`)
+    if (blockCounters.img > 0) parts.push(`img ${blockCounters.img}`)
+    console.log(`[llmService] protectBlocks: 保护了 ${total} 个块 (${parts.join(', ')})`)
   }
+
   return result
 }
+
+/** 还原所有被保护的块级元素 */
+function restoreBlocks(translated: string): string {
+  let result = translated
+  for (const [key, original] of blockPlaceholderMap) {
+    // 占位符可能被 LLM 添加空格或换行，用宽松匹配
+    result = result.split(key).join(original)
+    // 也匹配被空白包裹的情况
+    result = result.replace(new RegExp(`\\s*${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*`, 'g'), original)
+  }
+  return result.trim()
+}
+
+/** 兼容旧接口：protectMedia = protectBlocks, restoreMedia = restoreBlocks */
+const protectMedia = protectBlocks
+const restoreMedia = restoreBlocks
 
 // ============================================================
 // 错误分类（增强容错：将原始异常归类为结构化错误类型）
@@ -427,7 +469,7 @@ function stripExtraParagraphs(text: string): string {
 
 function buildParagraphTranslatePrompt(paragraph: string, targetLang: string): string {
   const protectedText = protectMedia(paragraph)
-  const plainText = protectedText.replace(/<[^>]+>/g, '').replace(/IMG_PH_\d+/g, '').trim()
+  const plainText = protectedText.replace(/<[^>]+>/g, '').replace(/__BLOCK_[TCI]_\d+__/g, '').trim()
   if (!plainText) return ''
   const isHtml = isHtmlContent(paragraph)
 

@@ -146,10 +146,20 @@ export function registerIpcHandlers(): void {
       }
 
       console.log(`[DIAG] forceRefresh: 强制重新抓取 articleId=${articleId}, url=${article.link}`)
-      const result = await getOrFetchArticleContent(articleId, article.link, true)
-      return {
-        type: 'get_article_content',
-        payload: { error: 0, content: { id: articleId, content: result.content, contentHtml: result.contentHtml }, message: result.degraded ? result.reason : undefined }
+      try {
+        const result = await getOrFetchArticleContent(articleId, article.link, true)
+        console.log(`[DIAG] forceRefresh: IPC 返回 — content.length=${result.content?.length ?? 0}, contentHtml.length=${result.contentHtml?.length ?? 0}, degraded=${!!result.degraded}`)
+        return {
+          type: 'get_article_content',
+          payload: { error: 0, content: { id: articleId, content: result.content, contentHtml: result.contentHtml }, message: result.degraded ? result.reason : undefined }
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error(`[ipcHandlers] forceRefresh 异常 (articleId=${articleId}):`, msg)
+        return {
+          type: 'get_article_content',
+          payload: { error: 0, content: { id: articleId, content: `【刷新失败】${msg}`, contentHtml: `<p>【刷新失败】${msg}</p>` }, message: msg }
+        }
       }
     }
   )

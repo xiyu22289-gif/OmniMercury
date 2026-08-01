@@ -11,7 +11,7 @@ import {
   Globe, ExternalLink, Sparkles, Languages, Loader, Settings,
   Check, Columns, AlignJustify, Replace, X,
   BookOpen, Monitor, Type, Minus, Plus, ChevronDown, Tag, Zap, Square, CheckSquare, Loader2, PenLine, Download,
-  Search, ArrowUp, ArrowDown, Keyboard, ArrowLeft, MessageCircle, Send, Highlighter, Eraser
+  Search, ArrowUp, ArrowDown, Keyboard, ArrowLeft, MessageCircle, Send, Highlighter, Eraser, RefreshCw
 } from 'lucide-react'
 import NotesPanel from './NotesPanel'
 import ResizeHandle from './ResizeHandle'
@@ -151,14 +151,20 @@ function NewTabTranslation({
   const [dividerPos, setDividerPos] = useState(50)
   const isDragging = useRef(false)
 
-  const handleMouseDown = useCallback(() => { isDragging.current = true }, [])
+  const handleMouseDown = useCallback(() => {
+    isDragging.current = true
+    document.body.style.userSelect = 'none'
+  }, [])
 
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
       if (!isDragging.current) return
       setDividerPos(Math.max(20, Math.min(80, (e.clientX / window.innerWidth) * 100)))
     }
-    const onUp = () => { isDragging.current = false }
+    const onUp = () => {
+      isDragging.current = false
+      document.body.style.userSelect = ''
+    }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
     return () => {
@@ -616,10 +622,78 @@ export default function ReaderView() {
   const [selectSummaryLang, setSelectSummaryLang] = useState('Chinese')
   const [selectSummaryDetail, setSelectSummaryDetail] = useState<'compact' | 'medium' | 'detailed'>('medium')
 
+  // ============ 选择文本摘要（工具栏按钮） ============
+  const [selectedTextSummary, setSelectedTextSummary] = useState('')
+  const [selectedTextSummaryLoading, setSelectedTextSummaryLoading] = useState(false)
+  const selectedTextSummaryAnchorRef = useRef<HTMLDivElement | null>(null)
+  const selectedTextSummaryLoadingRef = useRef(false)
+  useEffect(() => { selectedTextSummaryLoadingRef.current = selectedTextSummaryLoading }, [selectedTextSummaryLoading])
+
+  /** 对选中文本生成摘要 */
+  const handleSelectionTextSummary = useCallback(async () => {
+    if (!selectedArticleId || selectedTextSummaryLoading) return
+    const sel = window.getSelection()
+    const text = sel?.toString().trim() ?? ''
+    if (!text || text.length < 20) {
+      setError('请至少选中 20 个字符再生成摘要')
+      return
+    }
+    if (text.length > 5000) {
+      setError('选中文本超过 5000 字符，请缩小选区')
+      return
+    }
+
+    // 清除之前的摘要锚点
+    if (selectedTextSummaryAnchorRef.current) {
+      selectedTextSummaryAnchorRef.current.remove()
+      selectedTextSummaryAnchorRef.current = null
+    }
+    setSelectedTextSummary('')
+    setSelectedTextSummaryLoading(true)
+    setShowFloatBtn(false)
+
+    // 在选区后插入锚点
+    try {
+      const range = sel!.getRangeAt(0)
+      const anchor = document.createElement('div')
+      anchor.id = '__selection_text_summary_anchor__'
+      if (range.endContainer.nodeType === Node.TEXT_NODE) {
+        const endParent = range.endContainer.parentNode
+        endParent?.insertBefore(anchor, range.endContainer.nextSibling)
+      } else {
+        range.endContainer.appendChild(anchor)
+      }
+      selectedTextSummaryAnchorRef.current = anchor
+    } catch { /* 插入锚点失败，不影响摘要 */ }
+
+    try {
+      const art = useStore.getState().articles.find(a => a.id === selectedArticleId)
+      await window.api.summarizeSelection(
+        selectedArticleId,
+        art?.title || '',
+        [text],
+        'Chinese',
+        'medium',
+      )
+    } catch (err) {
+      setError(String(err))
+      setSelectedTextSummaryLoading(false)
+    }
+  }, [selectedArticleId, selectedTextSummaryLoading])
+
   /** 生成选中段落摘要 */
   const handleSelectiveSummarize = useCallback(async () => {
     if (!selectedArticleId || selectionSummaryLoading) return
-    const c = useStore.getState().articleContent || ''
+    const state = useStore.getState()
+    // ★ 优先用 articleContentHtml 提取干净文本，确保段落索引与渲染一致
+    let c = state.articleContent || ''
+    if (state.articleContentHtml) {
+      try {
+        const doc = new DOMParser().parseFromString(state.articleContentHtml, 'text/html')
+        doc.querySelectorAll('script, style').forEach(el => el.remove())
+        c = (doc.body.textContent || '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim() || c
+      } catch { /* fall through */ }
+    }
     const paras = splitContent(c)
     const indices = [...selectedParagraphIndices].sort((a, b) => a - b)
     if (indices.length === 0) return
@@ -806,7 +880,17 @@ export default function ReaderView() {
   /** AI 问答：发送问题 */
   const handleAskQuestion = useCallback(async () => {
     const q = qaQuestionRef.current.trim(); if (!selectedArticleIdRef.current || !q || qaStreamLoading) return
-    const c = useStore.getState().articleContent || ''; const a = useStore.getState().articles.find(x => x.id === selectedArticleIdRef.current)
+    const state = useStore.getState()
+    // ★ 优先用 articleContentHtml 提取干净文本，避免 JSON-LD/GA 杂讯
+    let c = state.articleContent || ''
+    if (state.articleContentHtml) {
+      try {
+        const doc = new DOMParser().parseFromString(state.articleContentHtml, 'text/html')
+        doc.querySelectorAll('script, style').forEach(el => el.remove())
+        c = (doc.body.textContent || '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim() || c
+      } catch { /* fall through */ }
+    }
+    const a = state.articles.find(x => x.id === selectedArticleIdRef.current)
     qaQuestionRef.current = ''; setQaQuestion(''); resetQaStream(); useStore.setState({ qaStreamLoading: true })
     try { await window.api.askQuestion(selectedArticleIdRef.current, c, a?.title || '', q, i18n.language) } catch (err) { useStore.setState({ qaStream: String(err), qaStreamLoading: false }) }
   }, [qaStreamLoading])
@@ -879,6 +963,7 @@ export default function ReaderView() {
   const isTranslating = translateLoading || hasTranslation
   const hasSummary = summarizingArticleId === selectedArticleId && summaryStream.trim()
 
+  // ★ 当前选中的文章对象 — 必须在所有使用它的 callbacks 之前定义
   const selectedArticle = articles.find(a => a.id === selectedArticleId)
 
   // ★ 提取文章的基础 URL，用于解析相对路径的图片链接
@@ -891,6 +976,26 @@ export default function ReaderView() {
       return null
     }
   }, [selectedArticle?.url])
+
+  // ★ 翻译/摘要用的干净文本：优先从 articleContentHtml（已清洗 HTML）提取，避免 JSON-LD/GA 杂讯
+  const cleanArticleText = useMemo(() => {
+    if (articleContentHtml) {
+      try {
+        const doc = new DOMParser().parseFromString(articleContentHtml, 'text/html')
+        doc.querySelectorAll('script, style').forEach(el => el.remove())
+        const text = doc.body.textContent || ''
+        return text.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
+      } catch {
+        return articleContentHtml
+          .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+          .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+          .replace(/<[^>]+>/g, '\n')
+          .replace(/\n{3,}/g, '\n\n')
+          .trim()
+      }
+    }
+    return articleContent || ''
+  }, [articleContentHtml, articleContent])
 
   /** markdownComponents — 使用 articleBaseUrl 闭包传递给 SafeImage，覆盖关键 HTML 元素渲染 */
   const markdownComponents = useMemo(() => ({
@@ -1070,12 +1175,23 @@ export default function ReaderView() {
           else if ('message' in chunk) useStore.setState({ qaStream: chunk.message, qaStreamLoading: false })
         } else if (chunk.type === 'selectiveSummarize') {
           if (chunk.articleId !== selectedArticleIdRef.current) return
-          if ('delta' in chunk) {
-            useStore.setState(state => ({ selectionSummary: state.selectionSummary + chunk.delta }))
-          } else if ('fullText' in chunk) {
-            setSelectionSummaryLoading(false)
+          if (selectedTextSummaryLoadingRef.current) {
+            // ★ 工具栏文本选定摘要路径
+            if ('delta' in chunk) {
+              setSelectedTextSummary(prev => prev + chunk.delta)
+            } else if ('fullText' in chunk) {
+              setSelectedTextSummaryLoading(false)
+            }
+            else if ('message' in chunk) { setError(chunk.message); setSelectedTextSummaryLoading(false); if (chunk.detail) setErrorDetail(chunk.detail) }
+          } else {
+            // 复选框段落摘要路径
+            if ('delta' in chunk) {
+              useStore.setState(state => ({ selectionSummary: state.selectionSummary + chunk.delta }))
+            } else if ('fullText' in chunk) {
+              setSelectionSummaryLoading(false)
+            }
+            else if ('message' in chunk) { setError(chunk.message); setSelectionSummaryLoading(false); if (chunk.detail) setErrorDetail(chunk.detail) }
           }
-          else if ('message' in chunk) { setError(chunk.message); setSelectionSummaryLoading(false); if (chunk.detail) setErrorDetail(chunk.detail) }
         }
       })
     }
@@ -1254,13 +1370,19 @@ export default function ReaderView() {
 
   // ============ 拖拽事件 ============
 
-  const handleDividerMouseDown = useCallback(() => { isDragging.current = true }, [])
+  const handleDividerMouseDown = useCallback(() => {
+    isDragging.current = true
+    document.body.style.userSelect = 'none'
+  }, [])
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
       if (!isDragging.current) return
       setDividerPos(Math.max(20, Math.min(80, (e.clientX / window.innerWidth) * 100)))
     }
-    const onUp = () => { isDragging.current = false }
+    const onUp = () => {
+      isDragging.current = false
+      document.body.style.userSelect = ''
+    }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
     return () => {
@@ -1269,13 +1391,22 @@ export default function ReaderView() {
     }
   }, [])
 
-  const handleSummaryDividerDown = useCallback(() => { isSummaryDragging.current = true }, [])
+  const handleSummaryDividerDown = useCallback(() => {
+    isSummaryDragging.current = true
+    document.body.style.userSelect = 'none'
+    document.body.style.cursor = 'col-resize'
+  }, [])
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
       if (!isSummaryDragging.current) return
-      setSummaryPanelWidth(Math.max(20, Math.min(60, (e.clientX / window.innerWidth) * 100)))
+      // 摘要面板在右侧，宽度 = 100 - e.clientX 占窗口比例
+      setSummaryPanelWidth(Math.max(20, Math.min(60, 100 - (e.clientX / window.innerWidth) * 100)))
     }
-    const onUp = () => { isSummaryDragging.current = false }
+    const onUp = () => {
+      isSummaryDragging.current = false
+      document.body.style.userSelect = ''
+      document.body.style.cursor = ''
+    }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
     return () => {
@@ -1286,21 +1417,34 @@ export default function ReaderView() {
 
   // ============ 事件处理 ============
 
-  const handleSummarize = useCallback(async (targetLang: string) => {
+  const handleSummarize = useCallback(async (targetLang: string, force = false) => {
     if (!selectedArticleId || !selectedArticle) return
     if (summaryLoading) return
 
-    // 缓存命中检查：translations._summary 存储了已生成的 AI 摘要 + 语言
-    if (selectedArticle.translations) {
+    // force 为 true 时清除缓存，强制重新生成
+    if (force && selectedArticle.translations) {
+      try {
+        const transMap: Record<string, unknown> = JSON.parse(selectedArticle.translations)
+        delete transMap._summary
+        const updatedStr = JSON.stringify(transMap)
+        // 更新 store 中的 article
+        useStore.setState(s => ({
+          articles: s.articles.map(a =>
+            a.id === selectedArticleId ? { ...a, translations: updatedStr } : a
+          )
+        }))
+      } catch { /* 清除失败，忽略 */ }
+    }
+
+    // 缓存命中检查（非强制模式）
+    if (!force && selectedArticle.translations) {
       try {
         const transMap: Record<string, unknown> = JSON.parse(selectedArticle.translations)
         const cached = transMap._summary as { text: string; lang: string; detailLevel?: string } | undefined
         if (cached && cached.text && cached.lang === targetLang && (cached.detailLevel || 'medium') === summaryDetailLevel) {
-          // 命中缓存：直接恢复摘要，不调用 API
           resetSummary()
           setSummarizingArticleId(selectedArticleId)
           setSummaryLangLabel(LANG_LABEL_MAP[targetLang] || targetLang)
-          // 逐字恢复（模拟流式，也可直接 setState）
           useStore.setState({ summaryStream: cached.text })
           return
         }
@@ -1314,14 +1458,14 @@ export default function ReaderView() {
     setSummaryLoading(true)
     setSummaryLangLabel(LANG_LABEL_MAP[targetLang] || targetLang)
     try {
-      const c = articleContent || selectedArticle.summary || ''
+      const c = cleanArticleText || selectedArticle.summary || ''
       if (!c) { setError('文章无内容'); setSummaryLoading(false); return }
       await window.api.summarize(selectedArticleId, c, selectedArticle.title, targetLang, summaryDetailLevel)
     } catch (err) {
       setError(String(err))
       setSummaryLoading(false)
     }
-  }, [selectedArticleId, selectedArticle, articleContent, summaryLoading, summaryDetailLevel])
+  }, [selectedArticleId, selectedArticle, cleanArticleText, summaryLoading, summaryDetailLevel])
 
   const confirmSummary = useCallback((lang: string) => {
     setShowSummaryLangPicker(false)
@@ -1447,7 +1591,7 @@ export default function ReaderView() {
     setAiSuggestions([])
     setAiCheckedNames(new Set())
     try {
-      const content = articleContent || selectedArticle.summary || ''
+      const content = cleanArticleText || selectedArticle.summary || ''
       console.log('[ReaderView] AI 推荐 — 标题:', selectedArticle.title, '内容长度:', content.length)
       const currentNames = (articleTagsMap[selectedArticle.id] || []).map(t => t.name)
       const res = await window.api.suggestTagsFromAI(selectedArticle.title, content, currentNames)
@@ -1511,12 +1655,27 @@ export default function ReaderView() {
     }
   }, [selectedArticleId, aiCheckedNames, batchAddTagsToArticle, fetchTags])
 
-  const handleStartTranslate = useCallback(async (targetLang: string) => {
+  const handleStartTranslate = useCallback(async (targetLang: string, force = false) => {
     if (!selectedArticleId || !selectedArticle) return
     if (translateLoading) return
     setShowTranslateLangPicker(false)
 
-    const transStr = selectedArticle.translations
+    // force 为 true 时清除该语言的翻译缓存
+    if (force && selectedArticle.translations) {
+      try {
+        const transMap: Record<string, unknown> = JSON.parse(selectedArticle.translations)
+        delete transMap[targetLang]
+        delete transMap[targetLang + '_complete']
+        // 更新 store
+        useStore.setState(s => ({
+          articles: s.articles.map(a =>
+            a.id === selectedArticleId ? { ...a, translations: JSON.stringify(transMap) } : a
+          )
+        }))
+      } catch { /* 清除失败，忽略 */ }
+    }
+
+    const transStr = force ? '' : selectedArticle.translations
     const transMap: Record<string, unknown> = {}
     if (transStr) {
       try { Object.assign(transMap, JSON.parse(transStr)) } catch {}
@@ -1524,18 +1683,21 @@ export default function ReaderView() {
     console.log('[缓存] 检查:', JSON.stringify({
       articleId: selectedArticleId,
       hasTranslations: !!transStr,
+      force,
       v: transMap._v,
       keys: Object.keys(transMap).filter(k => k !== '_v' && k !== '_summary'),
       targetLang,
+      contentSource: articleContentHtml ? 'articleContentHtml' : 'articleContent',
+      contentLen: cleanArticleText.length,
     }))
 
-    // ★ 翻译缓存检查
-    if (transMap._v === 2 && Array.isArray(transMap[targetLang]) && (transMap[targetLang] as any[]).length > 0) {
+    // ★ 翻译缓存检查（非强制模式）
+    if (!force && transMap._v === 2 && Array.isArray(transMap[targetLang]) && (transMap[targetLang] as any[]).length > 0) {
       const cached = transMap[targetLang] as string[]
       const isComplete = !!transMap[targetLang + '_complete']
       if (isComplete) {
         console.log(`[缓存] ✅ 命中 ${targetLang}，${cached.length} 段（已标记完整）`)
-        frozenOriginalParagraphsRef.current = splitContent(articleContent || '')
+        frozenOriginalParagraphsRef.current = splitContent(cleanArticleText)
         translatingRef.current = true
         translateTargetLangRef.current = targetLang
         setTranslateLoading(true)
@@ -1545,7 +1707,7 @@ export default function ReaderView() {
       }
       // 缓存未标记完整 — 先加载已有，再补全新翻译
       console.log(`[缓存] ⚠️ 缓存未标记完整（${cached.length} 段），先加载，再补全`)
-      frozenOriginalParagraphsRef.current = splitContent(articleContent || '')
+      frozenOriginalParagraphsRef.current = splitContent(cleanArticleText)
       translatingRef.current = true
       translateTargetLangRef.current = targetLang
       setTranslateLoading(true)
@@ -1554,9 +1716,8 @@ export default function ReaderView() {
       while (filled.length < totalParas) filled.push('')
       useStore.setState({ paragraphTranslations: filled })
       try {
-        const c = articleContent || selectedArticle.summary || ''
-        if (!c.trim()) { setError('文章无内容'); setTranslateLoading(false); return }
-        await window.api.translateParagraphs(selectedArticleId, c, selectedArticle.title, targetLang)
+        if (!cleanArticleText.trim()) { setError('文章无内容'); setTranslateLoading(false); return }
+        await window.api.translateParagraphs(selectedArticleId, cleanArticleText, selectedArticle.title, targetLang)
       } catch (err) {
         setError(String(err))
         setTranslateLoading(false)
@@ -1571,16 +1732,15 @@ export default function ReaderView() {
     translateTargetLangRef.current = targetLang
     setTranslateLoading(true)
     resetParagraphTranslations()
-    frozenOriginalParagraphsRef.current = splitContent(articleContent || selectedArticle.summary || '')
+    frozenOriginalParagraphsRef.current = splitContent(cleanArticleText)
     try {
-      const c = articleContent || selectedArticle.summary || ''
-      if (!c.trim()) { setError('文章无内容'); setTranslateLoading(false); return }
-      await window.api.translateParagraphs(selectedArticleId, c, selectedArticle.title, targetLang)
+      if (!cleanArticleText.trim()) { setError('文章无内容'); setTranslateLoading(false); return }
+      await window.api.translateParagraphs(selectedArticleId, cleanArticleText, selectedArticle.title, targetLang)
     } catch (err) {
       setError(String(err))
       setTranslateLoading(false)
     }
-  }, [selectedArticleId, selectedArticle, articleContent, translateLoading])
+  }, [selectedArticleId, selectedArticle, cleanArticleText, translateLoading])
 
   // ============ 渲染函数 ============
 
@@ -1732,21 +1892,40 @@ export default function ReaderView() {
             <button
               onClick={async () => {
                 if (!selectedArticleId) return
+                // ★ 保存旧内容，刷新失败时恢复
+                const prevContent = articleContent
+                const prevContentHtml = articleContentHtml
                 useStore.setState({ isLoading: true, articleContent: null, articleContentHtml: null })
                 try {
                   const res = await window.api.refreshArticleContent(selectedArticleId)
                   if (res.payload.error === 0) {
+                    const newContent = res.payload.content?.content || ''
+                    const newContentHtml = res.payload.content?.contentHtml || null
+                    console.log(`[ReaderView] forceRefresh 完成: content.length=${newContent.length}, contentHtml.length=${newContentHtml?.length ?? 0}`)
                     useStore.setState({
-                      articleContent: res.payload.content?.content || '',
-                      articleContentHtml: res.payload.content?.contentHtml || null,
+                      articleContent: newContent,
+                      articleContentHtml: newContentHtml,
                       isLoading: false
                     })
                   } else {
-                    useStore.setState({ isLoading: false })
+                    // 恢复旧内容
+                    console.error('[ReaderView] forceRefresh API error:', res.payload.message)
+                    useStore.setState({
+                      articleContent: prevContent,
+                      articleContentHtml: prevContentHtml,
+                      isLoading: false,
+                      error: res.payload.message || '刷新失败'
+                    })
                   }
                 } catch (err) {
                   console.error('[ReaderView] forceRefresh 失败:', err)
-                  useStore.setState({ isLoading: false })
+                  // 恢复旧内容
+                  useStore.setState({
+                    articleContent: prevContent,
+                    articleContentHtml: prevContentHtml,
+                    isLoading: false,
+                    error: String(err)
+                  })
                 }
               }}
               className="flex items-center gap-1 text-xs text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300 bg-amber-50 dark:bg-amber-900/20 px-2 py-1 rounded transition-colors"
@@ -2109,6 +2288,14 @@ export default function ReaderView() {
                     {t(DISPLAY_MODE_LABEL_KEYS[m.value])}
                   </button>
                 ))}
+                <button
+                  onClick={() => handleStartTranslate(translateTargetLangRef.current, true)}
+                  disabled={translateLoading}
+                  className="flex items-center gap-1 px-2 py-1.5 text-xs rounded-lg text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors disabled:opacity-30"
+                  title="重新翻译"
+                >
+                  <RefreshCw size={12} className={translateLoading ? 'animate-spin' : ''} />
+                </button>
                 <button
                   onClick={handleBackToOriginal}
                   className="flex items-center gap-1 px-2 py-1.5 text-xs rounded-lg text-gray-500 hover:bg-red-50 hover:text-red-500 dark:text-gray-400 dark:hover:bg-red-900/20 dark:hover:text-red-400 transition-colors"
@@ -2703,12 +2890,57 @@ export default function ReaderView() {
                   </div>,
                   selectionResultAnchorRef.current
                 )}
+
+              {/* ===== 选择文本摘要结果（Portal 到选区末尾锚点） ===== */}
+              {(selectedTextSummary || selectedTextSummaryLoading)
+                && selectedTextSummaryAnchorRef.current
+                && document.body.contains(selectedTextSummaryAnchorRef.current)
+                && createPortal(
+                  <div className="mt-4 border-2 border-purple-300 dark:border-purple-600 rounded-lg overflow-hidden">
+                    <div className="bg-purple-50 dark:bg-purple-900/20 px-3 py-1.5 flex items-center justify-between border-b border-purple-200 dark:border-purple-700">
+                      <div className="flex items-center gap-1.5">
+                        <Sparkles size={12} className="text-purple-500" />
+                        <span className="text-[11px] font-medium text-purple-600 dark:text-purple-400">
+                          选区摘要
+                        </span>
+                        {selectedTextSummaryLoading && <Loader size={10} className="animate-spin text-purple-400 ml-1" />}
+                      </div>
+                      <button
+                        onClick={() => {
+                          setSelectedTextSummary('')
+                          setSelectedTextSummaryLoading(false)
+                          if (selectedTextSummaryAnchorRef.current) {
+                            selectedTextSummaryAnchorRef.current.remove()
+                            selectedTextSummaryAnchorRef.current = null
+                          }
+                        }}
+                        className="p-0.5 rounded text-purple-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                    <div className="bg-purple-50/30 dark:bg-purple-900/5 px-4 py-3">
+                      {selectedTextSummary ? (
+                        <div className={`prose prose-sm ${proseCls} max-w-none leading-relaxed text-sm`}>
+                          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins} components={markdownComponents}>
+                            {selectedTextSummary}
+                          </ReactMarkdown>
+                        </div>
+                      ) : (
+                        <div className="text-xs text-purple-500 dark:text-purple-400 py-1">
+                          正在生成摘要…
+                        </div>
+                      )}
+                    </div>
+                  </div>,
+                  selectedTextSummaryAnchorRef.current
+                )}
             </div>
           )}
         </div>
       </div>
 
-      {/* ===== 选择文本翻译浮动按钮 (Portal 到 body) ===== */}
+      {/* ===== 选择文本浮动按钮 (Portal 到 body) ===== */}
       {showFloatBtn && floatBtnPos && createPortal(
         <div
           data-selection-btn="true"
@@ -2725,6 +2957,17 @@ export default function ReaderView() {
               {l.label}
             </button>
           ))}
+          {/* 分隔线 */}
+          <span className="w-px h-4 bg-gray-300 dark:bg-gray-600" />
+          <button
+            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); handleSelectionTextSummary() }}
+            disabled={selectedTextSummaryLoading}
+            className="flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium text-purple-600 hover:bg-purple-50 dark:text-purple-400 dark:hover:bg-purple-900/30 rounded transition-colors disabled:opacity-50"
+            title="生成选中文本摘要"
+          >
+            {selectedTextSummaryLoading ? <Loader size={11} className="animate-spin" /> : <Sparkles size={11} />}
+            {' 摘要'}
+          </button>
         </div>,
         document.body
       )}
@@ -2748,6 +2991,14 @@ export default function ReaderView() {
                   {summaryLoading && <Loader size={12} className="animate-spin text-purple-400 ml-1" />}
                 </div>
                 <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => handleSummarize(selectedSummaryLang, true)}
+                    disabled={summaryLoading}
+                    className="flex items-center gap-1 px-1.5 py-0.5 text-xs text-gray-400 hover:text-purple-500 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded transition-colors disabled:opacity-30"
+                    title="重新生成摘要"
+                  >
+                    <RefreshCw size={12} className={summaryLoading ? 'animate-spin' : ''} />
+                  </button>
                   <button
                     onClick={async () => {
                       try {

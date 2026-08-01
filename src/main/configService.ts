@@ -226,4 +226,4 @@ export const AI_FIRST_TOKEN_TIMEOUT = 15_000
 export const OPML_IMPORT_CONCURRENCY = 4
 
 /** 文章正文抓取超时（毫秒） */
-export const CONTENT_FETCH_TIMEOUT = 20_000
+export const CONTENT_FETCH_TIMEOUT = 30_000
