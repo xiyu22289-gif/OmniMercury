@@ -1197,6 +1197,56 @@ export default function ReaderView() {
     }
   }, [selectedArticleId])
 
+  // ★ 错误自动清除：5 秒后关闭错误提示
+  useEffect(() => {
+    if (!error) return
+    const timer = setTimeout(() => {
+      useStore.setState({ error: null })
+      setErrorDetail(null)
+    }, 5000)
+    return () => clearTimeout(timer)
+  }, [error])
+
+  // ★ 自动刷新：内容过短时触发完整抓取
+  const autoRefreshedRef = useRef<Set<number>>(new Set())
+  useEffect(() => {
+    if (!selectedArticleId || isLoading) return
+    if (autoRefreshedRef.current.has(selectedArticleId)) return
+
+    const mdLen = articleContent?.length ?? 0
+    const htmlLen = articleContentHtml?.length ?? 0
+    const hasUrl = !!selectedArticle?.url
+
+    // 条件：内容存在但过短（< 1000 字符）且有原始 URL
+    const mdTooShort = mdLen > 0 && mdLen < 1000
+    const htmlTooShort = htmlLen > 0 && htmlLen < 1000
+    const noContent = mdLen === 0 && htmlLen === 0
+
+    if (hasUrl && (mdTooShort || htmlTooShort) && !noContent) {
+      console.log(`[ReaderView] 内容过短 (md=${mdLen}, html=${htmlLen})，自动触发完整抓取 articleId=${selectedArticleId}`)
+      autoRefreshedRef.current.add(selectedArticleId)
+      // 160ms 延迟：给后端 contentService 的截断检测先跑完
+      setTimeout(async () => {
+        try {
+          useStore.setState({ isLoading: true })
+          const res = await window.api.refreshArticleContent(selectedArticleId!)
+          if (res.payload.error === 0) {
+            useStore.setState({
+              articleContent: res.payload.content?.content || '',
+              articleContentHtml: res.payload.content?.contentHtml || null,
+              isLoading: false,
+            })
+          } else {
+            useStore.setState({ isLoading: false })
+          }
+        } catch (err) {
+          console.error('[ReaderView] 自动刷新失败:', err)
+          useStore.setState({ isLoading: false })
+        }
+      }, 160)
+    }
+  }, [selectedArticleId, articleContent, articleContentHtml, isLoading])
+
   // ============ 拖拽事件 ============
 
   const handleDividerMouseDown = useCallback(() => { isDragging.current = true }, [])
@@ -2563,7 +2613,7 @@ export default function ReaderView() {
                 className={`rounded-lg p-6 ${containerBg}`}
               >
                 {readerMode === 'reader'
-                  ? renderParagraphsWithCheckboxes()
+                  ? (articleContentHtml ? renderHtmlContent() : renderParagraphsWithCheckboxes())
                   : renderOriginalContent()
                 }
               </div>

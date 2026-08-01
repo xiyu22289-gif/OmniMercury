@@ -157,6 +157,40 @@ function sanitizeHtml(html: string): string {
     .trim()
 }
 
+// ============================================================
+// 表格保护：Readability 会过滤 <table>，用占位符保护后再恢复
+// ============================================================
+
+const tablePlaceholderMap = new Map<string, string>()
+let tableCounter = 0
+
+/** Readability 提取前：将 <table> 替换为占位符，防止被过滤 */
+function protectTables(html: string): { protected: string; count: number } {
+  tablePlaceholderMap.clear()
+  tableCounter = 0
+  let count = 0
+  const result = html.replace(/<table[\s>][\s\S]*?<\/table>/gi, (match) => {
+    const key = `__TABLE_PLACEHOLDER_${tableCounter++}__`
+    tablePlaceholderMap.set(key, match)
+    count++
+    return `<p>${key}</p>`
+  })
+  return { protected: result, count }
+}
+
+/** Readability 提取后：将占位符恢复为原始 <table> */
+function restoreTables(html: string): string {
+  if (tablePlaceholderMap.size === 0) return html
+  let result = html
+  for (const [key, tableHtml] of tablePlaceholderMap) {
+    result = result.replace(new RegExp(key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), tableHtml)
+    // 也处理被 sanitizeHtml 或 Readability 包裹在 <p> 中的情况
+    result = result.replace(new RegExp(`<p[^>]*>\\s*${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*<\/p>`, 'gi'), tableHtml)
+  }
+  tablePlaceholderMap.clear()
+  return result
+}
+
 /** 清理属性值中的换行符、首尾空白、尾部无效字符 */
 function normalizeSrc(raw: string): string {
   return raw
@@ -344,6 +378,15 @@ export async function fetchAndCleanArticle(url: string): Promise<ContentResult> 
     }
   }
 
+  // ★ Step 2.5: 提取表格占位符保护（Readability 会过滤 <table>）
+  let bodyHtml = dom.window.document.body.innerHTML
+  const { protected: protectedHtml, count: tableCount } = protectTables(bodyHtml)
+  if (tableCount > 0) {
+    console.log(`[contentService] protectTables: 保护了 ${tableCount} 个 <table> (${url})`)
+    // 重新构造 jsdom，将保护后的 HTML 写回
+    dom = new JSDOM(protectedHtml, { url, referrer: url, contentType: 'text/html', runScripts: 'outside-only' })
+  }
+
   // ---- Step 3: Readability 提纯正文 ----
   let cleanHtml: string
   let extractedTitle: string | null = null
@@ -364,6 +407,11 @@ export async function fetchAndCleanArticle(url: string): Promise<ContentResult> 
     }
 
     cleanHtml = sanitizeHtml(result.content)
+    // ★ 恢复被保护的 <table> 标签
+    if (tableCount > 0) {
+      cleanHtml = restoreTables(cleanHtml)
+      console.log(`[contentService] restoreTables: 恢复了 ${tableCount} 个 <table> (${url})`)
+    }
     // 在 HTML 层面也移除截断标记（有些站点在 Readability 输出中保留）
     cleanHtml = cleanHtml
       .replace(/<p[^>]*>\s*Continue\s+reading[^<]*<\/p>/gi, '')
@@ -433,6 +481,107 @@ export async function fetchAndCleanArticle(url: string): Promise<ContentResult> 
 }
 
 // ============================================================
+// 截断检测
+// ============================================================
+
+/** 截断检测结果 */
+interface TruncationCheck {
+  truncated: boolean
+  reason: string
+}
+
+/** 强制抓取的域名白名单 */
+const FORCE_FETCH_DOMAINS = new Set([
+  'soulhacker.me',
+  'www.soulhacker.me',
+])
+
+/**
+ * 检测内容是否被截断（RSS 摘要等），需要触发完整抓取。
+ *
+ * 不再使用长度阈值（避免误判短文章），改用精确信号：
+ * 0. 域名白名单 — 对特定来源强制抓取
+ * 1. RSS 完整内容保护 — content 已有完整 HTML 结构时放行（不重复抓取）
+ * 2. 截断标记词 — "Continue reading"、"Read more"、末尾 "..."、"[...]" 等
+ * 3. HTML 结构检测 — 无 HTML 标签 + 包含省略号 → 疑似摘要
+ */
+function isContentTruncated(
+  contentMd: string | null,
+  contentHtml: string | null,
+  articleUrl: string | null,
+  articleId: number,
+): TruncationCheck {
+  const md = contentMd ?? ''
+  const html = contentHtml ?? ''
+  const combinedText = `${md} ${html}`
+
+  // ---- 规则0: 域名白名单强制抓取 ----
+  if (articleUrl) {
+    try {
+      const hostname = new URL(articleUrl).hostname
+      if (FORCE_FETCH_DOMAINS.has(hostname)) {
+        const reason = `[TRUNC_DETECT] articleId=${articleId} 域名白名单强制抓取: ${hostname}`
+        console.log(reason)
+        return { truncated: true, reason }
+      }
+    } catch { /* URL 解析失败，跳过域名检测 */ }
+  }
+
+  // ---- 规则1: RSS 完整内容保护 ----
+  // 如果 content（原始 HTML）包含结构性标签且长度充足，说明已经是完整抓取结果。
+  // 即使 contentMd 较短（如只有标题的短文章），也不触发重复抓取。
+  if (html.length > 0) {
+    const hasHtmlStructure = /<(p|div|article|section|h[1-6]|table|ul|ol|blockquote|pre|figure|img)\b/i.test(html)
+    if (hasHtmlStructure && html.length > 800) {
+      console.log(
+        `[TRUNC_DETECT] articleId=${articleId} content 已有完整 HTML 结构 ` +
+        `(标签匹配=${hasHtmlStructure}, html.length=${html.length})，跳过截断检测`
+      )
+      return { truncated: false, reason: '' }
+    }
+  }
+
+  // ---- 规则2: 截断标记词 ----
+  const truncationMarkers: Array<{ pattern: RegExp; label: string }> = [
+    { pattern: /Continue\s+reading/i, label: 'Continue reading' },
+    { pattern: /Read\s+more/i, label: 'Read more' },
+    { pattern: /阅读全文/, label: '阅读全文' },
+    { pattern: /阅读更多/, label: '阅读更多' },
+    { pattern: /\.\.\.\s*$/, label: '末尾 "..."' },
+    { pattern: /…\s*$/, label: '末尾 "…"' },
+    { pattern: /\[\.\.\.\]\s*$/, label: '末尾 "[...]"' },
+    { pattern: /\[…\]\s*$/, label: '末尾 "[…]"' },
+  ]
+  for (const { pattern, label } of truncationMarkers) {
+    if (pattern.test(combinedText)) {
+      const reason = `[TRUNC_DETECT] articleId=${articleId} 内容包含截断标记: "${label}"`
+      console.log(reason)
+      return { truncated: true, reason }
+    }
+  }
+
+  // ---- 规则3: HTML 结构检测 ----
+  // 纯文本（无 HTML 标签）且包含省略号 → 很可能是 RSS 摘要片段
+  if (html.trim().length > 0) {
+    const hasHtmlTags = /<[a-zA-Z][^>]*>/i.test(html)
+    if (!hasHtmlTags) {
+      const hasEllipsis = /\.\.\.|…/.test(html)
+      if (hasEllipsis) {
+        const reason = `[TRUNC_DETECT] articleId=${articleId} 纯文本无 HTML 标签且包含省略号，疑似 RSS 摘要 (html.length=${html.length})`
+        console.log(reason)
+        return { truncated: true, reason }
+      }
+    }
+  }
+
+  console.log(
+    `[TRUNC_DETECT] articleId=${articleId} 未检测到截断信号 ` +
+    `(md.length=${md.length}, html.length=${html.length}, hasUrl=${!!articleUrl})`
+  )
+  return { truncated: false, reason: '' }
+}
+
+// ============================================================
 // 带缓存的获取（供 IPC Handler 使用）
 // ============================================================
 
@@ -465,14 +614,13 @@ export async function getOrFetchArticleContent(
         .get()
 
       if (row && row.contentMd) {
-        // ★ 短内容检测：contentMd < 500 字符且 contentHtml(即content列) < 800 字符时，
-        //    说明是 RSS 摘要而非完整正文，自动触发清洗流水线抓取完整内容
-        const htmlLen = row.content?.length ?? 0
-        const mdLen = row.contentMd.length
-        if ((mdLen < 500 || htmlLen < 800) && articleUrl) {
-          console.log(`[contentService] 缓存内容过短 (contentMd=${mdLen}字符, content=${htmlLen}字符)，自动触发完整抓取`)
-          // 跳过缓存，直接走流水线（见下方 forceRefresh 逻辑之前的部分）
+        // ★ 多维截断检测：检查内容长度、截断标记、纯文本/无标签等
+        const { truncated, reason } = isContentTruncated(row.contentMd, row.content, articleUrl || null, articleId)
+        if (truncated) {
+          console.log(`[contentService] ${reason}，自动触发完整抓取`)
+          // 跳过缓存，直接走流水线
         } else {
+          const htmlLen = row.content?.length ?? 0
           console.log(`[DIAG] Stage3a: DB缓存命中 — row.content 存在: ${!!row.content}, 长度: ${htmlLen}`)
           if (row.content) {
             console.log(`[DIAG] Stage3a: row.content 含 <table: ${row.content.includes('<table')}, 含 \\n: ${row.content.includes('\n')}`)
@@ -484,10 +632,10 @@ export async function getOrFetchArticleContent(
       }
       // 有原始 content 但无 contentMd（RSS 原始摘要等）
       if (row && row.content && !row.contentMd) {
-        // ★ 短内容检测：content < 500 字符且没有 contentMd，肯定是 RSS 摘要片段
-        const rawLen = row.content.length
-        if (rawLen < 800 && articleUrl) {
-          console.log(`[contentService] 缓存仅含原始摘要 (${rawLen}字符, 无contentMd)，自动触发完整抓取`)
+        // ★ 多维截断检测：对 RSS 原始内容也应用同样规则
+        const { truncated, reason } = isContentTruncated(null, row.content, articleUrl || null, articleId)
+        if (truncated) {
+          console.log(`[contentService] ${reason}，自动触发完整抓取`)
           // 跳过此路径，直接走清洗流水线
         } else {
           const fixedHtml = resolveImageUrls(row.content, articleUrl)

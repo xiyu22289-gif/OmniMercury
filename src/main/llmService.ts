@@ -190,6 +190,65 @@ async function consumeStreamWithCallback(
 }
 
 // ============================================================
+// 流式降级：stream: true 失败时自动回退 stream: false
+// ============================================================
+
+type StreamCallFn = () => Promise<ChatStream>
+type NonStreamCallFn = () => Promise<OpenAI.Chat.Completions.ChatCompletion>
+
+/**
+ * 优先尝试流式调用，失败时自动回退到非流式。
+ *
+ * 触发降级的条件（任一命中）：
+ * - 错误信息包含 "stream" 相关关键词
+ * - HTTP 400（参数错误，常见于模型不支持流式）
+ */
+async function tryStreamWithFallback(
+  createStreamCall: StreamCallFn,
+  createNonStreamCall: NonStreamCallFn,
+  onDelta: (delta: string) => void,
+  onError: (message: string) => void,
+): Promise<{ fullText: string; error: string | null }> {
+  // 1. 先尝试流式
+  try {
+    const stream = await createStreamCall()
+    return await consumeStreamWithCallback(stream, onDelta, onError)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    const code = err?.status ?? err?.response?.status ?? err?.statusCode
+    const isStreamIssue =
+      msg.includes('stream') ||
+      msg.includes('does not support') ||
+      msg.includes('not supported') ||
+      msg.includes('streaming') ||
+      msg.includes('SSE') ||
+      code === 400
+    if (!isStreamIssue) throw err // 非流式问题，继续向上抛给 withRetry
+  }
+
+  // 2. 流式失败，回退到非流式
+  console.warn('[llmService] 流式调用失败，回退到非流式')
+  try {
+    const response = await createNonStreamCall()
+    const text = response.choices?.[0]?.message?.content || ''
+    if (text) {
+      // 模拟流式：一次性输出全部内容
+      onDelta(text)
+      return { fullText: text, error: null }
+    }
+    const detail = classifyError(new Error('AI 服务（非流式）返回空响应'))
+    const errMsg = formatErrorDetail(detail)
+    onError(errMsg)
+    return { fullText: '', error: errMsg }
+  } catch (nonStreamErr) {
+    const detail = classifyError(nonStreamErr)
+    const errMsg = formatErrorDetail(detail)
+    onError(errMsg)
+    return { fullText: '', error: errMsg }
+  }
+}
+
+// ============================================================
 // Kimi 兼容
 // ============================================================
 
@@ -247,8 +306,18 @@ function restoreMedia(translated: string): string {
  * 从 OpenAI SDK 错误对象中提取 HTTP 状态码和详细信息。
  */
 function classifyError(err: any, url?: string, position?: number, context?: string): LlmErrorDetail {
+  // ★ 提取 OpenAI SDK 原始错误体
+  const apiError = err?.error ?? err?.response?.data ?? err?.response?.body ?? err?.body
+  let rawApiDetail = ''
+  if (apiError && typeof apiError === 'object') {
+    rawApiDetail = JSON.stringify(apiError)
+  } else if (typeof apiError === 'string') {
+    rawApiDetail = apiError
+  }
   const msg: string = err instanceof Error ? err.message : String(err)
-  const code: number | undefined = err?.status ?? err?.response?.status ?? err?.statusCode
+  // 拼上原始 API 错误详情
+  const fullMsg = rawApiDetail ? `${msg} [API: ${rawApiDetail}]` : msg
+  const code: number | undefined = err?.status ?? err?.response?.status ?? err?.statusCode ?? apiError?.status ?? apiError?.status_code
   const timestamp = new Date().toISOString()
 
   // 超时（axios/OpenAI SDK 超时标记）
@@ -257,7 +326,7 @@ function classifyError(err: any, url?: string, position?: number, context?: stri
     msg.includes('ETIMEDOUT') || msg.includes('ECONNABORTED') ||
     msg.includes('aborted')
   ) {
-    return { errorType: 'timeout', message: msg, url, statusCode: code, position, context, timestamp }
+    return { errorType: 'timeout', message: fullMsg, url, statusCode: code, position, context, timestamp }
   }
 
   // 鉴权失败
@@ -266,12 +335,12 @@ function classifyError(err: any, url?: string, position?: number, context?: stri
     msg.includes('API Key') || msg.includes('Incorrect API key') ||
     msg.includes('authentication') || msg.includes('invalid api key')
   ) {
-    return { errorType: 'auth', message: msg, url, statusCode: code, position, context, timestamp }
+    return { errorType: 'auth', message: fullMsg, url, statusCode: code, position, context, timestamp }
   }
 
   // 限流
   if (code === 429 || msg.toLowerCase().includes('rate') || msg.includes('too many requests')) {
-    return { errorType: 'rate_limit', message: msg, url, statusCode: code, position, context, timestamp }
+    return { errorType: 'rate_limit', message: fullMsg, url, statusCode: code, position, context, timestamp }
   }
 
   // 网络错误（DNS / 连接）
@@ -281,7 +350,7 @@ function classifyError(err: any, url?: string, position?: number, context?: stri
     msg.includes('network') || msg.includes('NetworkError') ||
     msg.includes('connect') || msg.includes('getaddrinfo')
   ) {
-    return { errorType: 'network', message: msg, url, statusCode: code, position, context, timestamp }
+    return { errorType: 'network', message: fullMsg, url, statusCode: code, position, context, timestamp }
   }
 
   // 解析错误
@@ -289,16 +358,16 @@ function classifyError(err: any, url?: string, position?: number, context?: stri
     msg.includes('JSON') || msg.includes('parse') || msg.includes('SyntaxError') ||
     msg.includes('Unexpected token') || msg.includes('Invalid JSON')
   ) {
-    return { errorType: 'parse', message: msg, url, statusCode: code, position, context, timestamp }
+    return { errorType: 'parse', message: fullMsg, url, statusCode: code, position, context, timestamp }
   }
 
   // 服务端错误
   if (code && code >= 500) {
-    return { errorType: 'api', message: msg, url, statusCode: code, position, context, timestamp }
+    return { errorType: 'api', message: fullMsg, url, statusCode: code, position, context, timestamp }
   }
 
   // 默认
-  return { errorType: 'unknown', message: msg, url, statusCode: code, position, context, timestamp }
+  return { errorType: 'unknown', message: fullMsg, url, statusCode: code, position, context, timestamp }
 }
 
 /** 将 LlmErrorDetail 格式化为用户友好的错误摘要 */
@@ -401,6 +470,80 @@ function getFuncConfig(funcType: LlmFunctionType): { baseUrl: string; apiKey: st
 }
 
 // ============================================================
+// 重试机制
+// ============================================================
+
+/** 可重试的错误类型 */
+const RETRYABLE_ERRORS = new Set<LlmErrorType>(['timeout', 'network', 'rate_limit', 'api', 'unknown'])
+
+/** 判断错误是否可重试 */
+function isRetryable(detail: LlmErrorDetail): boolean {
+  return RETRYABLE_ERRORS.has(detail.errorType)
+}
+
+interface RetryOptions {
+  maxRetries?: number
+  baseDelayMs?: number
+  operation: string
+  articleId: number
+}
+
+/**
+ * 带重试和首 token 超时保护的流式 LLM 调用包装。
+ *
+ * 重试策略：
+ * - 最多 retry maxRetries 次（默认 2）
+ * - 延迟递增：1s, 2s
+ * - 仅重试可恢复的错误（超时/网络/限流/API/未知）
+ * - 鉴权/配置/解析错误直接失败
+ * - 每次重试前记录日志
+ */
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  onError: (message: string, detail?: LlmErrorDetail) => void,
+  classify: (err: any) => LlmErrorDetail,
+  opts: RetryOptions,
+): Promise<{ result: T | null; error: string | null }> {
+  const maxRetries = opts.maxRetries ?? 2
+  const baseDelay = opts.baseDelayMs ?? 1000
+  let lastError: string | null = null
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const result = await fn()
+      return { result, error: null }
+    } catch (err) {
+      const detail = classify(err)
+      lastError = formatErrorDetail(detail)
+
+      // 不可重试的错误直接返回
+      if (!isRetryable(detail)) {
+        console.error(`[llmService] ${opts.operation} articleId=${opts.articleId} 不可重试错误: ${detail.errorType}`)
+        onError(lastError, detail)
+        return { result: null, error: lastError }
+      }
+
+      // 最后一次尝试也失败了
+      if (attempt === maxRetries) {
+        console.error(`[llmService] ${opts.operation} articleId=${opts.articleId} 重试 ${maxRetries} 次后仍失败: ${lastError}`)
+        onError(`[重试 ${maxRetries} 次后仍失败] ${lastError}`, detail)
+        return { result: null, error: lastError }
+      }
+
+      // 中间重试
+      const delay = baseDelay * (attempt + 1)
+      console.warn(
+        `[llmService] ${opts.operation} articleId=${opts.articleId} ` +
+        `第 ${attempt + 1}/${maxRetries} 次失败 (${detail.errorType})，${delay}ms 后重试: ${detail.message.slice(0, 80)}`
+      )
+      await new Promise(r => setTimeout(r, delay))
+    }
+  }
+
+  return { result: null, error: lastError ?? '未知错误' }
+}
+
+// ============================================================
 // 段落翻译（全文翻译 → fullTranslate 配置）
 // ============================================================
 
@@ -426,6 +569,16 @@ export async function translateParagraphs(request: TranslateRequest, callback: S
   const paragraphs = splitIntoParagraphs(content)
   const allTranslations: string[] = new Array(paragraphs.length).fill('')
 
+  // ★ 诊断日志：打印请求参数
+  console.log(`[llmService] translateParagraphs 请求参数:`, JSON.stringify({
+    articleId,
+    model,
+    baseUrl: effective.baseUrl,
+    targetLang,
+    paragraphCount: paragraphs.length,
+    totalContentLen: content.length,
+  }))
+
   for (let i = 0; i < paragraphs.length; i++) {
     const prompt = buildParagraphTranslatePrompt(paragraphs[i], targetLang)
     if (!prompt) {
@@ -433,29 +586,43 @@ export async function translateParagraphs(request: TranslateRequest, callback: S
       callback({ type: 'translateParagraph', articleId, paragraphIndex: i, fullText: paragraphs[i] })
       continue
     }
-    try {
-      const stream = await client.chat.completions.create({
-        model, messages: [{ role: 'user', content: prompt }], temperature: temp, stream: true,
-      })
-      const { fullText } = await consumeStreamWithCallback(stream,
-        (delta) => callback({ type: 'translateParagraph', articleId, paragraphIndex: i, delta }),
-        (errorMsg) => {
-          const detail = classifyError(new Error(errorMsg), effective.baseUrl, i, paragraphs[i]?.slice(0, 50))
-          allTranslations[i] = `[${detail.errorType === 'timeout' ? '超时' : detail.errorType === 'network' ? '网络错误' : '错误'}] ${errorMsg}`
-          callback({ type: 'translateParagraph', articleId, paragraphIndex: i, message: formatErrorDetail(detail), detail })
-        }
-      )
-      if (fullText) {
-        const single = restoreMedia(fullText).trim()
-        allTranslations[i] = single
-        callback({ type: 'translateParagraph', articleId, paragraphIndex: i, fullText: single })
-        await recordTokens({ model, operation: 'translateParagraphs', prompt, completion: single })
-      }
-    } catch (err) {
-      const detail = classifyError(err, effective.baseUrl, i, paragraphs[i]?.slice(0, 50))
-      const errLabel = detail.errorType === 'timeout' ? '翻译超时' : detail.errorType === 'network' ? '网络错误' : detail.errorType === 'rate_limit' ? '请求限流' : '翻译失败'
-      allTranslations[i] = `[${errLabel}] ${detail.message}`
-      callback({ type: 'translateParagraph', articleId, paragraphIndex: i, message: formatErrorDetail(detail), detail })
+    // ★ 带重试 + 流式降级的段落翻译
+    const paraLen = prompt.length
+    const { result: translatedText, error: transError } = await withRetry(
+      async () => {
+        const { fullText: text, error } = await tryStreamWithFallback(
+          // 流式调用
+          () => client.chat.completions.create({
+            model, messages: [{ role: 'user', content: prompt }], temperature: temp,
+            max_tokens: 2048, stream: true,
+          }),
+          // 非流式降级调用
+          () => client.chat.completions.create({
+            model, messages: [{ role: 'user', content: prompt }], temperature: temp,
+            max_tokens: 2048, stream: false,
+          }),
+          (delta) => callback({ type: 'translateParagraph', articleId, paragraphIndex: i, delta }),
+          (_errorMsg) => { /* 流内错误由 withRetry 统一处理 */ }
+        )
+        if (error) throw new Error(error)
+        if (!text) throw new Error('AI 服务返回空响应')
+        return text
+      },
+      (errorMsg, detail) => {
+        allTranslations[i] = `[翻译失败] ${errorMsg}`
+        callback({ type: 'translateParagraph', articleId, paragraphIndex: i, message: errorMsg, detail })
+      },
+      (err) => classifyError(err, effective.baseUrl, i, paragraphs[i]?.slice(0, 50)),
+      { operation: `translateParagraphs[${i}]`, articleId },
+    )
+
+    if (transError) continue
+
+    if (translatedText) {
+      const single = restoreMedia(translatedText).trim()
+      allTranslations[i] = single
+      callback({ type: 'translateParagraph', articleId, paragraphIndex: i, fullText: single })
+      await recordTokens({ model, operation: 'translateParagraphs', prompt, completion: single })
     }
     if (i < paragraphs.length - 1) await new Promise(r => setTimeout(r, 50))
   }
@@ -491,14 +658,14 @@ function buildSummarizePrompt(title: string, content: string, targetLang: string
   }
 
   const detailGuide: Record<string, string> = {
-    compact: '约 50-80 词的极简',
-    medium: '约 150 词的简洁',
-    detailed: '约 300-400 词的详细（覆盖关键点、论据和结论）',
+    compact: '一段式，100字以内，将3-5个要点连贯地组织成一段话',
+    medium: '一段式，200字以内，将4-6个要点连贯地组织成一段话',
+    detailed: '一段式，300字以内，将5-8个要点连贯地组织成一段话',
   }
   const detailEn: Record<string, string> = {
-    compact: 'very concise (about 50-80 words)',
-    medium: 'concise (about 150 words)',
-    detailed: 'detailed (about 300-400 words, covering key points, arguments, and conclusions)',
+    compact: 'single-paragraph, within 100 words, weaving 3-5 key points into one coherent paragraph',
+    medium: 'single-paragraph, within 200 words, weaving 4-6 key points into one coherent paragraph',
+    detailed: 'single-paragraph, within 300 words, weaving 5-8 key points into one coherent paragraph',
   }
 
   const fn = templates[targetLang]
@@ -521,12 +688,14 @@ export async function summarizeArticle(request: SummarizeRequest, callback: Stre
   const effective = getFuncConfig('fullSummary')
   if (!effective.apiKey) { callback({ type, articleId, message: '未配置 API Key' }); return }
   const model = effective.model
+  const baseUrl = effective.baseUrl
 
   let client: OpenAI
   try { client = createClientFromEffectiveConfig('fullSummary') } catch (err) { callback({ type, articleId, message: String(err) }); return }
 
   const prompt = buildSummarizePrompt(title, content, targetLang, detailLevel)
-  const maxTokens = detailLevel === 'compact' ? 300 : detailLevel === 'detailed' ? 1500 : 800
+  // ★ max_tokens 安全上限：避免模型限制导致调用失败
+  const maxTokens = detailLevel === 'compact' ? 300 : detailLevel === 'detailed' ? 1024 : 600
   const systemPromptMap: Record<string, string> = {
     Chinese: '你是一个专业的文章摘要助手。',
     English: 'You are a professional article summarization assistant. Output ONLY in English.',
@@ -538,35 +707,66 @@ export async function summarizeArticle(request: SummarizeRequest, callback: Stre
   const systemPrompt = systemPromptMap[targetLang] || `You are a professional article summarization assistant. Output ONLY in ${targetLang}.`
   const totalPrompt = systemPrompt + prompt
 
-  try {
-    const stream = await client.chat.completions.create({
-      model,
-      messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: prompt }],
-      temperature: getTemperature(model),
-      max_tokens: maxTokens,
-      stream: true,
-    })
-    const { fullText } = await consumeStreamWithCallback(stream,
-      (delta) => callback({ type, articleId, delta }),
-      (errorMsg) => callback({ type, articleId, message: errorMsg })
-    )
-    if (fullText) {
-      const trimmed = fullText.trim()
-      if (trimmed) {
-        try {
-          getDb().update(articlesTable).set({ summary: trimmed }).where(eq(articlesTable.id, articleId)).run()
-          const row = getDb().select({ translations: articlesTable.translations }).from(articlesTable).where(eq(articlesTable.id, articleId)).get()
-          const existingMap: Record<string, unknown> = row?.translations ? JSON.parse(row.translations) : {}
-          existingMap._summary = { text: trimmed, lang: targetLang, detailLevel }
-          getDb().update(articlesTable).set({ translations: JSON.stringify(existingMap) }).where(eq(articlesTable.id, articleId)).run()
-        } catch {}
-      }
-      callback({ type, articleId, fullText: trimmed })
-      await recordTokens({ model, operation: 'summarize', prompt: totalPrompt, completion: trimmed })
+  // ★ 诊断日志：打印请求参数
+  console.log(`[llmService] summarizeArticle 请求参数:`, JSON.stringify({
+    articleId,
+    model,
+    baseUrl,
+    targetLang,
+    detailLevel,
+    maxTokens,
+    promptLen: prompt.length,
+    systemPromptLen: systemPrompt.length,
+    title: title.slice(0, 50),
+  }))
+
+  // ★ 带重试 + 流式降级的调用
+  const { result: fullText, error: retryError } = await withRetry(
+    async () => {
+      const { fullText: text, error } = await tryStreamWithFallback(
+        // 流式调用
+        () => client.chat.completions.create({
+          model,
+          messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: prompt }],
+          temperature: getTemperature(model),
+          max_tokens: maxTokens,
+          stream: true,
+        }),
+        // 非流式降级调用
+        () => client.chat.completions.create({
+          model,
+          messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: prompt }],
+          temperature: getTemperature(model),
+          max_tokens: maxTokens,
+          stream: false,
+        }),
+        (delta) => callback({ type, articleId, delta }),
+        (_errorMsg) => { /* 流内错误由 withRetry 统一处理 */ }
+      )
+      if (error) throw new Error(error)
+      if (!text) throw new Error('AI 服务返回空响应')
+      return text
+    },
+    (errorMsg, detail) => callback({ type, articleId, message: errorMsg, detail }),
+    (err) => classifyError(err, baseUrl),
+    { operation: 'summarizeArticle', articleId },
+  )
+
+  if (retryError) return
+
+  if (fullText) {
+    const trimmed = fullText.trim()
+    if (trimmed) {
+      try {
+        getDb().update(articlesTable).set({ summary: trimmed }).where(eq(articlesTable.id, articleId)).run()
+        const row = getDb().select({ translations: articlesTable.translations }).from(articlesTable).where(eq(articlesTable.id, articleId)).get()
+        const existingMap: Record<string, unknown> = row?.translations ? JSON.parse(row.translations) : {}
+        existingMap._summary = { text: trimmed, lang: targetLang, detailLevel }
+        getDb().update(articlesTable).set({ translations: JSON.stringify(existingMap) }).where(eq(articlesTable.id, articleId)).run()
+      } catch {}
     }
-  } catch (err) {
-    const detail = classifyError(err, effective.baseUrl)
-    callback({ type, articleId, message: formatErrorDetail(detail), detail })
+    callback({ type, articleId, fullText: trimmed })
+    await recordTokens({ model, operation: 'summarize', prompt: totalPrompt, completion: trimmed })
   }
 }
 
