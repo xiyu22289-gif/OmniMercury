@@ -11,7 +11,7 @@ import {
   Globe, ExternalLink, Sparkles, Languages, Loader, Settings,
   Check, Columns, AlignJustify, Replace, X,
   BookOpen, Monitor, Type, Minus, Plus, ChevronDown, Tag, Zap, Square, CheckSquare, Loader2, PenLine, Download,
-  Search, ArrowUp, ArrowDown, Keyboard, ArrowLeft, MessageCircle, Send
+  Search, ArrowUp, ArrowDown, Keyboard, ArrowLeft, MessageCircle, Send, Highlighter, Eraser
 } from 'lucide-react'
 import NotesPanel from './NotesPanel'
 import ResizeHandle from './ResizeHandle'
@@ -328,6 +328,71 @@ export default function ReaderView() {
   // 快速创建标签
   const [quickCreateName, setQuickCreateName] = useState('')
   const [quickCreateColor, setQuickCreateColor] = useState('#3b82f6')
+
+  // ============ 标注功能 ============
+  const [annotationMode, setAnnotationMode] = useState(false)
+  const [annotationTool, setAnnotationTool] = useState<'highlighter' | 'eraser'>('highlighter')
+  const [highlighterColor, setHighlighterColor] = useState('#fef08a')
+  const annotationModeRef = useRef(false)
+  const annotationToolRef = useRef<'highlighter' | 'eraser'>('highlighter')
+  const highlighterColorRef = useRef('#fef08a')
+  useEffect(() => { annotationModeRef.current = annotationMode }, [annotationMode])
+  useEffect(() => { annotationToolRef.current = annotationTool }, [annotationTool])
+  useEffect(() => { highlighterColorRef.current = highlighterColor }, [highlighterColor])
+  const HIGHLIGHTER_COLORS = ['#fef08a', '#bfdbfe', '#bbf7d0', '#fecaca', '#e9d5ff', '#fed7aa', '#f5f5f4', '#d9f99d']
+  const HIGHLIGHTER_COLORS_DARK = ['#eab308', '#3b82f6', '#22c55e', '#ef4444', '#a855f7', '#f97316', '#a1a1aa', '#84cc16']
+
+  // ========== 标注持久化 ==========
+  const saveAnnotations = useCallback(() => {
+    const articleId = selectedArticleIdRef.current
+    if (!articleId) return
+    const area = readingAreaRef.current
+    if (!area) return
+    const clones = area.querySelectorAll('.__annotation_highlight__')
+    const html = Array.from(clones).map(el => (el as HTMLElement).outerHTML).join('<!--annotation-->')
+    window.api.saveHighlights(articleId, html).catch(e => console.error('[ReaderView] 保存标注失败：', e))
+  }, [])
+
+  useEffect(() => {
+    if (!selectedArticleId) return
+    const loadAnnotations = async () => {
+      try {
+        const res = await window.api.getHighlights(selectedArticleId)
+        const html = res?.data ?? null
+        if (!html) return
+        const parts = html.split('<!--annotation-->')
+        if (parts.length === 0) return
+        const area = readingAreaRef.current
+        if (!area) { setTimeout(loadAnnotations, 300); return }
+        const parser = new DOMParser()
+        for (const part of parts) {
+          if (!part.trim()) continue
+          const doc = parser.parseFromString(part, 'text/html')
+          const span = doc.querySelector('.__annotation_highlight__')
+          if (!span?.textContent) continue
+          const searchText = span.textContent
+          const tw = document.createTreeWalker(area, NodeFilter.SHOW_TEXT, {
+            acceptNode: (n) => n.textContent?.includes(searchText) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP
+          })
+          let tn = tw.nextNode()
+          while (tn) {
+            const idx = (tn.textContent || '').indexOf(searchText)
+            if (idx >= 0) {
+              const r = document.createRange(); r.setStart(tn, idx); r.setEnd(tn, idx + searchText.length)
+              const ns = document.createElement('span'); ns.className = '__annotation_highlight__'
+              ns.style.cssText = (span as HTMLElement).style.cssText || ''
+              try { r.surroundContents(ns) } catch { const c = r.extractContents(); ns.appendChild(c); r.insertNode(ns) }
+              break
+            }
+            tn = tw.nextNode()
+          }
+        }
+      } catch (e) { console.error('[ReaderView] 加载标注失败：', e) }
+    }
+    const t = setTimeout(loadAnnotations, 500)
+    return () => clearTimeout(t)
+  }, [selectedArticleId])
+
   // AI 推荐
   const [aiSuggesting, setAiSuggesting] = useState(false)
   const [aiSuggestions, setAiSuggestions] = useState<string[]>([])
@@ -621,9 +686,92 @@ export default function ReaderView() {
   /** ★ 翻译结果锚点：插入在选中文本正下方 */
   const selectionResultAnchorRef = useRef<HTMLDivElement | null>(null)
 
+  /** ★ 标注功能：荧光笔高亮选中文本 */
+  const handleAnnotationMouseUp = useCallback((e: MouseEvent) => {
+    const tool = annotationToolRef.current
+    const sel = window.getSelection()
+    if (!sel || sel.isCollapsed) return
+    const text = sel.toString().trim()
+    if (!text) return
+    // ★ 排除代码段/表格/图片内的选区
+    if ((e.target as HTMLElement).closest?.('[data-no-select]')) return
+
+    if (tool === 'highlighter') {
+      // 荧光笔：用 span 包裹选区，应用背景色
+      try {
+        const r = sel.getRangeAt(0)
+        const span = document.createElement('span')
+        span.className = '__annotation_highlight__'
+        span.style.cssText = `background:${highlighterColorRef.current};color:inherit;border-radius:2px;padding:0;`
+        try {
+          r.surroundContents(span)
+        } catch {
+          const contents = r.extractContents()
+          span.appendChild(contents)
+          r.insertNode(span)
+        }
+        sel.removeAllRanges()
+      } catch { /* 跨节点选区失败则静默 */ }
+    } else if (tool === 'eraser') {
+      // 橡皮：清除选中文本所在的最内层 __annotation_highlight__ span
+      const range = sel.getRangeAt(0)
+      let node: Node | null = range.commonAncestorContainer
+      // 查找包含选区的 annotation span
+      while (node) {
+        if (node.nodeType === Node.ELEMENT_NODE && (node as HTMLElement).classList?.contains('__annotation_highlight__')) {
+          const el = node as HTMLElement
+          const parent = el.parentNode
+          if (parent) {
+            while (el.firstChild) { parent.insertBefore(el.firstChild, el) }
+            parent.removeChild(el)
+          }
+          sel.removeAllRanges()
+          return
+        }
+        node = node.parentNode
+      }
+      // 如果点击处没有 annotation span，尝试清除该区域附近的所有 annotation span
+      // （橡皮擦也可以清除整个选区内包含的 annotation span）
+      const startContainer = range.startContainer
+      const endContainer = range.endContainer
+      const walker = document.createTreeWalker(
+        range.commonAncestorContainer,
+        NodeFilter.SHOW_ELEMENT,
+        {
+          acceptNode: (n) => {
+            return (n as HTMLElement).classList?.contains('__annotation_highlight__')
+              ? NodeFilter.FILTER_ACCEPT
+              : NodeFilter.FILTER_SKIP
+          }
+        }
+      )
+      const toRemove: HTMLElement[] = []
+      let cur = walker.nextNode() as HTMLElement | null
+      while (cur) {
+        toRemove.push(cur)
+        cur = walker.nextNode() as HTMLElement | null
+      }
+      toRemove.forEach(el => {
+        const parent = el.parentNode
+        if (parent) {
+          while (el.firstChild) { parent.insertBefore(el.firstChild, el) }
+          parent.removeChild(el)
+        }
+      })
+      sel.removeAllRanges()
+    }
+    // 每次标注操作后自动保存
+    saveAnnotations()
+  }, [saveAnnotations])
+
   /** mouseup 监听 → React state 控制浮动按钮（仅限阅读区域） */
   useEffect(() => {
     const onMouseUp = (e: MouseEvent) => {
+      // ★ 标注模式下不弹出翻译按钮（由标注 effect 处理）
+      if (annotationModeRef.current) {
+        handleAnnotationMouseUp(e)
+        return
+      }
       const sel = window.getSelection()
       const text = sel?.toString().trim() ?? ''
       if (!text || !sel || sel.isCollapsed) { setShowFloatBtn(false); selectedTextRef.current = ''; return }
@@ -1995,6 +2143,64 @@ export default function ReaderView() {
 
             {/* ===== AI 问答按钮 ===== */}
             <button onClick={() => useStore.setState({ qaPanelOpen: !qaPanelOpen })} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${qaPanelOpen ? 'bg-orange-50 text-orange-600 dark:bg-orange-900/20 dark:text-orange-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'}`} title="AI 问答"><MessageCircle size={13} />AI问答</button>
+
+            <div className="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1" />
+
+            {/* ===== 标注按钮 ===== */}
+            <div className="relative">
+              <button
+                onClick={() => setAnnotationMode(!annotationMode)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors
+                  ${annotationMode
+                    ? 'bg-pink-50 text-pink-600 dark:bg-pink-900/20 dark:text-pink-400'
+                    : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                  }`}
+                title="标注"
+              >
+                <Highlighter size={13} />
+                标注
+              </button>
+              {annotationMode && (
+                <div className="absolute top-full left-0 mt-1 z-50 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 p-2 flex items-center gap-1">
+                  {/* 荧光笔按钮 + 颜色选择 */}
+                  <button
+                    onClick={() => setAnnotationTool('highlighter')}
+                    className={`flex items-center gap-1 px-2 py-1 text-xs font-medium rounded transition-colors
+                      ${annotationTool === 'highlighter'
+                        ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300'
+                        : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700'
+                      }`}
+                    title="荧光笔"
+                  >
+                    <Highlighter size={13} />
+                  </button>
+                  <div className="flex items-center gap-0.5 border-l border-gray-200 dark:border-gray-600 pl-1 ml-0.5">
+                    {(darkMode ? HIGHLIGHTER_COLORS_DARK : HIGHLIGHTER_COLORS).map(c => (
+                      <button
+                        key={c}
+                        onClick={() => { setHighlighterColor(c); setAnnotationTool('highlighter') }}
+                        className={`w-4 h-4 rounded-full transition-transform hover:scale-125 border-2 ${highlighterColor === c && annotationTool === 'highlighter' ? 'border-gray-700 dark:border-yellow-300' : 'border-gray-300 dark:border-gray-500'}`}
+                        style={{ backgroundColor: c }}
+                        title={c}
+                      />
+                    ))}
+                  </div>
+                  <div className="w-px h-5 bg-gray-200 dark:bg-gray-600 mx-1" />
+                  {/* 橡皮按钮 */}
+                  <button
+                    onClick={() => setAnnotationTool('eraser')}
+                    className={`flex items-center gap-1 px-2 py-1 text-xs font-medium rounded transition-colors
+                      ${annotationTool === 'eraser'
+                        ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                        : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700'
+                      }`}
+                    title="橡皮"
+                  >
+                    <Eraser size={13} />
+                  </button>
+                </div>
+              )}
+            </div>
 
             <div className="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1" />
 

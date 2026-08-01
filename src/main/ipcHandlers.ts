@@ -198,6 +198,16 @@ export function registerIpcHandlers(): void {
     }
   })
 
+  // ================================================================
+  // M14: 荧光笔
+  // ================================================================
+  ipcMain.handle('highlights:get', async (_event, articleId: number) => {
+    try { const { getArticleHighlights } = await import('./db'); const data = getArticleHighlights(articleId); return { success: true, data } } catch (err) { return { success: false, error: String(err) } }
+  })
+  ipcMain.handle('highlights:save', async (_event, articleId: number, highlights: string) => {
+    try { const { saveArticleHighlights } = await import('./db'); saveArticleHighlights(articleId, highlights); return { success: true } } catch (err) { return { success: false, error: String(err) } }
+  })
+
   ipcMain.handle('backend:markRead', async (_event, articleId: number) => {
     try {
       const { markArticleRead } = await import('./db')

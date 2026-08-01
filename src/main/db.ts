@@ -294,6 +294,11 @@ export function initDatabase(dbPath: string): BetterSQLite3Database {
     // 迁移失败忽略
   }
 
+  // M14 兼容迁移：highlights 列（荧光笔）
+  try {
+    sqlite.exec('ALTER TABLE articles ADD COLUMN highlights TEXT');
+  } catch { /* 列已存在 */ }
+
   // M13 兼容迁移：browse_history 表
   try {
     sqlite.exec(`
@@ -878,4 +883,18 @@ export function getDailyBrowseCounts(days: number = 7): { date: string; count: n
 /** 清空浏览历史 */
 export function clearBrowseHistory(): void {
   getDb().delete(browseHistory).run();
+}
+
+// ============================================================
+// M14: Highlight CRUD
+// ============================================================
+export function getArticleHighlights(articleId: number): string | null {
+  const sqlite = getRawDb()
+  const row = sqlite.prepare('SELECT highlights FROM articles WHERE id = ?').get(articleId) as { highlights: string | null } | undefined
+  return row?.highlights ?? null
+}
+
+export function saveArticleHighlights(articleId: number, highlights: string): void {
+  const sqlite = getRawDb()
+  sqlite.prepare('UPDATE articles SET highlights = ? WHERE id = ?').run(highlights, articleId)
 }

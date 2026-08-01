@@ -62,6 +62,10 @@ interface AppState {
   selectionTranslateLoading: boolean
   selectionTargetLang: string
 
+  // ---- 荧光笔 ----
+  highlighterMode: 'off' | 'pen' | 'eraser'
+  highlighterColor: string
+
   // ---- 笔记 ----
   noteContent: string
   noteLoading: boolean
@@ -264,6 +268,10 @@ export const useStore = create<AppState>((set, get) => {
     // ---- 字体设置默认值 ----
     readerFontFamily: saved.readerFontFamily ?? 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
     readerFontSize: saved.readerFontSize ?? 16,
+
+    // ---- 荧光笔默认值 ----
+    highlighterMode: 'off' as const,
+    highlighterColor: '#fbbf24',
 
     // ---- 笔记默认值 ----
     noteContent: '',

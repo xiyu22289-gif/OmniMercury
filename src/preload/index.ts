@@ -212,6 +212,12 @@ const api = {
   clearBrowseHistory: (): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke('history:clear'),
 
+  // ---- M14 荧光笔 ----
+  getHighlights: (articleId: number): Promise<{ success: boolean; data?: string | null; error?: string }> =>
+    ipcRenderer.invoke('highlights:get', articleId),
+  saveHighlights: (articleId: number, highlights: string): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('highlights:save', articleId, highlights),
+
   // ---- M15 AI 问答 ----
   askQuestion: (articleId: number, articleContent: string, articleTitle: string, question: string, lang?: string): Promise<{ success: boolean }> =>
     ipcRenderer.invoke('llm:askQuestion', articleId, articleContent, articleTitle, question, lang),
