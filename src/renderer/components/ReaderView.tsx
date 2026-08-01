@@ -238,7 +238,7 @@ function NewTabTranslation({
 // ============ 主组件 ============
 
 export default function ReaderView() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const {
     // 文章状态
     selectedArticleId,
@@ -655,7 +655,7 @@ export default function ReaderView() {
     const q = qaQuestionRef.current.trim(); if (!selectedArticleIdRef.current || !q || qaStreamLoading) return
     const c = useStore.getState().articleContent || ''; const a = useStore.getState().articles.find(x => x.id === selectedArticleIdRef.current)
     qaQuestionRef.current = ''; setQaQuestion(''); resetQaStream(); useStore.setState({ qaStreamLoading: true })
-    try { await window.api.askQuestion(selectedArticleIdRef.current, c, a?.title || '', q) } catch (err) { useStore.setState({ qaStream: String(err), qaStreamLoading: false }) }
+    try { await window.api.askQuestion(selectedArticleIdRef.current, c, a?.title || '', q, i18n.language) } catch (err) { useStore.setState({ qaStream: String(err), qaStreamLoading: false }) }
   }, [qaStreamLoading])
 
   /** 触发翻译 — surroundContents 包裹高亮（不破坏 DOM 结构）+ 锚点 */

@@ -213,8 +213,8 @@ const api = {
     ipcRenderer.invoke('history:clear'),
 
   // ---- M15 AI 问答 ----
-  askQuestion: (articleId: number, articleContent: string, articleTitle: string, question: string): Promise<{ success: boolean }> =>
-    ipcRenderer.invoke('llm:askQuestion', articleId, articleContent, articleTitle, question),
+  askQuestion: (articleId: number, articleContent: string, articleTitle: string, question: string, lang?: string): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke('llm:askQuestion', articleId, articleContent, articleTitle, question, lang),
 }
 
 contextBridge.exposeInMainWorld('api', api)

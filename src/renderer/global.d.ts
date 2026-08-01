@@ -121,7 +121,7 @@ declare global {
       clearBrowseHistory: () => Promise<{ success: boolean; error?: string }>
 
       // ---- M15 AI 问答 ----
-      askQuestion: (articleId: number, articleContent: string, articleTitle: string, question: string) => Promise<{ success: boolean }>
+      askQuestion: (articleId: number, articleContent: string, articleTitle: string, question: string, lang?: string) => Promise<{ success: boolean }>
     }
   }
 }

@@ -388,11 +388,11 @@ export function registerIpcHandlers(): void {
   // ================================================================
   // M15: AI 问答
   // ================================================================
-  ipcMain.handle('llm:askQuestion', async (event, articleId: number, articleContent: string, articleTitle: string, question: string) => {
+  ipcMain.handle('llm:askQuestion', async (event, articleId: number, articleContent: string, articleTitle: string, question: string, lang?: string) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (!win) return { success: false, error: '窗口不存在' }
     const { askQuestion } = await import('./llmService')
-    askQuestion(articleId, articleContent, articleTitle, question, (chunk) => win.webContents.send('llm:stream-chunk', chunk))
+    askQuestion(articleId, articleContent, articleTitle, question, (chunk) => win.webContents.send('llm:stream-chunk', chunk), lang)
       .catch(err => { console.error('[ipcHandlers] askQuestion 异常：', err) })
     return { success: true }
   })

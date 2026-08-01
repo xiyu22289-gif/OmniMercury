@@ -574,19 +574,48 @@ export async function summarizeArticle(request: SummarizeRequest, callback: Stre
 // M15: AI 问答（流式）
 // ============================================================
 
+/** 根据 i18n 语言代码映射到 askQuestion prompt 模板 */
+const QA_PROMPT_TEMPLATES: Record<string, { system: string; user: string }> = {
+  zh: {
+    system: '你是一个专业的文章内容助手，用简体中文回答所有问题。',
+    user: '文章标题：{title}\n\n文章内容：{content}\n\n用户问题：{question}\n\n请用简体中文简洁准确地回答：',
+  },
+  'zh-TW': {
+    system: '你是一個專業的文章內容助手，用繁體中文回答所有問題。',
+    user: '文章標題：{title}\n\n文章內容：{content}\n\n用戶問題：{question}\n\n請用繁體中文簡潔準確地回答：',
+  },
+  en: {
+    system: 'You are a professional article content assistant. Answer all questions in English ONLY.',
+    user: 'Article Title: {title}\n\nArticle Content: {content}\n\nUser Question: {question}\n\nPlease answer concisely and accurately in English:',
+  },
+}
+
+function buildQaPrompt(articleTitle: string, articleContent: string, question: string, lang: string): { systemPrompt: string; userPrompt: string } {
+  const content = articleContent.slice(0, 6000)
+  const tpl = QA_PROMPT_TEMPLATES[lang] || QA_PROMPT_TEMPLATES['zh']!
+  return {
+    systemPrompt: tpl.system,
+    userPrompt: tpl.user.replace('{title}', articleTitle).replace('{content}', content).replace('{question}', question),
+  }
+}
+
 export async function askQuestion(
   articleId: number, articleContent: string, articleTitle: string,
-  question: string, callback: StreamCallback,
+  question: string, callback: StreamCallback, lang?: string,
 ): Promise<void> {
   const effective = getFuncConfig('qa' as LlmFunctionType)
   if (!effective.apiKey) { callback({ type: 'qa' as any, articleId, message: '未配置问答 AI 的 API Key' }); return }
-  const prompt = `文章标题：${articleTitle}\n\n文章内容：${articleContent.slice(0, 6000)}\n\n用户问题：${question}\n\n请简洁准确地回答：`
+  const { systemPrompt, userPrompt } = buildQaPrompt(articleTitle, articleContent, question, lang || 'zh')
   let client: OpenAI
   try { client = createClientFromEffectiveConfig('qa' as LlmFunctionType) } catch (err) { callback({ type: 'qa' as any, articleId, message: String(err) }); return }
   try {
-    const stream = await client.chat.completions.create({ model: effective.model, messages: [{ role: 'user', content: prompt }], temperature: 0.7, stream: true })
+    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ]
+    const stream = await client.chat.completions.create({ model: effective.model, messages, temperature: 0.7, stream: true })
     const { fullText } = await consumeStreamWithCallback(stream, (delta) => callback({ type: 'qa' as any, articleId, delta }), (errorMsg) => callback({ type: 'qa' as any, articleId, message: errorMsg }))
-    if (fullText) { callback({ type: 'qa' as any, articleId, fullText: fullText.trim() }); await recordTokens({ model: effective.model, operation: 'qa', prompt, completion: fullText }) }
+    if (fullText) { callback({ type: 'qa' as any, articleId, fullText: fullText.trim() }); await recordTokens({ model: effective.model, operation: 'qa', prompt: systemPrompt + userPrompt, completion: fullText }) }
   } catch (err) { const detail = classifyError(err, effective.baseUrl); callback({ type: 'qa' as any, articleId, message: formatErrorDetail(detail), detail }) }
 }
 
