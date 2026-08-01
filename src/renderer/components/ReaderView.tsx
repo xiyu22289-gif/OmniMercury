@@ -151,14 +151,29 @@ function NewTabTranslation({
   const [dividerPos, setDividerPos] = useState(50)
   const isDragging = useRef(false)
 
-  const handleMouseDown = useCallback(() => { isDragging.current = true }, [])
+  const lastXRef = useRef(0)
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    isDragging.current = true
+    lastXRef.current = e.clientX
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+  }, [])
 
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
       if (!isDragging.current) return
-      setDividerPos(Math.max(20, Math.min(80, (e.clientX / window.innerWidth) * 100)))
+      const delta = e.clientX - lastXRef.current
+      lastXRef.current = e.clientX
+      const deltaPct = (delta / window.innerWidth) * 100
+      setDividerPos(prev => Math.max(20, Math.min(80, prev + deltaPct)))
     }
-    const onUp = () => { isDragging.current = false }
+    const onUp = () => {
+      isDragging.current = false
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
     return () => {
@@ -421,9 +436,15 @@ export default function ReaderView() {
   const qaQuestionRef = useRef('')
   const [qaPanelWidth, setQaPanelWidth] = useState(35)
   const isQaDragging = useRef(false)
+  const qaLastXRef = useRef(0)
   useEffect(() => { qaQuestionRef.current = qaQuestion }, [qaQuestion])
   useEffect(() => {
-    const onMove = (e: MouseEvent) => { if (!isQaDragging.current) return; setQaPanelWidth(Math.max(20, Math.min(60, 100 - (e.clientX / window.innerWidth) * 100))) }
+    const onMove = (e: MouseEvent) => {
+      if (!isQaDragging.current) return
+      const delta = e.clientX - qaLastXRef.current
+      qaLastXRef.current = e.clientX
+      setQaPanelWidth(prev => Math.max(20, Math.min(60, prev - (delta / window.innerWidth) * 100)))
+    }
     const onUp = () => { if (isQaDragging.current) { isQaDragging.current = false; document.body.style.userSelect = ''; document.body.style.cursor = '' } }
     window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp)
     return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp) }
@@ -1254,13 +1275,26 @@ export default function ReaderView() {
 
   // ============ 拖拽事件 ============
 
-  const handleDividerMouseDown = useCallback(() => { isDragging.current = true }, [])
+  const sideLastXRef = useRef(0)
+  const handleDividerMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    isDragging.current = true
+    sideLastXRef.current = e.clientX
+    document.body.style.userSelect = 'none'
+    document.body.style.cursor = 'col-resize'
+  }, [])
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
       if (!isDragging.current) return
-      setDividerPos(Math.max(20, Math.min(80, (e.clientX / window.innerWidth) * 100)))
+      const delta = e.clientX - sideLastXRef.current
+      sideLastXRef.current = e.clientX
+      setDividerPos(prev => Math.max(20, Math.min(80, prev + (delta / window.innerWidth) * 100)))
     }
-    const onUp = () => { isDragging.current = false }
+    const onUp = () => {
+      isDragging.current = false
+      document.body.style.userSelect = ''
+      document.body.style.cursor = ''
+    }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
     return () => {
@@ -1269,13 +1303,26 @@ export default function ReaderView() {
     }
   }, [])
 
-  const handleSummaryDividerDown = useCallback(() => { isSummaryDragging.current = true }, [])
+  const summaryLastXRef = useRef(0)
+  const handleSummaryDividerDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    isSummaryDragging.current = true
+    summaryLastXRef.current = e.clientX
+    document.body.style.userSelect = 'none'
+    document.body.style.cursor = 'col-resize'
+  }, [])
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
       if (!isSummaryDragging.current) return
-      setSummaryPanelWidth(Math.max(20, Math.min(60, (e.clientX / window.innerWidth) * 100)))
+      const delta = e.clientX - summaryLastXRef.current
+      summaryLastXRef.current = e.clientX
+      setSummaryPanelWidth(prev => Math.max(20, Math.min(60, prev - (delta / window.innerWidth) * 100)))
     }
-    const onUp = () => { isSummaryDragging.current = false }
+    const onUp = () => {
+      isSummaryDragging.current = false
+      document.body.style.userSelect = ''
+      document.body.style.cursor = ''
+    }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
     return () => {
