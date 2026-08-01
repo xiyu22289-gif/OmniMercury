@@ -332,15 +332,16 @@ export default function ReaderView() {
   // ============ 标注功能 ============
   const [annotationMode, setAnnotationMode] = useState(false)
   const [annotationTool, setAnnotationTool] = useState<'highlighter' | 'eraser'>('highlighter')
-  const [highlighterColor, setHighlighterColor] = useState('#fef08a')
+  const [highlighterColor, setHighlighterColor] = useState('#eab308')
   const annotationModeRef = useRef(false)
   const annotationToolRef = useRef<'highlighter' | 'eraser'>('highlighter')
-  const highlighterColorRef = useRef('#fef08a')
+  const highlighterColorRef = useRef('#eab308')
   useEffect(() => { annotationModeRef.current = annotationMode }, [annotationMode])
   useEffect(() => { annotationToolRef.current = annotationTool }, [annotationTool])
   useEffect(() => { highlighterColorRef.current = highlighterColor }, [highlighterColor])
-  const HIGHLIGHTER_COLORS = ['#fef08a', '#bfdbfe', '#bbf7d0', '#fecaca', '#e9d5ff', '#fed7aa', '#f5f5f4', '#d9f99d']
-  const HIGHLIGHTER_COLORS_DARK = ['#eab308', '#3b82f6', '#22c55e', '#ef4444', '#a855f7', '#f97316', '#a1a1aa', '#84cc16']
+  const HIGHLIGHTER_COLORS = ['#eab308', '#3b82f6', '#22c55e', '#ef4444', '#a855f7', '#f97316', '#a1a1aa', '#84cc16']
+  const annotationBtnRef = useRef<HTMLDivElement>(null)
+  const [annotationBtnRect, setAnnotationBtnRect] = useState<{ top: number; left: number } | null>(null)
 
   // ========== 标注持久化 ==========
   const saveAnnotations = useCallback(() => {
@@ -697,19 +698,23 @@ export default function ReaderView() {
     if ((e.target as HTMLElement).closest?.('[data-no-select]')) return
 
     if (tool === 'highlighter') {
-      // 荧光笔：用 span 包裹选区，应用背景色
+      // 先提取选区，清理旧标注 span（保留文字），再包裹新颜色
       try {
         const r = sel.getRangeAt(0)
+        // 提取选区内容（含旧标注 span）
+        const extracted = r.extractContents()
+        // 解开旧标注 span：找到内部所有 annotation span 并移除标签保留文字
+        const spans = extracted.querySelectorAll?.('.__annotation_highlight__') ?? []
+        spans.forEach((el: Element) => {
+          const p = el.parentNode
+          if (p) { while (el.firstChild) p.insertBefore(el.firstChild, el); p.removeChild(el) }
+        })
+        // 用新颜色 span 包裹已净化的内容
         const span = document.createElement('span')
         span.className = '__annotation_highlight__'
         span.style.cssText = `background:${highlighterColorRef.current};color:inherit;border-radius:2px;padding:0;`
-        try {
-          r.surroundContents(span)
-        } catch {
-          const contents = r.extractContents()
-          span.appendChild(contents)
-          r.insertNode(span)
-        }
+        span.appendChild(extracted)
+        r.insertNode(span)
         sel.removeAllRanges()
       } catch { /* 跨节点选区失败则静默 */ }
     } else if (tool === 'eraser') {
@@ -2197,9 +2202,17 @@ export default function ReaderView() {
             <div className="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1" />
 
             {/* ===== 标注按钮 ===== */}
-            <div className="relative">
+            <div className="relative" ref={annotationBtnRef}>
               <button
-                onClick={() => setAnnotationMode(!annotationMode)}
+                onClick={() => {
+                  if (!annotationMode) {
+                    const r = annotationBtnRef.current?.getBoundingClientRect()
+                    if (r) setAnnotationBtnRect({ top: r.bottom + 4, left: r.left + r.width / 2 })
+                  } else {
+                    setAnnotationBtnRect(null)
+                  }
+                  setAnnotationMode(!annotationMode)
+                }}
                 className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors
                   ${annotationMode
                     ? 'bg-pink-50 text-pink-600 dark:bg-pink-900/20 dark:text-pink-400'
@@ -2210,8 +2223,12 @@ export default function ReaderView() {
                 <Highlighter size={13} />
                 标注
               </button>
-              {annotationMode && (
-                <div className="absolute top-full left-0 mt-1 z-50 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 p-2 flex items-center gap-1">
+              {annotationMode && annotationBtnRect && createPortal(
+                <div
+                  data-annotation-popup="true"
+                  className="fixed z-[9999] bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 p-2 flex items-center gap-1"
+                  style={{ top: annotationBtnRect.top, left: annotationBtnRect.left, transform: 'translateX(-50%)' }}
+                >
                   {/* 荧光笔按钮 + 颜色选择 */}
                   <button
                     onClick={() => setAnnotationTool('highlighter')}
@@ -2225,7 +2242,7 @@ export default function ReaderView() {
                     <Highlighter size={13} />
                   </button>
                   <div className="flex items-center gap-0.5 border-l border-gray-200 dark:border-gray-600 pl-1 ml-0.5">
-                    {(darkMode ? HIGHLIGHTER_COLORS_DARK : HIGHLIGHTER_COLORS).map(c => (
+                    {HIGHLIGHTER_COLORS.map((c: string) => (
                       <button
                         key={c}
                         onClick={() => { setHighlighterColor(c); setAnnotationTool('highlighter') }}
@@ -2248,7 +2265,8 @@ export default function ReaderView() {
                   >
                     <Eraser size={13} />
                   </button>
-                </div>
+                </div>,
+                document.body
               )}
             </div>
 

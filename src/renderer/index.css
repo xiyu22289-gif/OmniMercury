@@ -567,7 +567,18 @@ body.eye-care .reader-view .w-px {
 }
 
 /* ================================================================ */
-/*  7. 译文/摘要卡片边框                                              */
+/*  7. 标注浮层 / Portal 按钮不受护眼模式覆盖                          */
+/* ================================================================ */
+/* Portal 元素渲染在 body 下，不在 .reader-view 内，天然免疫护眼规则。
+   只需给面板本身设定暖色背景，按钮颜色完全由 inline style 控制。 */
+body.eye-care [data-annotation-popup="true"],
+body.eye-care [data-selection-btn="true"] {
+  background-color: #FFF8E6 !important;
+  border-color: #C4AE8A !important;
+}
+
+/* ================================================================ */
+/*  8. 译文/摘要卡片边框                                              */
 /* ================================================================ */
 body.eye-care [class*="border-blue-300"],
 body.eye-care [class*="border-blue-600"] {
