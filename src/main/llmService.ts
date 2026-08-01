@@ -214,16 +214,11 @@ async function tryStreamWithFallback(
     const stream = await createStreamCall()
     return await consumeStreamWithCallback(stream, onDelta, onError)
   } catch (err) {
+    // 流式调用失败 → 一律回退非流式（不检查具体原因）。
+    // 许多第三方 LLM 的流式实现不稳定（如 Fetch error / Load failed），
+    // 但非流式调用通常正常。日志记录后静默降级。
     const msg = err instanceof Error ? err.message : String(err)
-    const code = err?.status ?? err?.response?.status ?? err?.statusCode
-    const isStreamIssue =
-      msg.includes('stream') ||
-      msg.includes('does not support') ||
-      msg.includes('not supported') ||
-      msg.includes('streaming') ||
-      msg.includes('SSE') ||
-      code === 400
-    if (!isStreamIssue) throw err // 非流式问题，继续向上抛给 withRetry
+    console.warn(`[llmService] 流式调用失败，回退到非流式: ${msg}`)
   }
 
   // 2. 流式失败，回退到非流式
@@ -727,7 +722,7 @@ export async function summarizeArticle(request: SummarizeRequest, callback: Stre
         // 流式调用
         () => client.chat.completions.create({
           model,
-          messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: prompt }],
+          messages: [{ role: 'user', content: totalPrompt }],
           temperature: getTemperature(model),
           max_tokens: maxTokens,
           stream: true,
@@ -735,7 +730,7 @@ export async function summarizeArticle(request: SummarizeRequest, callback: Stre
         // 非流式降级调用
         () => client.chat.completions.create({
           model,
-          messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: prompt }],
+          messages: [{ role: 'user', content: totalPrompt }],
           temperature: getTemperature(model),
           max_tokens: maxTokens,
           stream: false,

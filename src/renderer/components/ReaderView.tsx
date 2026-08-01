@@ -1645,7 +1645,14 @@ export default function ReaderView() {
 
   /** ★ 按段落拆分渲染，每段带复选框（适用于任何 HTML 结构） */
   const renderParagraphsWithCheckboxes = () => {
-    const displayContent = articleContent || selectedArticle?.summary || ''
+    // 优先用 Markdown 纯文本；若只有 HTML 内容，从 HTML 提取纯文本
+    let displayContent = articleContent || selectedArticle?.summary || ''
+    if (!displayContent && articleContentHtml) {
+      try {
+        const doc = new DOMParser().parseFromString(articleContentHtml, 'text/html')
+        displayContent = doc.body.textContent || ''
+      } catch { displayContent = articleContentHtml.replace(/<[^>]+>/g, '') }
+    }
 
     if (!displayContent && !isLoading) {
       return (
@@ -2678,7 +2685,7 @@ export default function ReaderView() {
                 className={`rounded-lg p-6 ${containerBg}`}
               >
                 {readerMode === 'reader'
-                  ? (articleContentHtml ? renderHtmlContent() : renderParagraphsWithCheckboxes())
+                  ? (articleContent ? renderParagraphsWithCheckboxes() : renderHtmlContent())
                   : renderOriginalContent()
                 }
               </div>
