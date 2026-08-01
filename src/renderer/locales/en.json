@@ -152,6 +152,7 @@
     "tabSelectiveTranslate": "Select Translation",
     "tabFullSummary": "Full Summary",
     "tabSelectiveSummary": "Select Summary",
+    "tabQA": "AI Q&A LLM",
     "tabTokenStats": "Token Usage",
     "newCustomModel": "New Custom Model",
     "editCustomModel": "Edit Custom Model",

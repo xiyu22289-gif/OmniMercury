@@ -155,6 +155,7 @@
     "tabSelectiveTranslate": "选择翻译LLM",
     "tabFullSummary": "全文摘要LLM",
     "tabSelectiveSummary": "选择摘要LLM",
+    "tabQA": "AI问答LLM",
     "tabTokenStats": "Token用量",
     "newCustomModel": "新建自定义模型",
     "editCustomModel": "编辑自定义模型",

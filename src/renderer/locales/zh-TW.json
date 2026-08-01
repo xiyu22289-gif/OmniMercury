@@ -154,6 +154,7 @@
     "tabSelectiveTranslate": "選擇翻譯LLM",
     "tabFullSummary": "全文摘要LLM",
     "tabSelectiveSummary": "選擇摘要LLM",
+    "tabQA": "AI問答LLM",
     "tabTokenStats": "Token用量",
     "newCustomModel": "新建自訂模型",
     "editCustomModel": "編輯自訂模型",

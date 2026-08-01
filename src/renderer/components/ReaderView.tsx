@@ -911,6 +911,7 @@ export default function ReaderView() {
           }
           else if ('message' in chunk) { setError(chunk.message); setSelectionTranslateLoading(false); if (chunk.detail) setErrorDetail(chunk.detail) }
         } else if (chunk.type === 'qa') {
+          if (chunk.articleId && chunk.articleId !== selectedArticleIdRef.current) return
           if ('delta' in chunk) useStore.setState(s => ({ qaStream: s.qaStream + chunk.delta }))
           else if ('fullText' in chunk) useStore.setState({ qaStreamLoading: false })
           else if ('message' in chunk) useStore.setState({ qaStream: chunk.message, qaStreamLoading: false })
@@ -1022,7 +1023,7 @@ export default function ReaderView() {
     return () => clearTimeout(timer)
   }, [articleContentHtml, articleContent])
 
-  // 切换文章时重置翻译状态 + 拉取文章标签 + 清除段落选中
+  // 切换文章时重置翻译状态 + 拉取文章标签 + 清除段落选中 + 重置 QA 状态
   useEffect(() => {
     translatingRef.current = false
     resetTranslate()
@@ -1040,6 +1041,8 @@ export default function ReaderView() {
     document.querySelectorAll('#__selection_result_anchor__, #__selection_summary_anchor__').forEach(el => el.remove())
     selectionResultAnchorRef.current = null
     selectionSummaryAnchorRef.current = null
+    // 重置 AI 问答状态（每篇文章独立）
+    resetQaStream()
     // 拉取当前文章的标签
     if (selectedArticleId) {
       fetchArticleTags(selectedArticleId)
@@ -1991,7 +1994,7 @@ export default function ReaderView() {
             )}
 
             {/* ===== AI 问答按钮 ===== */}
-            <button onClick={() => useStore.setState({ qaPanelOpen: !qaPanelOpen })} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${qaPanelOpen ? 'bg-teal-50 text-teal-600 dark:bg-teal-900/20 dark:text-teal-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'}`} title="AI 问答"><MessageCircle size={13} />AI问答</button>
+            <button onClick={() => useStore.setState({ qaPanelOpen: !qaPanelOpen })} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${qaPanelOpen ? 'bg-orange-50 text-orange-600 dark:bg-orange-900/20 dark:text-orange-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'}`} title="AI 问答"><MessageCircle size={13} />AI问答</button>
 
             <div className="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1" />
 
@@ -2538,21 +2541,21 @@ export default function ReaderView() {
       {/* ===== AI 问答面板 ===== */}
       {qaPanelOpen && !hasSummary && (
         <>
-          <div onMouseDown={() => { isQaDragging.current = true; document.body.style.userSelect = 'none'; document.body.style.cursor = 'col-resize' }} style={{ width: 6, cursor: 'col-resize', background: '#d1d5db', flexShrink: 0, borderRadius: 3, alignSelf: 'stretch' }} className="hover:bg-teal-400 transition-colors" />
+          <div onMouseDown={() => { isQaDragging.current = true; document.body.style.userSelect = 'none'; document.body.style.cursor = 'col-resize' }} style={{ width: 6, cursor: 'col-resize', background: '#d1d5db', flexShrink: 0, borderRadius: 3, alignSelf: 'stretch' }} className="hover:bg-orange-400 transition-colors" />
           <div className={containerBg} style={{ width: `${qaPanelWidth}%`, overflowY: 'auto', paddingLeft: 12, display: 'flex', flexDirection: 'column' }}>
             <div className="sticky top-0 z-10 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm pb-2 mb-3 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5"><MessageCircle size={13} className="text-teal-500" /><span className="text-xs font-semibold text-teal-600 dark:text-teal-400 uppercase tracking-wider">AI 问答</span>{qaStreamLoading && <Loader size={12} className="animate-spin text-teal-400 ml-1" />}</div>
+                <div className="flex items-center gap-1.5"><MessageCircle size={13} className="text-orange-500" /><span className="text-xs font-semibold text-orange-600 dark:text-orange-400 uppercase tracking-wider">AI 问答</span>{qaStreamLoading && <Loader size={12} className="animate-spin text-orange-400 ml-1" />}</div>
                 <button onClick={() => useStore.setState({ qaPanelOpen: false, qaStream: '', qaStreamLoading: false })} className="flex items-center gap-1 px-1.5 py-0.5 text-xs text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"><X size={12} /></button>
               </div>
             </div>
             <div className="flex-1 overflow-y-auto">
-              {qaStream ? <div className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap">{qaStream}</div> : qaStreamLoading ? <div className="flex items-center justify-center py-8"><Loader size={16} className="animate-spin text-teal-400" /></div> : <div className="text-gray-400 text-sm py-8 text-center"><MessageCircle size={32} className="mx-auto mb-2 opacity-30" />向 AI 提问关于这篇文章的问题</div>}
+              {qaStream ? <div className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap">{qaStream}</div> : qaStreamLoading ? <div className="flex items-center justify-center py-8"><Loader size={16} className="animate-spin text-orange-400" /></div> : <div className="text-gray-400 text-sm py-8 text-center"><MessageCircle size={32} className="mx-auto mb-2 opacity-30" />向 AI 提问关于这篇文章的问题</div>}
             </div>
             <div className="flex-shrink-0 pt-3 border-t border-gray-200 dark:border-gray-700 mt-2">
               <div className="flex items-center gap-2">
-                <input type="text" defaultValue="" onChange={e => qaQuestionRef.current = e.target.value} onKeyDown={e => { if (e.key === 'Enter' && qaQuestionRef.current.trim() && !qaStreamLoading) handleAskQuestion() }} placeholder="输入你的问题..." disabled={qaStreamLoading} className="flex-1 px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 dark:text-white rounded-lg focus:outline-none focus:ring-1 focus:ring-teal-500 disabled:opacity-50" />
-                <button onClick={handleAskQuestion} disabled={!qaQuestionRef.current.trim() || qaStreamLoading} className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-white bg-teal-500 rounded-lg hover:bg-teal-600 disabled:opacity-40 transition-colors flex-shrink-0"><Send size={13} /></button>
+                <input type="text" defaultValue="" onChange={e => qaQuestionRef.current = e.target.value} onKeyDown={e => { if (e.key === 'Enter' && qaQuestionRef.current.trim() && !qaStreamLoading) handleAskQuestion() }} placeholder="输入你的问题..." disabled={qaStreamLoading} className="flex-1 px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 dark:text-white rounded-lg focus:outline-none focus:ring-1 focus:ring-orange-500 disabled:opacity-50" />
+                <button onClick={handleAskQuestion} disabled={!qaQuestionRef.current.trim() || qaStreamLoading} className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-white bg-orange-500 rounded-lg hover:bg-orange-600 disabled:opacity-40 transition-colors flex-shrink-0"><Send size={13} /></button>
               </div>
             </div>
           </div>
