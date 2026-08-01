@@ -571,6 +571,26 @@ export async function summarizeArticle(request: SummarizeRequest, callback: Stre
 }
 
 // ============================================================
+// M15: AI 问答（流式）
+// ============================================================
+
+export async function askQuestion(
+  articleId: number, articleContent: string, articleTitle: string,
+  question: string, callback: StreamCallback,
+): Promise<void> {
+  const effective = getFuncConfig('qa' as LlmFunctionType)
+  if (!effective.apiKey) { callback({ type: 'qa' as any, articleId, message: '未配置问答 AI 的 API Key' }); return }
+  const prompt = `文章标题：${articleTitle}\n\n文章内容：${articleContent.slice(0, 6000)}\n\n用户问题：${question}\n\n请简洁准确地回答：`
+  let client: OpenAI
+  try { client = createClientFromEffectiveConfig('qa' as LlmFunctionType) } catch (err) { callback({ type: 'qa' as any, articleId, message: String(err) }); return }
+  try {
+    const stream = await client.chat.completions.create({ model: effective.model, messages: [{ role: 'user', content: prompt }], temperature: 0.7, stream: true })
+    const { fullText } = await consumeStreamWithCallback(stream, (delta) => callback({ type: 'qa' as any, articleId, delta }), (errorMsg) => callback({ type: 'qa' as any, articleId, message: errorMsg }))
+    if (fullText) { callback({ type: 'qa' as any, articleId, fullText: fullText.trim() }); await recordTokens({ model: effective.model, operation: 'qa', prompt, completion: fullText }) }
+  } catch (err) { const detail = classifyError(err, effective.baseUrl); callback({ type: 'qa' as any, articleId, message: formatErrorDetail(detail), detail }) }
+}
+
+// ============================================================
 // 选择段落摘要
 // ============================================================
 

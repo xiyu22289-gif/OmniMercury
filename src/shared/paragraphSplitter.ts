@@ -20,9 +20,11 @@ export function splitIntoParagraphs(content: string): string[] {
     if (segs.length > 1) return segs
   }
 
-  // 2. 双换行分割
-  const double = raw.split(/\n\n+/).map(s => s.trim()).filter(Boolean)
-  if (double.length > 1) return double
+  // 2. 双换行分割（代码块保护）
+  const codeBlocks: string[] = []
+  const protectedRaw = raw.replace(/(```[^`]*```)/gs, (match) => { codeBlocks.push(match); return `__CODE_${codeBlocks.length - 1}__` })
+  const double = protectedRaw.split(/\n\n+/).map(s => s.trim()).filter(Boolean)
+  if (double.length > 1) return double.map(seg => seg.replace(/__CODE_(\d+)__/g, (_m, idx) => codeBlocks[parseInt(idx)]))
 
   // 3. 单换行分割
   const single = raw.split(/\n/).map(s => s.trim()).filter(Boolean)

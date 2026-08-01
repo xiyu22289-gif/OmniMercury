@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useStore } from '../store'
-import { X, RotateCcw, Check, Zap, Loader2, Eye, EyeOff, BarChart3, Globe, FileText, MousePointerClick, ListFilter, Star } from 'lucide-react'
+import { X, RotateCcw, Check, Zap, Loader2, Eye, EyeOff, BarChart3, Globe, FileText, MousePointerClick, ListFilter, Star, MessageCircle } from 'lucide-react'
 import type { TokenStats, LlmFunctionType, LlmFunctionConfig, CustomModelConfig, LlmModelItem } from '../../shared/types'
 import { ModelDetailView } from './LLMSettings'
 
@@ -12,15 +12,16 @@ const PRESET_MODELS = [
   { label: 'GPT-5.6 Luna (CodeAPI)', baseUrl: 'https://codeapi.icu/v1', model: 'gpt-5.6-luna' },
 ]
 
-type LTabType = 'fullTranslate' | 'selectiveTranslate' | 'fullSummary' | 'selectiveSummary' | 'tokenStats'
+type LTabType = 'fullTranslate' | 'selectiveTranslate' | 'fullSummary' | 'selectiveSummary' | 'qa' | 'tokenStats'
 const TAB_CONFIG: { key: LTabType; icon: typeof Globe; labelKey: string }[] = [
   { key: 'fullTranslate', icon: Globe, labelKey: 'llmSettings.tabFullTranslate' },
   { key: 'selectiveTranslate', icon: MousePointerClick, labelKey: 'llmSettings.tabSelectiveTranslate' },
   { key: 'fullSummary', icon: FileText, labelKey: 'llmSettings.tabFullSummary' },
   { key: 'selectiveSummary', icon: ListFilter, labelKey: 'llmSettings.tabSelectiveSummary' },
+  { key: 'qa', icon: MessageCircle, labelKey: 'llmSettings.tabQA' },
   { key: 'tokenStats', icon: BarChart3, labelKey: 'llmSettings.tabTokenStats' },
 ]
-const ALL_FUNC_TYPES: LlmFunctionType[] = ['fullTranslate', 'selectiveTranslate', 'fullSummary', 'selectiveSummary']
+const ALL_FUNC_TYPES: LlmFunctionType[] = ['fullTranslate', 'selectiveTranslate', 'fullSummary', 'selectiveSummary', 'qa']
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`

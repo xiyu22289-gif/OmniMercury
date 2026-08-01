@@ -75,7 +75,7 @@ export interface Tag {
 // ============================================================
 
 /** LLM 功能类型 */
-export type LlmFunctionType = 'fullTranslate' | 'selectiveTranslate' | 'fullSummary' | 'selectiveSummary'
+export type LlmFunctionType = 'fullTranslate' | 'selectiveTranslate' | 'fullSummary' | 'selectiveSummary' | 'qa'
 
 /** 自定义模型配置（用户自行填写的模型） */
 export interface CustomModelConfig {
@@ -102,6 +102,7 @@ export interface LlmGlobalConfig {
   selectiveTranslate: LlmFunctionConfig
   fullSummary: LlmFunctionConfig
   selectiveSummary: LlmFunctionConfig
+  qa: LlmFunctionConfig
 }
 
 /** LLM 服务商配置（旧版兼容，存于 electron-store） */
@@ -187,7 +188,7 @@ export interface SelectiveSummarizeRequest {
 /** 流式数据块（主进程 → 渲染进程单向推送） */
 export interface LlmStreamChunk {
   /** 操作类型 */
-  type: 'summarize' | 'translate' | 'translateParagraph' | 'translateComplete' | 'selectiveTranslate' | 'selectiveSummarize'
+  type: 'summarize' | 'translate' | 'translateParagraph' | 'translateComplete' | 'selectiveTranslate' | 'selectiveSummarize' | 'qa'
   /** 文章 ID */
   articleId: number
   /** 段落索引（仅 translateParagraph 使用） */
@@ -198,7 +199,7 @@ export interface LlmStreamChunk {
 
 /** 流式结束通知 */
 export interface LlmStreamDone {
-  type: 'summarize' | 'translate' | 'translateParagraph' | 'translateComplete' | 'selectiveTranslate' | 'selectiveSummarize'
+  type: 'summarize' | 'translate' | 'translateParagraph' | 'translateComplete' | 'selectiveTranslate' | 'selectiveSummarize' | 'qa'
   articleId: number
   /** 段落索引（仅 translateParagraph 使用） */
   paragraphIndex?: number
@@ -224,7 +225,7 @@ export interface LlmErrorDetail {
 
 /** 流式错误通知 */
 export interface LlmStreamError {
-  type: 'summarize' | 'translate' | 'translateParagraph' | 'translateComplete' | 'selectiveTranslate' | 'selectiveSummarize'
+  type: 'summarize' | 'translate' | 'translateParagraph' | 'translateComplete' | 'selectiveTranslate' | 'selectiveSummarize' | 'qa'
   articleId: number
   /** 段落索引（仅 translateParagraph 使用） */
   paragraphIndex?: number

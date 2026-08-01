@@ -50,6 +50,12 @@ interface AppState {
   /** 翻译目标语言 */
   translateTargetLang: string
 
+  // ---- AI 问答 ----
+  qaStream: string
+  qaStreamLoading: boolean
+  qaPanelOpen: boolean
+  resetQaStream: () => void
+
   // ---- 选择文本翻译 ----
   selectionOriginal: string
   selectionTranslation: string
@@ -282,6 +288,12 @@ export const useStore = create<AppState>((set, get) => {
     paragraphTranslations: [],
     displayMode: saved.displayMode ?? 'topBottom',
     translateTargetLang: saved.translateTargetLang ?? 'Chinese',
+
+    // ---- AI 问答默认值 ----
+    qaStream: '',
+    qaStreamLoading: false,
+    qaPanelOpen: false,
+    resetQaStream: () => set({ qaStream: '', qaStreamLoading: false }),
 
     // ---- 选择文本翻译默认值 ----
     selectionOriginal: '',

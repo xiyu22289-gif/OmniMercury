@@ -211,6 +211,10 @@ const api = {
     ipcRenderer.invoke('history:get', limit),
   clearBrowseHistory: (): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke('history:clear'),
+
+  // ---- M15 AI 问答 ----
+  askQuestion: (articleId: number, articleContent: string, articleTitle: string, question: string): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke('llm:askQuestion', articleId, articleContent, articleTitle, question),
 }
 
 contextBridge.exposeInMainWorld('api', api)

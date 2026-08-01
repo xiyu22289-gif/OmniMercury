@@ -11,7 +11,7 @@ import {
   Globe, ExternalLink, Sparkles, Languages, Loader, Settings,
   Check, Columns, AlignJustify, Replace, X,
   BookOpen, Monitor, Type, Minus, Plus, ChevronDown, Tag, Zap, Square, CheckSquare, Loader2, PenLine, Download,
-  Search, ArrowUp, ArrowDown, Keyboard, ArrowLeft
+  Search, ArrowUp, ArrowDown, Keyboard, ArrowLeft, MessageCircle, Send
 } from 'lucide-react'
 import NotesPanel from './NotesPanel'
 import ResizeHandle from './ResizeHandle'
@@ -291,6 +291,11 @@ export default function ReaderView() {
     batchAddTagsToArticle,
     // 笔记
     notePanelOpen,
+    // AI 问答
+    qaStream,
+    qaStreamLoading,
+    qaPanelOpen,
+    resetQaStream,
     // 选择文本翻译
     selectionOriginal,
     selectionTranslation,
@@ -345,6 +350,19 @@ export default function ReaderView() {
   // 笔记面板宽度
   const [notePanelWidth, setNotePanelWidth] = useState(30)
 
+  // AI 问答
+  const [qaQuestion, setQaQuestion] = useState('')
+  const qaQuestionRef = useRef('')
+  const [qaPanelWidth, setQaPanelWidth] = useState(35)
+  const isQaDragging = useRef(false)
+  useEffect(() => { qaQuestionRef.current = qaQuestion }, [qaQuestion])
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => { if (!isQaDragging.current) return; setQaPanelWidth(Math.max(20, Math.min(60, 100 - (e.clientX / window.innerWidth) * 100))) }
+    const onUp = () => { if (isQaDragging.current) { isQaDragging.current = false; document.body.style.userSelect = ''; document.body.style.cursor = '' } }
+    window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp)
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp) }
+  }, [])
+
   // 翻译分界线
   const [dividerPos, setDividerPos] = useState(50)
   const isDragging = useRef(false)
@@ -370,6 +388,8 @@ export default function ReaderView() {
       el.removeEventListener('scroll', onScroll)
       setShowScrollToTop(false)
     }
+    // 关闭 QA 面板
+    useStore.setState({ qaPanelOpen: false, qaStream: '', qaStreamLoading: false })
   }, [selectedArticleId])
 
   // ============ 文章内搜索 ============
@@ -607,6 +627,8 @@ export default function ReaderView() {
       const sel = window.getSelection()
       const text = sel?.toString().trim() ?? ''
       if (!text || !sel || sel.isCollapsed) { setShowFloatBtn(false); selectedTextRef.current = ''; return }
+      // ★ 排除代码段/表格/图片内的选区
+      if ((e.target as HTMLElement).closest?.('[data-no-select]')) { setShowFloatBtn(false); selectedTextRef.current = ''; return }
       // 边界检查：选区必须在阅读区域内（含翻译结果、侧边栏）
       const area = document.querySelector('.reader-view') as HTMLElement | null
       if (!area) { setShowFloatBtn(false); selectedTextRef.current = ''; return }
@@ -627,6 +649,14 @@ export default function ReaderView() {
     document.addEventListener('mouseup', onMouseUp)
     return () => document.removeEventListener('mouseup', onMouseUp)
   }, [])
+
+  /** AI 问答：发送问题 */
+  const handleAskQuestion = useCallback(async () => {
+    const q = qaQuestionRef.current.trim(); if (!selectedArticleIdRef.current || !q || qaStreamLoading) return
+    const c = useStore.getState().articleContent || ''; const a = useStore.getState().articles.find(x => x.id === selectedArticleIdRef.current)
+    qaQuestionRef.current = ''; setQaQuestion(''); resetQaStream(); useStore.setState({ qaStreamLoading: true })
+    try { await window.api.askQuestion(selectedArticleIdRef.current, c, a?.title || '', q) } catch (err) { useStore.setState({ qaStream: String(err), qaStreamLoading: false }) }
+  }, [qaStreamLoading])
 
   /** 触发翻译 — surroundContents 包裹高亮（不破坏 DOM 结构）+ 锚点 */
   const triggerSelectiveTranslate = useCallback((targetLang: string) => {
@@ -724,7 +754,7 @@ export default function ReaderView() {
       </a>
     ),
     pre: ({ children, ...props }: any) => (
-      <pre className="overflow-x-auto max-w-full rounded-lg" {...props}>{children}</pre>
+      <pre className="overflow-x-auto max-w-full rounded-lg my-4 block" data-no-select="true" {...props}>{children}</pre>
     ),
     code: ({ children, className, ...props }: any) => {
       // inline code: no language class on <code> → wrap with backtick-style
@@ -880,6 +910,10 @@ export default function ReaderView() {
             setSelectionTranslateLoading(false)
           }
           else if ('message' in chunk) { setError(chunk.message); setSelectionTranslateLoading(false); if (chunk.detail) setErrorDetail(chunk.detail) }
+        } else if (chunk.type === 'qa') {
+          if ('delta' in chunk) useStore.setState(s => ({ qaStream: s.qaStream + chunk.delta }))
+          else if ('fullText' in chunk) useStore.setState({ qaStreamLoading: false })
+          else if ('message' in chunk) useStore.setState({ qaStream: chunk.message, qaStreamLoading: false })
         } else if (chunk.type === 'selectiveSummarize') {
           if (chunk.articleId !== selectedArticleIdRef.current) return
           if ('delta' in chunk) {
@@ -1373,6 +1407,10 @@ export default function ReaderView() {
     return (
       <div className={`prose prose-sm ${darkMode ? 'prose-invert' : 'prose-gray'} max-w-none leading-relaxed`}>
         {paras.map((para, idx) => {
+          const isCode = /^\s*```/.test(para)
+          const isTable = /^\s*\|/.test(para)
+          const isImage = /!\[/.test(para)
+          if (isCode || isTable || isImage) return (<div key={idx} data-para-index={idx} data-no-select="true" className="mb-6 last:mb-0">{renderParagraphWithHighlights(para, idx)}</div>)
           const checked = selectedParagraphIndices.has(idx)
           const Icon = checked ? CheckSquare : Square
           return (
@@ -1952,6 +1990,9 @@ export default function ReaderView() {
               </div>
             )}
 
+            {/* ===== AI 问答按钮 ===== */}
+            <button onClick={() => useStore.setState({ qaPanelOpen: !qaPanelOpen })} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${qaPanelOpen ? 'bg-teal-50 text-teal-600 dark:bg-teal-900/20 dark:text-teal-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'}`} title="AI 问答"><MessageCircle size={13} />AI问答</button>
+
             <div className="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1" />
 
             {/* ===== 笔记按钮 ===== */}
@@ -2493,6 +2534,30 @@ export default function ReaderView() {
               </div>
             </div>
           )}
+
+      {/* ===== AI 问答面板 ===== */}
+      {qaPanelOpen && !hasSummary && (
+        <>
+          <div onMouseDown={() => { isQaDragging.current = true; document.body.style.userSelect = 'none'; document.body.style.cursor = 'col-resize' }} style={{ width: 6, cursor: 'col-resize', background: '#d1d5db', flexShrink: 0, borderRadius: 3, alignSelf: 'stretch' }} className="hover:bg-teal-400 transition-colors" />
+          <div className={containerBg} style={{ width: `${qaPanelWidth}%`, overflowY: 'auto', paddingLeft: 12, display: 'flex', flexDirection: 'column' }}>
+            <div className="sticky top-0 z-10 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm pb-2 mb-3 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5"><MessageCircle size={13} className="text-teal-500" /><span className="text-xs font-semibold text-teal-600 dark:text-teal-400 uppercase tracking-wider">AI 问答</span>{qaStreamLoading && <Loader size={12} className="animate-spin text-teal-400 ml-1" />}</div>
+                <button onClick={() => useStore.setState({ qaPanelOpen: false, qaStream: '', qaStreamLoading: false })} className="flex items-center gap-1 px-1.5 py-0.5 text-xs text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"><X size={12} /></button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {qaStream ? <div className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap">{qaStream}</div> : qaStreamLoading ? <div className="flex items-center justify-center py-8"><Loader size={16} className="animate-spin text-teal-400" /></div> : <div className="text-gray-400 text-sm py-8 text-center"><MessageCircle size={32} className="mx-auto mb-2 opacity-30" />向 AI 提问关于这篇文章的问题</div>}
+            </div>
+            <div className="flex-shrink-0 pt-3 border-t border-gray-200 dark:border-gray-700 mt-2">
+              <div className="flex items-center gap-2">
+                <input type="text" defaultValue="" onChange={e => qaQuestionRef.current = e.target.value} onKeyDown={e => { if (e.key === 'Enter' && qaQuestionRef.current.trim() && !qaStreamLoading) handleAskQuestion() }} placeholder="输入你的问题..." disabled={qaStreamLoading} className="flex-1 px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 dark:text-white rounded-lg focus:outline-none focus:ring-1 focus:ring-teal-500 disabled:opacity-50" />
+                <button onClick={handleAskQuestion} disabled={!qaQuestionRef.current.trim() || qaStreamLoading} className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-white bg-teal-500 rounded-lg hover:bg-teal-600 disabled:opacity-40 transition-colors flex-shrink-0"><Send size={13} /></button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* ===== 笔记面板（下方） ===== */}
           {showFontPicker && fontPickerPos && (

@@ -119,6 +119,9 @@ declare global {
       logBrowseHistory: (articleId: number) => Promise<{ success: boolean; error?: string }>
       getBrowseHistory: (limit?: number) => Promise<{ success: boolean; data?: Array<{ id: number; articleId: number; articleTitle: string; articleLink: string | null; feedTitle: string | null; author: string | null; pubDate: string | null; viewedAt: string }>; error?: string }>
       clearBrowseHistory: () => Promise<{ success: boolean; error?: string }>
+
+      // ---- M15 AI 问答 ----
+      askQuestion: (articleId: number, articleContent: string, articleTitle: string, question: string) => Promise<{ success: boolean }>
     }
   }
 }

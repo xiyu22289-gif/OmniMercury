@@ -64,6 +64,7 @@ export function getDefaultGlobalConfig(): LlmGlobalConfig {
     selectiveTranslate: emptyFunctionConfig(),
     fullSummary: emptyFunctionConfig(),
     selectiveSummary: emptyFunctionConfig(),
+    qa: emptyFunctionConfig(),
   }
 }
 
@@ -96,6 +97,7 @@ export function getLlmGlobalConfig(): LlmGlobalConfig {
       selectiveTranslate: { ...defaults.selectiveTranslate, ...disk.selectiveTranslate, apiKeys: { ...disk.selectiveTranslate?.apiKeys } },
       fullSummary: { ...defaults.fullSummary, ...disk.fullSummary, apiKeys: { ...disk.fullSummary?.apiKeys } },
       selectiveSummary: { ...defaults.selectiveSummary, ...disk.selectiveSummary, apiKeys: { ...disk.selectiveSummary?.apiKeys } },
+      qa: { ...defaults.qa, ...(disk as any).qa, apiKeys: { ...(disk as any).qa?.apiKeys } },
     }
     // 迁移模型名
     for (const fn of ['fullTranslate', 'selectiveTranslate', 'fullSummary', 'selectiveSummary'] as LlmFunctionType[]) {
@@ -117,6 +119,7 @@ export function getLlmGlobalConfig(): LlmGlobalConfig {
       selectiveTranslate: { ...migratedFn },
       fullSummary: { ...migratedFn },
       selectiveSummary: { ...migratedFn },
+      qa: emptyFunctionConfig(),
     }
     saveToDisk(migrated)
     return migrated
