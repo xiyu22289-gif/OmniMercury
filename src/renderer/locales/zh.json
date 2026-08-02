@@ -184,7 +184,8 @@
     "importProgress": "OPML 导入进度",
     "progress": "进度",
     "completed": "导入已完成，订阅源列表已更新。",
-    "preparing": "正在准备..."
+    "preparing": "正在准备...",
+    "failedSummary": "{{failed}} 个订阅源导入失败："
   },
   "search": {
     "placeholder": "搜索文章..."

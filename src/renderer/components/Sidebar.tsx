@@ -22,7 +22,7 @@ export default function Sidebar() {
     feeds, selectedFeedId, sidebarOpen,
     selectFeed, setFeeds, setError, setLoading,
     addFeedError, setAddFeedError, clearAddFeedError,
-    setOpmlImporting, setOpmlProgress, setOpmlDialogOpen,
+    setOpmlImporting, setOpmlProgress, setOpmlDialogOpen, setOpmlFailureDetails,
     // M5 标签
     tags, currentFilterTagId, setFilterTag, fetchTags, tagArticleCounts,
     loadStarredArticles, loadAllArticles,
@@ -63,12 +63,17 @@ export default function Sidebar() {
     })
 
     try {
-      await window.api.importOpml(selectResult.filePath)
+      const importResp = await window.api.importOpml(selectResult.filePath)
 
       // 4) 重新加载订阅源列表
       const listResp = await window.api.listFeeds()
       if (listResp.payload.error === 0 && listResp.payload.feeds) {
         setFeeds(listResp.payload.feeds)
+      }
+
+      // 5) 保存失败订阅源详情（不清除，等待用户手动关闭对话框）
+      if (importResp.payload.failure_details && importResp.payload.failure_details.length > 0) {
+        setOpmlFailureDetails(importResp.payload.failure_details)
       }
     } catch (err) {
       setError(String(err))
@@ -76,7 +81,11 @@ export default function Sidebar() {
       unsub()
       setOpmlImporting(false)
       setOpmlProgress(null)
-      setOpmlDialogOpen(false)
+      // 只在无失败详情时关闭对话框，有失败详情时等待用户查看后手动关闭
+      const state = useStore.getState()
+      if (!state.opmlFailureDetails || state.opmlFailureDetails.length === 0) {
+        setOpmlDialogOpen(false)
+      }
     }
   }
 

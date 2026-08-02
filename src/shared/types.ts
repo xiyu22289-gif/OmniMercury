@@ -52,6 +52,8 @@ export interface IpcResponse {
     feed_count?: number
     /** OPML 导入：失败的订阅源数量 */
     failed_count?: number
+    /** OPML 导入：失败订阅源详情列表 */
+    failure_details?: { title: string; xmlUrl: string; error: string }[]
     /** OPML 导入：OPML 文件标题 */
     opml_title?: string
     /** Token 用量统计 */

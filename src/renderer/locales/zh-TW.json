@@ -183,7 +183,8 @@
     "importProgress": "OPML 匯入進度",
     "progress": "進度",
     "completed": "匯入已完成，訂閱源列表已更新。",
-    "preparing": "正在準備..."
+    "preparing": "正在準備...",
+    "failedSummary": "{{failed}} 個訂閱源匯入失敗："
   },
   "search": {
     "placeholder": "搜尋文章..."

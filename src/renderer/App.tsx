@@ -52,7 +52,7 @@ export default function App() {
     layoutMode,
     themeMode, systemPrefersDark, setSystemPrefersDark,
     setFeeds, selectFeed, setError, isLoading, loadLlmConfig,
-    opmlImporting, opmlProgress, opmlDialogOpen, setOpmlDialogOpen,
+    opmlImporting, opmlProgress, opmlDialogOpen, setOpmlDialogOpen, opmlFailureDetails, setOpmlFailureDetails,
     showSettings, setShowSettings,
     selectArticle, toggleStar
   } = useStore()
@@ -376,16 +376,36 @@ export default function App() {
                   <span className="ml-2 text-sm text-gray-500 dark:text-gray-400">{t('opml.preparing')}</span>
                 </div>
               ) : (
-                <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-8">
-                  {t('opml.completed')}
-                </p>
+                <div>
+                  {/* 失败订阅源详情列表 */}
+                  {opmlFailureDetails && opmlFailureDetails.length > 0 ? (
+                    <div className="space-y-2">
+                      <p className="text-sm text-gray-600 dark:text-gray-400">
+                        {t('opml.failedSummary', { failed: opmlFailureDetails.length })}
+                      </p>
+                      <div className="max-h-48 overflow-y-auto space-y-2">
+                        {opmlFailureDetails.map((f, i) => (
+                          <div key={i} className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded p-2">
+                            <p className="text-xs font-medium text-red-700 dark:text-red-300 truncate" title={f.title}>{f.title || f.xmlUrl}</p>
+                            <p className="text-[10px] text-red-500 dark:text-red-400 mt-0.5 truncate" title={f.xmlUrl}>{f.xmlUrl}</p>
+                            <p className="text-[10px] text-red-400 dark:text-red-500 mt-0.5">{f.error}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-8">
+                      {t('opml.completed')}
+                    </p>
+                  )}
+                </div>
               )}
             </div>
 
             {!opmlImporting && (
               <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 flex justify-end">
                 <button
-                  onClick={() => setOpmlDialogOpen(false)}
+                  onClick={() => { setOpmlDialogOpen(false); setOpmlFailureDetails(null) }}
                   className="px-4 py-1.5 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
                 >
                   {t('tagManager.close')}

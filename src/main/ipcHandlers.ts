@@ -553,6 +553,10 @@ export function registerIpcHandlers(): void {
       const result = await importOpmlFile(filePath, (progress) => {
         win.webContents.send('opml:import-progress', progress)
       })
+      // 提取失败订阅源详情（标题、URL、错误原因）
+      const failureDetails = result.results
+        .filter(r => !r.success)
+        .map(r => ({ title: r.title, xmlUrl: r.xmlUrl, error: r.error || '未知错误' }))
       return {
         type: 'opml_import',
         payload: {
@@ -560,6 +564,7 @@ export function registerIpcHandlers(): void {
           message: `导入完成：${result.success}/${result.total} 个订阅源成功`,
           feed_count: result.success,
           failed_count: result.failed,
+          failure_details: failureDetails,
         },
       }
     } catch (err) {

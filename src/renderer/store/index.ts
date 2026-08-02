@@ -80,6 +80,8 @@ interface AppState {
   opmlImporting: boolean
   opmlProgress: { current: number; total: number; feedTitle: string; feedUrl: string; success: boolean } | null
   opmlDialogOpen: boolean
+  /** OPML 导入失败订阅源详情 */
+  opmlFailureDetails: { title: string; xmlUrl: string; error: string }[] | null
 
   // ---- 添加订阅源错误提示 ----
   addFeedError: string | null
@@ -116,6 +118,7 @@ interface AppState {
   setOpmlImporting: (importing: boolean) => void
   setOpmlProgress: (progress: { current: number; total: number; feedTitle: string; feedUrl: string; success: boolean } | null) => void
   setOpmlDialogOpen: (open: boolean) => void
+  setOpmlFailureDetails: (details: { title: string; xmlUrl: string; error: string }[] | null) => void
   setAddFeedError: (error: string | null) => void
   clearAddFeedError: () => void
   toggleStar: (articleId: number) => Promise<void>
@@ -258,6 +261,7 @@ export const useStore = create<AppState>((set, get) => {
     opmlImporting: false,
     opmlProgress: null,
     opmlDialogOpen: false,
+    opmlFailureDetails: null,
 
     // ---- 添加订阅源错误提示 ----
     addFeedError: null,
@@ -544,6 +548,7 @@ export const useStore = create<AppState>((set, get) => {
     setOpmlImporting: (importing) => set({ opmlImporting: importing }),
     setOpmlProgress: (progress) => set({ opmlProgress: progress }),
     setOpmlDialogOpen: (open) => set({ opmlDialogOpen: open }),
+    setOpmlFailureDetails: (details) => set({ opmlFailureDetails: details }),
 
     // ---- 添加订阅源错误 ----
     setAddFeedError: (error) => set({ addFeedError: error }),

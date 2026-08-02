@@ -182,7 +182,8 @@
     "importProgress": "OPML Import Progress",
     "progress": "Progress",
     "completed": "Import complete, feed list updated.",
-    "preparing": "Preparing..."
+    "preparing": "Preparing...",
+    "failedSummary": "{{failed}} feeds failed to import:"
   },
   "search": {
     "placeholder": "Search articles..."
