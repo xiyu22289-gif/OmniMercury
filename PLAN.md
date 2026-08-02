@@ -193,11 +193,11 @@
 
 | 平台 | 安装包 | 状态 |
 |:---|:---|:---|
-| Windows | `Summer RSS Reader-Setup-3.2.0.exe` | ✅ 已发布 |
-| macOS | `Summer RSS Reader-3.2.0.dmg` | ✅ 已发布（GitHub Actions） |
-| Linux | `Summer RSS Reader-3.2.0.AppImage` | ✅ 已发布 |
+| Windows | `Summer RSS Reader-Setup-3.3.0.exe` | ✅ 已发布 |
+| macOS | `Summer RSS Reader-3.3.0.dmg` | ✅ 已发布（GitHub Actions） |
+| Linux | `Summer RSS Reader-3.3.0.AppImage` | ✅ 已发布 |
 
 **CI/CD**：
 - ✅ GitHub Actions 自动打包 macOS / Linux 版本
 - ✅ 代码已上传至 GitHub
-- ✅ Release v3.2.0 已创建
+- ✅ Release v3.3.0 已创建

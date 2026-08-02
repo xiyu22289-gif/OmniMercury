@@ -28,8 +28,9 @@
 
 ### 1\.2 目录结构铁律
 
-- **主进程**：`src/main`（包含 main.ts, preload.ts, ipcHandlers.ts, db.ts, feedService.ts）
-- **渲染进程**：`src/renderer`（强制拆分 `components/ / pages/ / store/ / lib/ / hooks/`）
+- **主进程**：`src/main`（包含 main.ts, ipcHandlers.ts, db.ts, feedService.ts, llmService.ts, contentService.ts, configService.ts, tagService.ts, opmlService.ts, notesExportService.ts, ipc-client.ts）
+- **预加载脚本**：`src/preload/index.ts`（`window.electron` API 白名单暴露，独立目录）
+- **渲染进程**：`src/renderer`（强制拆分 `components/ / pages/ / store/ / lib/ / hooks/ / locales/`）
 - 禁止在 renderer 下创建 utils、services 等自定义混乱目录，统一收敛至 lib。
 
 ### 1\.3 数据库铁律
@@ -90,7 +91,7 @@
 
 - **主进程入口**：`src/main/main.ts`（注册IPC、初始化数据库、创建窗口）
 
-- **预加载脚本**：`src/preload/index.ts`（`window.electron` API 白名单暴露）
+- **预加载脚本**：`src/preload/index.ts`（`window.electron` API 白名单暴露，独立目录）
 
 - **渲染进程入口**：`src/renderer/main.tsx`（React挂载、全局样式注入）
 
