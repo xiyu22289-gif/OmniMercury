@@ -708,7 +708,7 @@ export async function translateParagraphs(request: TranslateRequest, callback: S
         return text
       },
       (errorMsg, detail) => {
-        allTranslations[i] = `[翻译失败] ${errorMsg}`
+        allTranslations[i] = paragraphs[i]
         callback({ type: 'translateParagraph', articleId, paragraphIndex: i, message: errorMsg, detail })
       },
       (err) => classifyError(err, effective.baseUrl, i, paragraphs[i]?.slice(0, 50)),
