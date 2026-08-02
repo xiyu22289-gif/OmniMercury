@@ -197,6 +197,7 @@
   "systemSettings": {
     "title": "Settings",
     "tabGeneral": "General",
+    "tabTranslation": "Translation",
     "tabLLM": "LLM",
     "tabTags": "Tags",
     "theme": "Theme",

@@ -27,10 +27,11 @@ const PRESET_COLORS = [
   '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899',
 ]
 
-type TabKey = 'general' | 'llm' | 'tags'
+type TabKey = 'general' | 'translation' | 'llm' | 'tags'
 
 const TAB_CONFIG: { key: TabKey; icon: typeof Settings; labelKey: string }[] = [
   { key: 'general', icon: Monitor, labelKey: 'systemSettings.tabGeneral' },
+  { key: 'translation', icon: Languages, labelKey: 'systemSettings.tabTranslation' },
   { key: 'llm', icon: Sparkles, labelKey: 'systemSettings.tabLLM' },
   { key: 'tags', icon: TagIcon, labelKey: 'systemSettings.tabTags' },
 ]
@@ -237,6 +238,50 @@ function GeneralSettingsPanel() {
               <span className="text-gray-500 dark:text-gray-400">{desc}</span>
             </div>
           ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ============ 翻译设置面板 ============
+
+function TranslationSettingsPanel() {
+  const [useTextBased, setUseTextBased] = useState(true)
+  const [useGlossary, setUseGlossary] = useState(false)
+
+  return (
+    <div className="px-5 py-4 space-y-5">
+      <div>
+        <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
+          <Languages size={13} className="inline mr-1" />
+          翻译方式
+        </label>
+        <div className="space-y-3">
+          <label className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg border-2 border-gray-200 dark:border-white/10 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+            <input
+              type="checkbox"
+              checked={useTextBased}
+              onChange={e => setUseTextBased(e.target.checked)}
+              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            <div>
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200">根据文本翻译</span>
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">直接对原文文本进行语言模型翻译</p>
+            </div>
+          </label>
+          <label className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg border-2 border-gray-200 dark:border-white/10 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+            <input
+              type="checkbox"
+              checked={useGlossary}
+              onChange={e => setUseGlossary(e.target.checked)}
+              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            <div>
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200">使用术语库翻译</span>
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">翻译时参考自定义术语库，确保专业名词翻译一致</p>
+            </div>
+          </label>
         </div>
       </div>
     </div>
@@ -505,6 +550,7 @@ export default function SystemSettings() {
         {/* 内容区域 */}
         <div className="flex-1 overflow-y-auto">
           {activeTab === 'general' && <GeneralSettingsPanel />}
+          {activeTab === 'translation' && <TranslationSettingsPanel />}
           {activeTab === 'llm' && <LLMSettingsFull />}
           {activeTab === 'tags' && <TagsSettingsPanel />}
         </div>

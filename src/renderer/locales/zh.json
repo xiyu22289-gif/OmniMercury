@@ -199,6 +199,7 @@
   "systemSettings": {
     "title": "系统设置",
     "tabGeneral": "通用",
+    "tabTranslation": "翻译设置",
     "tabLLM": "LLM 设置",
     "tabTags": "标签管理",
     "theme": "主题",
