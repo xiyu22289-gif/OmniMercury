@@ -350,6 +350,18 @@ export default function ReaderView() {
   useEffect(() => { annotationModeRef.current = annotationMode }, [annotationMode])
   useEffect(() => { annotationToolRef.current = annotationTool }, [annotationTool])
   useEffect(() => { highlighterColorRef.current = highlighterColor }, [highlighterColor])
+
+  // ★ 进入标注模式时：关闭选择翻译/摘要的浮动按钮和结果面板
+  useEffect(() => {
+    if (annotationMode) {
+      setShowFloatBtn(false)
+      selectedTextRef.current = ''
+      handleDismissSelectionTranslate()
+      // 清除选中段落摘要
+      handleClearSelectSummary()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [annotationMode])
   const HIGHLIGHTER_COLORS = ['#eab308', '#3b82f6', '#22c55e', '#ef4444', '#a855f7', '#f97316', '#a1a1aa', '#84cc16']
   const annotationBtnRef = useRef<HTMLDivElement>(null)
   const [annotationBtnRect, setAnnotationBtnRect] = useState<{ top: number; left: number } | null>(null)
@@ -741,8 +753,29 @@ export default function ReaderView() {
   /** ★ 翻译结果锚点：插入在选中文本正下方 */
   const selectionResultAnchorRef = useRef<HTMLDivElement | null>(null)
 
+  /**
+   * 清理节点内所有指定类名的标签，保留内部文字。
+   * 用于荧光笔覆盖旧标记（selection_highlight / annotation_highlight）
+   */
+  const unwrapTags = useCallback((root: ParentNode, classNames: string[]) => {
+    classNames.forEach(cn => {
+      const els = Array.from(root.querySelectorAll?.(`.${cn}`) ?? [])
+      els.forEach((el) => {
+        const p = el.parentNode
+        if (p && p.contains(el)) {
+          while (el.firstChild) p.insertBefore(el.firstChild, el)
+          p.removeChild(el)
+        }
+      })
+    })
+  }, [])
+
   /** ★ 标注功能：荧光笔高亮选中文本 */
   const handleAnnotationMouseUp = useCallback((e: MouseEvent) => {
+    // ★ 边界检查：标注仅在阅读区域（.reader-view）内生效，排除工具栏/菜单栏/标注浮层
+    const area = document.querySelector('.reader-view') as HTMLElement | null
+    if (!area || !area.contains(e.target as Node)) return
+
     const tool = annotationToolRef.current
     const sel = window.getSelection()
     if (!sel || sel.isCollapsed) return
@@ -752,25 +785,27 @@ export default function ReaderView() {
     if ((e.target as HTMLElement).closest?.('[data-no-select]')) return
 
     if (tool === 'highlighter') {
-      // 先提取选区，清理旧标注 span（保留文字），再包裹新颜色
       try {
         const r = sel.getRangeAt(0)
-        // 提取选区内容（含旧标注 span）
-        const extracted = r.extractContents()
-        // 解开旧标注 span：找到内部所有 annotation span 并移除标签保留文字
-        const spans = extracted.querySelectorAll?.('.__annotation_highlight__') ?? []
-        spans.forEach((el: Element) => {
-          const p = el.parentNode
-          if (p) { while (el.firstChild) p.insertBefore(el.firstChild, el); p.removeChild(el) }
-        })
-        // 用新颜色 span 包裹已净化的内容
-        const span = document.createElement('span')
-        span.className = '__annotation_highlight__'
-        span.style.cssText = `background:${highlighterColorRef.current};color:inherit;border-radius:2px;padding:0;`
-        span.appendChild(extracted)
-        r.insertNode(span)
+        // 方案 A：surroundContents 不改变格式（同节点内选区）
+        try {
+          const span = document.createElement('span')
+          span.className = '__annotation_highlight__'
+          span.style.cssText = `background:${highlighterColorRef.current};border-radius:2px;padding:0;`
+          r.surroundContents(span)
+        } catch {
+          // 跨节点降级：方案 B — extractContents 后净化和重包裹
+          const extracted = r.extractContents()
+          // 解开旧 selection_highlight mark 和 annotation_highlight span
+          unwrapTags(extracted, ['__selection_highlight__', '__annotation_highlight__'])
+          const span = document.createElement('span')
+          span.className = '__annotation_highlight__'
+          span.style.cssText = `background:${highlighterColorRef.current};border-radius:2px;padding:0;`
+          span.appendChild(extracted)
+          r.insertNode(span)
+        }
         sel.removeAllRanges()
-      } catch { /* 跨节点选区失败则静默 */ }
+      } catch { /* 选区操作失败则静默 */ }
     } else if (tool === 'eraser') {
       // 橡皮：从点击位置向上查找最内层的 annotation span，只清除这一笔
       const range = sel.getRangeAt(0)
@@ -791,7 +826,7 @@ export default function ReaderView() {
     }
     // 每次标注操作后自动保存
     saveAnnotations()
-  }, [saveAnnotations])
+  }, [saveAnnotations, unwrapTags])
 
   /** mouseup 监听 → React state 控制浮动按钮（仅限阅读区域） */
   useEffect(() => {
@@ -845,7 +880,7 @@ export default function ReaderView() {
     try { await window.api.askQuestion(selectedArticleIdRef.current, c, a?.title || '', q, i18n.language) } catch (err) { useStore.setState({ qaStream: String(err), qaStreamLoading: false }) }
   }, [qaStreamLoading])
 
-  /** 触发翻译 — surroundContents 包裹高亮（不破坏 DOM 结构）+ 锚点 */
+  /** 触发翻译 — 用 TreeWalker 逐文本节点包裹 <mark>，不破坏块级/行内结构 */
   const triggerSelectiveTranslate = useCallback((targetLang: string) => {
     const currentId = selectedArticleIdRef.current
     const text = selectedTextRef.current.trim()
@@ -855,25 +890,49 @@ export default function ReaderView() {
     const sel = window.getSelection()
     if (sel && !sel.isCollapsed) {
       try {
-        const r = sel.getRangeAt(0)
-        const mark = document.createElement('mark')
-        mark.style.cssText = 'background:#bfdbfe;color:inherit;border-radius:2px;'
-        mark.className = '__selection_highlight__'
-        // surroundContents 包裹选区（不破坏 DOM 树结构）
-        try {
-          r.surroundContents(mark)
-        } catch {
-          // 降级到 extractContents
-          const contents = r.extractContents()
-          mark.appendChild(contents)
-          r.insertNode(mark)
+        const range = sel.getRangeAt(0)
+
+        // 收集选区内的所有文本节点
+        const textNodes: Node[] = []
+        const walker = document.createTreeWalker(range.commonAncestorContainer, NodeFilter.SHOW_TEXT, {
+          acceptNode(node: Node) {
+            return range.intersectsNode(node) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT
+          }
+        })
+        let tn: Node | null = walker.nextNode()
+        while (tn) { textNodes.push(tn); tn = walker.nextNode() }
+
+        // 对每个文本节点：提取选区内部分 → 包入 <mark>
+        let lastMark: HTMLElement | null = null
+        for (const node of textNodes) {
+          const nodeRange = document.createRange()
+          const startOffset = node === range.startContainer ? range.startOffset : 0
+          const endOffset = node === range.endContainer ? range.endOffset : (node.textContent?.length ?? 0)
+          if (startOffset >= endOffset) continue
+          nodeRange.setStart(node, startOffset)
+          nodeRange.setEnd(node, endOffset)
+          const mark = document.createElement('mark')
+          mark.style.cssText = 'background:#bfdbfe;color:inherit;border-radius:2px;'
+          mark.className = '__selection_highlight__'
+          try {
+            nodeRange.surroundContents(mark)
+            lastMark = mark
+          } catch {
+            const frag = nodeRange.extractContents()
+            mark.appendChild(frag)
+            nodeRange.insertNode(mark)
+            lastMark = mark
+          }
         }
-        // 锚点插入 mark 之后
-        const anchor = document.createElement('div')
-        anchor.id = '__selection_result_anchor__'
-        mark.parentNode?.insertBefore(anchor, mark.nextSibling)
-        selectionResultAnchorRef.current = anchor
-      } catch { /* 跨节点选区失败则静默 */ }
+
+        // 锚点插入最后一个 mark 之后
+        if (lastMark) {
+          const anchor = document.createElement('div')
+          anchor.id = '__selection_result_anchor__'
+          lastMark.parentNode?.insertBefore(anchor, lastMark.nextSibling)
+          selectionResultAnchorRef.current = anchor
+        }
+      } catch { /* 选区操作失败则静默 */ }
     }
     selectionTargetLangRef.current = targetLang
     setSelectionOriginal(text)
@@ -886,10 +945,10 @@ export default function ReaderView() {
   }, [selectionTranslateLoading])
 
   const handleDismissSelectionTranslate = useCallback(() => {
-    // 移除高亮 mark 标签
-    document.querySelectorAll('.__selection_highlight__').forEach(mark => {
+    // 移除高亮 mark 标签（Array.from 避免 live NodeList stale 导致 removeChild 报错）
+    Array.from(document.querySelectorAll('.__selection_highlight__')).forEach(mark => {
       const parent = mark.parentNode
-      if (parent) {
+      if (parent && parent.contains(mark)) {
         while (mark.firstChild) {
           parent.insertBefore(mark.firstChild, mark)
         }
