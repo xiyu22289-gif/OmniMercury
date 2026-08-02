@@ -81,6 +81,11 @@ export default function App() {
     }
   }, [sidebarOpen, toggleSidebar])
 
+  // ---- 初始化：默认全屏窗口 ----
+  useEffect(() => {
+    window.api.setFullScreen().catch(() => {})
+  }, [])
+
   // ---- 初始化：加载订阅源列表 ----
   useEffect(() => {
     async function loadFeeds() {
