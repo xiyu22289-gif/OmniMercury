@@ -165,10 +165,10 @@ export default function NotesPanel({ darkMode }: NotesPanelProps) {
       }
       const result = await window.api.exportNotesOpml()
       if (!result.success) {
-        setError('导出失败: ' + (result.error ?? '未知错误'))
+        setError(t('common.exportFailed') + ': ' + (result.error ?? t('common.unknownError')))
       }
     } catch (err) {
-      setError('导出失败: ' + String(err))
+      setError(t('common.exportFailed') + ': ' + String(err))
     }
   }, [selectedArticleId, setError])
 

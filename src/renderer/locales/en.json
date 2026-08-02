@@ -1,4 +1,8 @@
 {
+  "common": {
+    "unknownError": "Unknown error",
+    "exportFailed": "Export failed"
+  },
   "app": {
     "title": "Summer RSS",
     "loading": "Loading..."
@@ -6,6 +10,7 @@
   "sidebar": {
     "add": "Add",
     "importOpml": "Import OPML file",
+    "importOpmlTitle": "Import feeds (OPML/CSV/TXT/JSON)",
     "exportOpml": "Export OPML file",
     "refreshAll": "Refresh all feeds",
     "enterUrl": "Enter RSS/Atom URL...",
@@ -15,7 +20,10 @@
     "noTags": "No tags yet, click gear to create",
     "manageTags": "Manage tags",
     "urlInvalid": "Please enter a valid RSS/Atom feed URL",
-    "feedExists": "Feed already exists"
+    "feedExists": "Feed already exists",
+    "removeFeed": "Remove feed",
+    "allArticles": "All articles",
+    "starredArticles": "Starred articles"
   },
   "articleList": {
     "articles": "Articles",
@@ -25,7 +33,11 @@
     "daysAgo": "{{n}}d ago",
     "filteredBy": "Filtered:",
     "clearFilter": "Clear filter",
-    "untitled": "(Untitled)"
+    "untitled": "(Untitled)",
+    "markReadTitle": "Mark as read",
+    "markUnreadTitle": "Mark as unread",
+    "addStarTitle": "Add star",
+    "removeStarTitle": "Remove star"
   },
   "reader": {
     "selectArticle": "Select an article to start reading",
@@ -176,7 +188,27 @@
     "fillBaseUrlAndKey": "Please fill in Base URL and API Key first",
     "confirm": "OK",
     "duplicateModelHint": "This configuration matches existing model \"{{name}}\". Use the existing one or pick a different model.",
-    "deleteCustomModelConfirm": "Are you sure you want to delete \"{{name}}\"? This will remove it from all functions and cannot be undone."
+    "modelNameRequired": "Please enter a model name",
+    "deleteCustomModelConfirm": "Are you sure you want to delete \"{{name}}\"? This will remove it from all functions and cannot be undone.",
+    "imageLoadFailed": "Image load failed",
+    "selectMinChars": "Select at least 20 characters to summarize",
+    "selectTooLong": "Selection exceeds 5000 characters, please narrow the selection",
+    "noArticleContent": "Article has no content",
+    "closeArticle": "Close article",
+    "refreshFailed": "Refresh failed",
+    "exportAsHtml": "Export as HTML",
+    "editTagColor": "Edit tag color",
+    "deleteTag": "Delete tag",
+    "retranslate": "Retranslate",
+    "regenerateSummary": "Regenerate summary",
+    "annotate": "Annotate",
+    "highlighter": "Highlighter",
+    "eraser": "Eraser",
+    "summarizeSelectionText": "Summarize selection",
+    "qaPlaceholder": "Enter your question...",
+    "aiQa": "AI Q&A",
+    "findInArticle": "Search in article (Ctrl+F)",
+    "wenkaiFont": "WenKai"
   },
   "opml": {
     "importProgress": "OPML Import Progress",
@@ -186,7 +218,9 @@
     "failedSummary": "{{failed}} feeds failed to import:"
   },
   "search": {
-    "placeholder": "Search articles..."
+    "placeholder": "Search articles...",
+    "searchTitle": "Search articles",
+    "searchTitlePlaceholder": "Search article titles…"
   },
   "theme": {
     "label": "Theme",

@@ -1,4 +1,8 @@
 {
+  "common": {
+    "unknownError": "未知错误",
+    "exportFailed": "导出失败"
+  },
   "app": {
     "title": "Summer RSS",
     "loading": "加载中..."
@@ -6,6 +10,7 @@
   "sidebar": {
     "add": "添加",
     "importOpml": "导入 OPML 文件",
+    "importOpmlTitle": "导入订阅源 (OPML/CSV/TXT/JSON)",
     "exportOpml": "导出 OPML 文件",
     "refreshAll": "刷新所有订阅源",
     "enterUrl": "输入 RSS/Atom URL...",
@@ -15,7 +20,10 @@
     "noTags": "暂无标签，点击齿轮创建",
     "manageTags": "管理标签",
     "urlInvalid": "请输入有效的 RSS/Atom 订阅源 URL",
-    "feedExists": "订阅源已存在"
+    "feedExists": "订阅源已存在",
+    "removeFeed": "移除订阅源",
+    "allArticles": "全部文章",
+    "starredArticles": "星标文章"
   },
   "articleList": {
     "articles": "文章",
@@ -25,7 +33,11 @@
     "daysAgo": "{{n}}天前",
     "filteredBy": "筛选：",
     "clearFilter": "清除筛选",
-    "untitled": "(无标题)"
+    "untitled": "(无标题)",
+    "markReadTitle": "标记已读",
+    "markUnreadTitle": "标记未读",
+    "addStarTitle": "添加星标",
+    "removeStarTitle": "取消星标"
   },
   "reader": {
     "selectArticle": "选择一篇文章开始阅读",
@@ -112,7 +124,26 @@
     "selectFont": "选择字体",
     "fontSizeLabel": "字号",
     "confirm": "确定",
-    "deleteCustomModelConfirm": "确定要完全删除「{{name}}」吗？此操作将从所有功能中移除该模型，不可撤销。"
+    "deleteCustomModelConfirm": "确定要完全删除「{{name}}」吗？此操作将从所有功能中移除该模型，不可撤销。",
+    "imageLoadFailed": "图片加载失败",
+    "selectMinChars": "请至少选中 20 个字符再生成摘要",
+    "selectTooLong": "选中文本超过 5000 字符，请缩小选区",
+    "noArticleContent": "文章无内容",
+    "closeArticle": "关闭文章",
+    "refreshFailed": "刷新失败",
+    "exportAsHtml": "导出文章为 HTML",
+    "editTagColor": "修改标签颜色",
+    "deleteTag": "删除标签",
+    "retranslate": "重新翻译",
+    "regenerateSummary": "重新生成摘要",
+    "annotate": "标注",
+    "highlighter": "荧光笔",
+    "eraser": "橡皮",
+    "summarizeSelectionText": "生成选中文本摘要",
+    "qaPlaceholder": "输入你的问题...",
+    "aiQa": "AI 问答",
+    "findInArticle": "在文章中搜索 (Ctrl+F)",
+    "wenkaiFont": "霞鹜文楷"
   },
   "tagManager": {
     "title": "管理标签",
@@ -178,7 +209,8 @@
     "suggestV1": "连接未成功，Base URL 是否缺少 /v1？建议自动添加 /v1 后重试。",
     "fillBaseUrlAndKey": "请先填写 Base URL 和 API Key",
     "confirm": "确定",
-    "duplicateModelHint": "此配置与已有模型「{{name}}」完全相同，建议直接使用已有模型或选择其他可用模型。"
+    "duplicateModelHint": "此配置与已有模型「{{name}}」完全相同，建议直接使用已有模型或选择其他可用模型。",
+    "modelNameRequired": "请输入模型名称"
   },
   "opml": {
     "importProgress": "OPML 导入进度",
@@ -188,7 +220,9 @@
     "failedSummary": "{{failed}} 个订阅源导入失败："
   },
   "search": {
-    "placeholder": "搜索文章..."
+    "placeholder": "搜索文章...",
+    "searchTitle": "搜索文章",
+    "searchTitlePlaceholder": "搜索文章标题…"
   },
   "theme": {
     "label": "主题",

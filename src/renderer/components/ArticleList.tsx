@@ -267,7 +267,7 @@ export default function ArticleList() {
                     ? 'text-green-500 hover:text-green-600'
                     : 'text-gray-300 dark:text-gray-600 hover:text-green-400'
                 }`}
-                title={isRead ? '标记未读' : '标记已读'}
+                title={isRead ? t('articleList.markUnreadTitle') : t('articleList.markReadTitle')}
               >
                 {isRead ? <Eye size={14} /> : <EyeOff size={14} />}
               </button>
@@ -280,7 +280,7 @@ export default function ArticleList() {
                     ? 'text-yellow-500 hover:text-yellow-600 bg-yellow-50 dark:bg-yellow-900/20'
                     : 'text-gray-300 dark:text-gray-600 hover:text-yellow-400 opacity-0 group-hover:opacity-100'
                 }`}
-                title={isStarred ? '取消星标' : '添加星标'}
+                title={isStarred ? t('articleList.removeStarTitle') : t('articleList.addStarTitle')}
               >
                 <Star size={14} fill={isStarred ? 'currentColor' : 'none'} />
               </button>

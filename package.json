@@ -1,6 +1,6 @@
 {
   "name": "summer-rss-reader",
-  "version": "3.3.0",
+  "version": "3.3.1",
   "description": "Summer RSS Reader - Cross-platform desktop RSS reader",
   "author": "xiyu22289 <xiyu22289@gmail.com>",
   "main": "dist/main/main.js",

@@ -196,7 +196,7 @@ function LlmConfigPanel({ funcType, config, onSave }: LlmConfigPanelProps) {
   }
 
   const saveCustomModel = async () => {
-    if (!customForm.label.trim()) { setModelListError('请输入模型名称'); return }
+    if (!customForm.label.trim()) { setModelListError(t('llmSettings.modelNameRequired')); return }
     if (!customForm.baseUrl.trim() || !customForm.apiKey.trim()) { setModelListError('请填写 Base URL 和 API Key'); return }
     if (!customForm.model.trim()) { setModelListError('请选择或输入模型名称'); return }
     const isNew = editingCustomIndex === null || editingCustomIndex < 0; const updated = isNew ? [...customModels, { ...customForm }] : customModels.map((cm, i) => i === editingCustomIndex ? { ...customForm } : cm)

@@ -20,13 +20,13 @@ import { splitIntoParagraphs } from '../../shared/paragraphSplitter'
 
 // ============ 字体选项 ============
 
-const FONT_FAMILIES = [
-  { value: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif', label: '系统默认' },
-  { value: 'Georgia, "Times New Roman", serif', label: '宋体/衬线' },
-  { value: '"PingFang SC", "Microsoft YaHei", "Hiragino Sans GB", sans-serif', label: '黑体/雅黑' },
-  { value: '"KaiTi", "STKaiti", "Kai", serif', label: '楷体' },
-  { value: '"LXGW WenKai", "Noto Serif SC", serif', label: '霞鹜文楷' },
-  { value: 'Consolas, "SF Mono", "Fira Code", monospace', label: '等宽字体' },
+const FONT_FAMILY_VALUES = [
+  { value: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif', key: 'reader.systemFont' },
+  { value: 'Georgia, "Times New Roman", serif', key: 'reader.serif' },
+  { value: '"PingFang SC", "Microsoft YaHei", "Hiragino Sans GB", sans-serif', key: 'reader.sansSerif' },
+  { value: '"KaiTi", "STKaiti", "Kai", serif', key: 'reader.kaiTi' },
+  { value: '"LXGW WenKai", "Noto Serif SC", serif', key: 'reader.wenkaiFont' },
+  { value: 'Consolas, "SF Mono", "Fira Code", monospace', key: 'reader.mono' },
 ]
 
 const FONT_SIZE_MIN = 12
@@ -60,7 +60,7 @@ function SafeImage({ src, alt, baseUrl }: { src?: string; alt?: string; baseUrl?
     return (
       <span className="inline-flex items-center gap-1.5 px-3 py-2 my-2 text-xs text-gray-400 bg-gray-100 dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
-        <span className="truncate max-w-[200px]">{alt || src?.slice(-30) || '图片加载失败'}</span>
+        <span className="truncate max-w-[200px]">{alt || src?.slice(-30) || t('reader.imageLoadFailed')}</span>
       </span>
     )
   }
@@ -615,11 +615,11 @@ export default function ReaderView() {
     const sel = window.getSelection()
     const text = sel?.toString().trim() ?? ''
     if (!text || text.length < 20) {
-      setError('请至少选中 20 个字符再生成摘要')
+      setError(t('reader.selectMinChars'))
       return
     }
     if (text.length > 5000) {
-      setError('选中文本超过 5000 字符，请缩小选区')
+      setError(t('reader.selectTooLong'))
       return
     }
 
@@ -994,6 +994,21 @@ export default function ReaderView() {
     ),
     blockquote: ({ children, ...props }: any) => (
       <blockquote className="border-l-3 border-gray-300 dark:border-gray-600 pl-4 my-3 text-gray-600 dark:text-gray-400 italic" {...props}>{children}</blockquote>
+    ),
+    iframe: ({ src, title, ...props }: any) => (
+      <div className="relative w-full my-4" style={{ paddingBottom: '56.25%' }}>
+        <iframe
+          src={src}
+          title={title}
+          className="absolute top-0 left-0 w-full h-full rounded"
+          allowFullScreen
+          loading="lazy"
+          {...props}
+        />
+      </div>
+    ),
+    video: ({ children, ...props }: any) => (
+      <video className="max-w-full h-auto rounded my-4" controls {...props}>{children}</video>
     ),
   }), [articleBaseUrl])
 
@@ -1409,7 +1424,7 @@ export default function ReaderView() {
     setSummaryLangLabel(LANG_LABEL_MAP[targetLang] || targetLang)
     try {
       const c = cleanArticleText || selectedArticle.summary || ''
-      if (!c) { setError('文章无内容'); setSummaryLoading(false); return }
+      if (!c) { setError(t('reader.noArticleContent')); setSummaryLoading(false); return }
       await window.api.summarize(selectedArticleId, c, selectedArticle.title, targetLang, summaryDetailLevel)
     } catch (err) {
       setError(String(err))
@@ -1549,7 +1564,7 @@ export default function ReaderView() {
       if (res.success && res.data) {
         setAiSuggestions(res.data)
       } else {
-        console.error('[ReaderView] AI 推荐失败 — API error:', res.error || '未知错误')
+        console.error('[ReaderView] AI 推荐失败 — API error:', res.error || t('common.unknownError'))
       }
     } catch (err) {
       console.error('[ReaderView] AI 推荐异常:', err)
@@ -1816,7 +1831,7 @@ export default function ReaderView() {
             <button
               onClick={() => useStore.setState({ selectedArticleId: null, articleContent: null, articleContentHtml: null })}
               className="flex-shrink-0 p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:text-gray-300 dark:hover:bg-gray-700 transition-colors"
-              title="关闭文章"
+              title={t('reader.closeArticle')}
             >
               <ArrowLeft size={18} />
             </button>
@@ -1874,7 +1889,7 @@ export default function ReaderView() {
                       articleContent: prevContent,
                       articleContentHtml: prevContentHtml,
                       isLoading: false,
-                      error: res.payload.message || '刷新失败'
+                      error: res.payload.message || t('reader.refreshFailed')
                     })
                   }
                 } catch (err) {
@@ -1897,7 +1912,7 @@ export default function ReaderView() {
             <button
               onClick={() => setShowExportDialog(true)}
               className="flex items-center gap-1 text-xs text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300 bg-green-50 dark:bg-green-900/20 px-2 py-1 rounded transition-colors"
-              title="导出文章为 HTML"
+              title={t('reader.exportAsHtml')}
             >
               <Download size={13} />
               导出文章
@@ -2000,10 +2015,10 @@ export default function ReaderView() {
                       try {
                         const result = await window.api.exportArticle(selectedArticleId!, exportIncludeHighlights, exportIncludeNotes)
                         if (!result.success && result.error !== '用户取消') {
-                          setError(result.error || '导出失败')
+                          setError(result.error || t('common.exportFailed'))
                         }
                       } catch (err) {
-                        setError('导出失败: ' + String(err))
+                        setError(t('common.exportFailed') + ': ' + String(err))
                       }
                     }}
                     className="flex-1 py-2 text-xs font-medium text-white bg-green-500 rounded-lg hover:bg-green-600 transition-colors flex items-center justify-center gap-1"
@@ -2106,7 +2121,7 @@ export default function ReaderView() {
                             <button
                               onClick={(e) => { e.stopPropagation(); setEditingTagColor(editingTagColor === tag.id ? null : tag.id) }}
                               className="p-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-                              title="修改标签颜色"
+                              title={t('reader.editTagColor')}
                             >
                               <span className="w-3 h-3 rounded-full border border-gray-300 dark:border-gray-500" style={{ backgroundColor: tag.color || '#3b82f6' }} />
                             </button>
@@ -2138,7 +2153,7 @@ export default function ReaderView() {
                           <button
                             onClick={(e) => { e.stopPropagation(); handleDeleteTag(tag.id) }}
                             className="flex-shrink-0 p-0.5 rounded text-gray-300 dark:text-gray-600 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                            title="删除标签"
+                            title={t('reader.deleteTag')}
                           >
                             <X size={12} />
                           </button>
@@ -2303,7 +2318,7 @@ export default function ReaderView() {
                   onClick={() => handleStartTranslate(translateTargetLangRef.current, true)}
                   disabled={translateLoading}
                   className="flex items-center gap-1 px-2 py-1.5 text-xs rounded-lg text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors disabled:opacity-30"
-                  title="重新翻译"
+                  title={t('reader.retranslate')}
                 >
                   <RefreshCw size={12} className={translateLoading ? 'animate-spin' : ''} />
                 </button>
@@ -2395,7 +2410,7 @@ export default function ReaderView() {
             )}
 
             {/* ===== AI 问答按钮 ===== */}
-            <button onClick={() => useStore.setState({ qaPanelOpen: !qaPanelOpen })} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${qaPanelOpen ? 'bg-orange-50 text-orange-600 dark:bg-orange-900/20 dark:text-orange-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'}`} title="AI 问答"><MessageCircle size={13} />AI问答</button>
+            <button onClick={() => useStore.setState({ qaPanelOpen: !qaPanelOpen })} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${qaPanelOpen ? 'bg-orange-50 text-orange-600 dark:bg-orange-900/20 dark:text-orange-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'}`} title={t('reader.aiQa')}><MessageCircle size={13} />{t('reader.aiQa')}</button>
 
             <div className="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1" />
 
@@ -2416,7 +2431,7 @@ export default function ReaderView() {
                     ? 'bg-pink-50 text-pink-600 dark:bg-pink-900/20 dark:text-pink-400'
                     : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
                   }`}
-                title="标注"
+                title={t('reader.annotate')}
               >
                 <Highlighter size={13} />
                 标注
@@ -2435,7 +2450,7 @@ export default function ReaderView() {
                         ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300'
                         : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700'
                       }`}
-                    title="荧光笔"
+                    title={t('reader.highlighter')}
                   >
                     <Highlighter size={13} />
                   </button>
@@ -2459,7 +2474,7 @@ export default function ReaderView() {
                         ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
                         : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700'
                       }`}
-                    title="橡皮"
+                    title={t('reader.eraser')}
                   >
                     <Eraser size={13} />
                   </button>
@@ -2494,7 +2509,7 @@ export default function ReaderView() {
                   ? 'bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400'
                   : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700'
                 }`}
-              title="在文章中搜索 (Ctrl+F)"
+              title={t('reader.findInArticle')}
             >
               <Search size={13} />
             </button>
@@ -2526,7 +2541,7 @@ export default function ReaderView() {
                   else scrollToHit(currentHitIndex + 1)
                 }
               }}
-              placeholder="在文章中搜索..."
+              placeholder={t('reader.findInArticle')}
               className="flex-1 px-2 py-1 text-sm bg-transparent border-none outline-none placeholder-gray-400 dark:placeholder-gray-500"
             />
             {searchHits.length > 0 && (
@@ -2974,10 +2989,10 @@ export default function ReaderView() {
             onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); handleSelectionTextSummary() }}
             disabled={selectedTextSummaryLoading}
             className="flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium text-purple-600 hover:bg-purple-50 dark:text-purple-400 dark:hover:bg-purple-900/30 rounded transition-colors disabled:opacity-50"
-            title="生成选中文本摘要"
+            title={t('reader.summarizeSelectionText')}
           >
             {selectedTextSummaryLoading ? <Loader size={11} className="animate-spin" /> : <Sparkles size={11} />}
-            {' 摘要'}
+            {' ' + t('reader.selectiveSummary')}
           </button>
         </div>,
         document.body
@@ -3006,7 +3021,7 @@ export default function ReaderView() {
                     onClick={() => handleSummarize(selectedSummaryLang, true)}
                     disabled={summaryLoading}
                     className="flex items-center gap-1 px-1.5 py-0.5 text-xs text-gray-400 hover:text-purple-500 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded transition-colors disabled:opacity-30"
-                    title="重新生成摘要"
+                    title={t('reader.regenerateSummary')}
                   >
                     <RefreshCw size={12} className={summaryLoading ? 'animate-spin' : ''} />
                   </button>
@@ -3015,10 +3030,10 @@ export default function ReaderView() {
                       try {
                         const result = await window.api.exportSummaryMd(selectedArticle.title, summaryStream)
                         if (!result.success && result.error !== '用户取消') {
-                          setError(result.error || '导出失败')
+                          setError(result.error || t('common.exportFailed'))
                         }
                       } catch (err) {
-                        setError('导出失败: ' + String(err))
+                        setError(t('common.exportFailed') + ': ' + String(err))
                       }
                     }}
                     disabled={!summaryStream.trim() || summaryLoading}
@@ -3055,7 +3070,7 @@ export default function ReaderView() {
                 <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{t('reader.selectFont')}</span>
               </div>
               <div className="py-1">
-                {FONT_FAMILIES.map(f => (
+                {FONT_FAMILY_VALUES.map(f => (
                   <button
                     key={f.value}
                     onClick={() => { setReaderFontFamily(f.value); setShowFontPicker(false) }}
@@ -3066,7 +3081,7 @@ export default function ReaderView() {
                       }`}
                     style={{ fontFamily: f.value }}
                   >
-                    <span>{f.label}</span>
+                    <span>{t(f.key)}</span>
                     {readerFontFamily === f.value && <Check size={12} className="text-amber-500 flex-shrink-0" />}
                   </button>
                 ))}
@@ -3081,7 +3096,7 @@ export default function ReaderView() {
           <div className={containerBg} style={{ width: `${qaPanelWidth}%`, overflowY: 'auto', paddingLeft: 12, display: 'flex', flexDirection: 'column' }}>
             <div className="sticky top-0 z-10 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm pb-2 mb-3 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5"><MessageCircle size={13} className="text-orange-500" /><span className="text-xs font-semibold text-orange-600 dark:text-orange-400 uppercase tracking-wider">AI 问答</span>{qaStreamLoading && <Loader size={12} className="animate-spin text-orange-400 ml-1" />}</div>
+                <div className="flex items-center gap-1.5"><MessageCircle size={13} className="text-orange-500" /><span className="text-xs font-semibold text-orange-600 dark:text-orange-400 uppercase tracking-wider">{t('reader.aiQa')}</span>{qaStreamLoading && <Loader size={12} className="animate-spin text-orange-400 ml-1" />}</div>
                 <button onClick={() => useStore.setState({ qaPanelOpen: false, qaStream: '', qaStreamLoading: false })} className="flex items-center gap-1 px-1.5 py-0.5 text-xs text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"><X size={12} /></button>
               </div>
             </div>
@@ -3090,7 +3105,7 @@ export default function ReaderView() {
             </div>
             <div className="flex-shrink-0 pt-3 border-t border-gray-200 dark:border-gray-700 mt-2">
               <div className="flex items-center gap-2">
-                <input type="text" defaultValue="" onChange={e => qaQuestionRef.current = e.target.value} onKeyDown={e => { if (e.key === 'Enter' && qaQuestionRef.current.trim() && !qaStreamLoading) handleAskQuestion() }} placeholder="输入你的问题..." disabled={qaStreamLoading} className="flex-1 px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 dark:text-white rounded-lg focus:outline-none focus:ring-1 focus:ring-orange-500 disabled:opacity-50" />
+                <input type="text" defaultValue="" onChange={e => qaQuestionRef.current = e.target.value} onKeyDown={e => { if (e.key === 'Enter' && qaQuestionRef.current.trim() && !qaStreamLoading) handleAskQuestion() }} placeholder={t('reader.qaPlaceholder')} disabled={qaStreamLoading} className="flex-1 px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 dark:text-white rounded-lg focus:outline-none focus:ring-1 focus:ring-orange-500 disabled:opacity-50" />
                 <button onClick={handleAskQuestion} disabled={!qaQuestionRef.current.trim() || qaStreamLoading} className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-white bg-orange-500 rounded-lg hover:bg-orange-600 disabled:opacity-40 transition-colors flex-shrink-0"><Send size={13} /></button>
               </div>
             </div>
@@ -3109,7 +3124,7 @@ export default function ReaderView() {
                 <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">{t('reader.selectFont')}</span>
               </div>
               <div className="py-1">
-                {FONT_FAMILIES.map(f => (
+                {FONT_FAMILY_VALUES.map(f => (
                   <button
                     key={f.value}
                     onClick={() => { setReaderFontFamily(f.value); setShowFontPicker(false) }}
@@ -3120,7 +3135,7 @@ export default function ReaderView() {
                       }`}
                     style={{ fontFamily: f.value }}
                   >
-                    <span>{f.label}</span>
+                    <span>{t(f.key)}</span>
                     {readerFontFamily === f.value && <Check size={12} className="text-amber-500 flex-shrink-0" />}
                   </button>
                 ))}

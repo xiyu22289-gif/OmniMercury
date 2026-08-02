@@ -175,6 +175,14 @@ html, body, #root {
   color: #9ca3af !important;
 }
 
+/* 视频 / iframe — 限制最大宽度，保持 16:9 比例 */
+.prose iframe,
+.prose video {
+  max-width: 100% !important;
+  height: auto !important;
+  aspect-ratio: 16 / 9;
+}
+
 /* 表格 — 同时支持 Markdown (ReactMarkdown) 和 HTML (dangerouslySetInnerHTML) 渲染 */
 .prose table {
   border-collapse: collapse !important;

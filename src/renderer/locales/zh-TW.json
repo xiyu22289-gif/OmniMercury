@@ -1,4 +1,8 @@
 {
+  "common": {
+    "unknownError": "未知錯誤",
+    "exportFailed": "匯出失敗"
+  },
   "app": {
     "title": "Summer RSS",
     "loading": "載入中..."
@@ -6,6 +10,7 @@
   "sidebar": {
     "add": "新增",
     "importOpml": "匯入 OPML 檔案",
+    "importOpmlTitle": "匯入訂閱源 (OPML/CSV/TXT/JSON)",
     "exportOpml": "匯出 OPML 檔案",
     "refreshAll": "重新整理所有訂閱源",
     "enterUrl": "輸入 RSS/Atom URL...",
@@ -15,7 +20,10 @@
     "noTags": "暫無標籤，點擊齒輪建立",
     "manageTags": "管理標籤",
     "urlInvalid": "請輸入有效的 RSS/Atom 訂閱源 URL",
-    "feedExists": "訂閱源已存在"
+    "feedExists": "訂閱源已存在",
+    "removeFeed": "移除訂閱源",
+    "allArticles": "全部文章",
+    "starredArticles": "星標文章"
   },
   "articleList": {
     "articles": "文章",
@@ -25,7 +33,11 @@
     "daysAgo": "{{n}}天前",
     "filteredBy": "篩選：",
     "clearFilter": "清除篩選",
-    "untitled": "(無標題)"
+    "untitled": "(無標題)",
+    "markReadTitle": "標記已讀",
+    "markUnreadTitle": "標記未讀",
+    "addStarTitle": "新增星標",
+    "removeStarTitle": "取消星標"
   },
   "reader": {
     "selectArticle": "選擇一篇文章開始閱讀",
@@ -111,7 +123,26 @@
     "orderedList": "有序列表",
     "fontSizeLabel": "字型大小",
     "confirm": "確定",
-    "deleteCustomModelConfirm": "確定要完全刪除「{{name}}」嗎？此操作將從所有功能中移除該模型，不可撤銷。"
+    "deleteCustomModelConfirm": "確定要完全刪除「{{name}}」嗎？此操作將從所有功能中移除該模型，不可撤銷。",
+    "imageLoadFailed": "圖片載入失敗",
+    "selectMinChars": "請至少選取 20 個字元再產生摘要",
+    "selectTooLong": "選取文字超過 5000 字元，請縮小選區",
+    "noArticleContent": "文章無內容",
+    "closeArticle": "關閉文章",
+    "refreshFailed": "重新整理失敗",
+    "exportAsHtml": "匯出為 HTML",
+    "editTagColor": "修改標籤顏色",
+    "deleteTag": "刪除標籤",
+    "retranslate": "重新翻譯",
+    "regenerateSummary": "重新產生摘要",
+    "annotate": "標註",
+    "highlighter": "螢光筆",
+    "eraser": "橡皮擦",
+    "summarizeSelectionText": "產生選取文字摘要",
+    "qaPlaceholder": "輸入你的問題...",
+    "aiQa": "AI 問答",
+    "findInArticle": "在文章中搜尋 (Ctrl+F)",
+    "wenkaiFont": "霞鶩文楷"
   },
   "tagManager": {
     "title": "管理標籤",
@@ -177,7 +208,8 @@
     "suggestV1": "連線未成功，Base URL 是否缺少 /v1？建議自動新增 /v1 後重試。",
     "fillBaseUrlAndKey": "請先填寫 Base URL 和 API Key",
     "confirm": "確定",
-    "duplicateModelHint": "此設定與已有模型「{{name}}」完全相同，建議直接使用已有模型或選擇其他可用模型。"
+    "duplicateModelHint": "此設定與已有模型「{{name}}」完全相同，建議直接使用已有模型或選擇其他可用模型。",
+    "modelNameRequired": "請輸入模型名稱"
   },
   "opml": {
     "importProgress": "OPML 匯入進度",
@@ -187,7 +219,9 @@
     "failedSummary": "{{failed}} 個訂閱源匯入失敗："
   },
   "search": {
-    "placeholder": "搜尋文章..."
+    "placeholder": "搜尋文章...",
+    "searchTitle": "搜尋文章",
+    "searchTitlePlaceholder": "搜尋文章標題…"
   },
   "theme": {
     "label": "主題",

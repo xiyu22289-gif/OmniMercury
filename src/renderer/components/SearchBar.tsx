@@ -1,9 +1,11 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useStore } from '../store'
 import type { Article } from '../../shared/types'
 import { Search, X } from 'lucide-react'
 
 export default function SearchBar() {
+  const { t } = useTranslation()
   const {
     searchQuery,
     setSearchQuery,
@@ -98,7 +100,7 @@ export default function SearchBar() {
       <button
         onClick={() => { setIsOpen(true); setTimeout(() => inputRef.current?.focus(), 100) }}
         className="p-1 rounded bg-transparent hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
-        title="搜索文章"
+        title={t('search.searchTitle')}
         id="global-search-btn"
       >
         <Search size={16} />
@@ -117,7 +119,7 @@ export default function SearchBar() {
           onChange={(e) => handleInputChange(e.target.value)}
           onKeyDown={handleKeyDown}
           onFocus={() => { if (searchSuggestions.length > 0) setShowDropdown(true) }}
-          placeholder="搜索文章标题…"
+          placeholder={t('search.searchTitlePlaceholder')}
           className="w-40 text-sm bg-transparent border-none outline-none placeholder-gray-400"
         />
         {searchQuery && (

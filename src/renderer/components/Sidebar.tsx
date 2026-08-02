@@ -205,7 +205,7 @@ export default function Sidebar() {
         <button
           onClick={handleOpmlImport}
           className="p-1.5 rounded bg-transparent hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
-          title="导入订阅源 (OPML/CSV/TXT/JSON)"
+          title={t('sidebar.importOpmlTitle')}
         >
           <Download size={14} />
         </button>
@@ -277,7 +277,7 @@ export default function Sidebar() {
             }`}
           >
             <Globe size={13} className="flex-shrink-0" />
-            <span className="text-xs">🌐 全部文章</span>
+            <span className="text-xs">🌐 {t('sidebar.allArticles')}</span>
           </button>
         </div>
 
@@ -330,7 +330,7 @@ export default function Sidebar() {
             <button
               onClick={(e) => handleRemoveFeed(feed.id, e)}
               className="p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 opacity-0 group-hover:opacity-100 hover:opacity-100 transition-opacity"
-              title="Remove feed"
+              title={t('sidebar.removeFeed')}
             >
               <Trash2 size={12} className="text-red-400" />
             </button>
@@ -349,7 +349,7 @@ export default function Sidebar() {
             className="w-full flex items-center gap-2 px-2 py-1 text-sm text-yellow-600 dark:text-yellow-400 hover:bg-yellow-50 dark:hover:bg-yellow-900/20 rounded transition-colors"
           >
             <Star size={13} className="flex-shrink-0" />
-            <span className="text-xs">⭐ 星标文章</span>
+            <span className="text-xs">⭐ {t('sidebar.starredArticles')}</span>
           </button>
         </div>
 
