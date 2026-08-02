@@ -227,6 +227,12 @@ const api = {
   // ---- M15 AI 问答 ----
   askQuestion: (articleId: number, articleContent: string, articleTitle: string, question: string, lang?: string): Promise<{ success: boolean }> =>
     ipcRenderer.invoke('llm:askQuestion', articleId, articleContent, articleTitle, question, lang),
+
+  // ---- 窗口尺寸控制 ----
+  setHalfScreen: (): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke('window:setHalfScreen'),
+  setFullScreen: (): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke('window:setFullScreen'),
 }
 
 contextBridge.exposeInMainWorld('api', api)

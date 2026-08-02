@@ -49,6 +49,7 @@ export default function App() {
   const { t } = useTranslation()
   const {
     sidebarOpen, toggleSidebar,
+    layoutMode,
     themeMode, systemPrefersDark, setSystemPrefersDark,
     setFeeds, selectFeed, setError, isLoading, loadLlmConfig,
     opmlImporting, opmlProgress, opmlDialogOpen, setOpmlDialogOpen,
@@ -246,53 +247,57 @@ export default function App() {
         </button>
       </div>
 
-      {/* 主内容区 — 三栏 + 拖拽分隔条 */}
+      {/* 主内容区 — 紧凑模式: 仅阅读区；全屏模式: 三栏 + 拖拽分隔条 */}
       <div className="flex flex-1 min-h-0">
-        {/* 侧边栏 */}
-        <div
-          className={`overflow-hidden ${sidebarOpen ? '' : 'collapsed'}`}
-          style={{
-            width: sidebarOpen ? sidebarWidth : 0,
-            minWidth: sidebarOpen ? MIN_SIDEBAR_WIDTH : 0
-          }}
-        >
-          <Sidebar />
-        </div>
+        {layoutMode === 'full' && (
+          <>
+            {/* 侧边栏 */}
+            <div
+              className={`overflow-hidden ${sidebarOpen ? '' : 'collapsed'}`}
+              style={{
+                width: sidebarOpen ? sidebarWidth : 0,
+                minWidth: sidebarOpen ? MIN_SIDEBAR_WIDTH : 0
+              }}
+            >
+              <Sidebar />
+            </div>
 
-        {/* 分隔条 1：侧边栏 ↔ 文章列表 */}
-        {sidebarOpen && (
-          <ResizeHandle
-            direction="horizontal"
-            onResize={(delta) => {
-              setSidebarWidth((prev) =>
-                Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, prev + delta))
-              )
-            }}
-          />
+            {/* 分隔条 1：侧边栏 ↔ 文章列表 */}
+            {sidebarOpen && (
+              <ResizeHandle
+                direction="horizontal"
+                onResize={(delta) => {
+                  setSidebarWidth((prev) =>
+                    Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, prev + delta))
+                  )
+                }}
+              />
+            )}
+
+            {/* 文章列表 */}
+            <div
+              className="article-list"
+              style={{
+                width: listWidth,
+                minWidth: MIN_LIST_WIDTH
+              }}
+            >
+              <ArticleList />
+            </div>
+
+            {/* 分隔条 2：文章列表 ↔ 阅读区 */}
+            <ResizeHandle
+              direction="horizontal"
+              onResize={(delta) => {
+                setListWidth((prev) =>
+                  Math.min(MAX_LIST_WIDTH, Math.max(MIN_LIST_WIDTH, prev + delta))
+                )
+              }}
+            />
+          </>
         )}
 
-        {/* 文章列表 */}
-        <div
-          className="article-list"
-          style={{
-            width: listWidth,
-            minWidth: MIN_LIST_WIDTH
-          }}
-        >
-          <ArticleList />
-        </div>
-
-        {/* 分隔条 2：文章列表 ↔ 阅读区 */}
-        <ResizeHandle
-          direction="horizontal"
-          onResize={(delta) => {
-            setListWidth((prev) =>
-              Math.min(MAX_LIST_WIDTH, Math.max(MIN_LIST_WIDTH, prev + delta))
-            )
-          }}
-        />
-
-        {/* 阅读区 */}
+        {/* 阅读区 — 紧凑模式下占满全宽 */}
         <ReaderView />
       </div>
 

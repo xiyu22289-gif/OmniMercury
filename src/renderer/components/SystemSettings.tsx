@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useStore } from '../store'
 import {
-  Settings, X, Monitor, Sun, Moon, Eye, Type, Globe, Languages, Keyboard, Check, ChevronDown,
+  Settings, X, Monitor, Sun, Moon, Eye, Type, Globe, Languages, Keyboard, Check, ChevronDown, Columns,
   Sparkles, BarChart3, Tag as TagIcon, Plus, Edit, Trash2, Palette
 } from 'lucide-react'
 import { LLMSettingsFull } from './LLMSettingsFull'
@@ -40,6 +40,7 @@ const TAB_CONFIG: { key: TabKey; icon: typeof Settings; labelKey: string }[] = [
 function GeneralSettingsPanel() {
   const { t, i18n } = useTranslation()
   const {
+    layoutMode, setLayoutMode,
     themeMode, setThemeMode,
     readerFontFamily, setReaderFontFamily,
     readerFontSize, setReaderFontSize,
@@ -57,6 +58,40 @@ function GeneralSettingsPanel() {
 
   return (
     <div className="px-5 py-4 space-y-5">
+      {/* 布局模式 */}
+      <div>
+        <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
+          <Columns size={13} className="inline mr-1" />
+          布局模式
+        </label>
+        <div className="flex gap-1.5">
+          {([
+            { value: 'full' as const, label: '全屏模式', desc: '侧栏 + 列表 + 阅读区' },
+            { value: 'compact' as const, label: '半屏模式', desc: '专注阅读' },
+          ]).map(o => (
+            <button
+              key={o.value}
+              onClick={() => {
+                setLayoutMode(o.value)
+                // 切换窗口尺寸
+                if (o.value === 'compact') window.api.setHalfScreen().catch(() => {})
+                else window.api.setFullScreen().catch(() => {})
+              }}
+              className={`flex-1 flex flex-col items-center gap-0.5 px-2 py-2 text-xs rounded-lg border-2 transition-colors ${
+                layoutMode === o.value
+                  ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:border-blue-400 dark:text-blue-300'
+                  : 'border-gray-300 dark:border-white/20 text-gray-600 dark:text-white/70 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+              }`}
+            >
+              <span className="font-medium">{o.label}</span>
+              <span className="text-[9px] opacity-60">{o.desc}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <hr className="border-gray-200 dark:border-gray-700" />
+
       {/* 主题 */}
       <div>
         <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">

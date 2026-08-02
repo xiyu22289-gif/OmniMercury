@@ -128,6 +128,10 @@ declare global {
       getHighlights: (articleId: number) => Promise<{ success: boolean; data?: string | null; error?: string }>
       saveHighlights: (articleId: number, highlights: string) => Promise<{ success: boolean; error?: string }>
 
+      // ---- 窗口尺寸控制 ----
+      setHalfScreen: () => Promise<{ success: boolean }>
+      setFullScreen: () => Promise<{ success: boolean }>
+
       // ---- M15 AI 问答 ----
       askQuestion: (articleId: number, articleContent: string, articleTitle: string, question: string, lang?: string) => Promise<{ success: boolean }>
     }

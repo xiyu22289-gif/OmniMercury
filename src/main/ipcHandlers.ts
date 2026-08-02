@@ -787,6 +787,30 @@ export function registerIpcHandlers(): void {
     }
   })
 
+  // ================================================================
+  // 窗口尺寸控制
+  // ================================================================
+  ipcMain.handle('window:setHalfScreen', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return { success: false }
+    const screen = require('electron').screen
+    const primaryDisplay = screen.getPrimaryDisplay()
+    const { width, height } = primaryDisplay.workAreaSize
+    // 半屏：占屏幕 50% 宽度，居中
+    const halfWidth = Math.round(width * 0.5)
+    win.setBounds({ width: halfWidth, height, x: Math.round((width - halfWidth) / 2), y: 0 })
+    return { success: true }
+  })
+  ipcMain.handle('window:setFullScreen', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return { success: false }
+    const screen = require('electron').screen
+    const primaryDisplay = screen.getPrimaryDisplay()
+    const { width, height } = primaryDisplay.workAreaSize
+    win.setBounds({ width, height, x: 0, y: 0 })
+    return { success: true }
+  })
+
   ipcMain.handle('history:clear', async () => {
     try {
       const { clearBrowseHistory } = await import('./db')

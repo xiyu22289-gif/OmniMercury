@@ -166,6 +166,10 @@ interface AppState {
   setSelectionSummary: (text: string) => void
   setSelectionSummaryLoading: (loading: boolean) => void
 
+  // ---- 布局模式 ----
+  layoutMode: 'full' | 'compact'
+  setLayoutMode: (mode: 'full' | 'compact') => void
+
   // ---- 浏览历史面板 ----
   showHistory: boolean
   setShowHistory: (show: boolean) => void
@@ -198,6 +202,7 @@ interface UiPrefs {
   displayMode: 'replace' | 'sideBySide' | 'topBottom' | 'newTab'
   translateTargetLang: string
   readerMode: 'reader' | 'original'
+  layoutMode: 'full' | 'compact'
 }
 
 function loadUiPrefs(): Partial<UiPrefs> {
@@ -218,6 +223,7 @@ function saveUiPrefs(state: AppState): void {
       displayMode: state.displayMode,
       translateTargetLang: state.translateTargetLang,
       readerMode: state.readerMode,
+      layoutMode: state.layoutMode,
     }
     localStorage.setItem(PERSIST_KEY, JSON.stringify(prefs))
   } catch {}
@@ -701,6 +707,13 @@ export const useStore = create<AppState>((set, get) => {
     clearSelectedParagraphs: () => set({ selectedParagraphIndices: new Set() }),
     setSelectionSummary: (summary) => set({ selectionSummary: summary }),
     setSelectionSummaryLoading: (loading) => set({ selectionSummaryLoading: loading }),
+
+    // ---- 布局模式 ----
+    layoutMode: saved.layoutMode ?? 'full',
+    setLayoutMode: (mode) => {
+      set({ layoutMode: mode })
+      saveUiPrefs(get())
+    },
 
     // ---- 浏览历史面板 ----
     showHistory: false,
