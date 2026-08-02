@@ -592,26 +592,3 @@ body.eye-care [class*="border-blue-300"],
 body.eye-care [class*="border-blue-600"] {
   border-color: #C4AE8A !important;
 }
-
-/* ================================================================ */
-/*  9. 笔记面板工具栏图标颜色 — 护眼模式下与边框色一致                    */
-/* ================================================================ */
-body.eye-care .notes-toolbar button svg {
-  color: #C4AE8A !important;
-}
-body.eye-care .notes-toolbar button:hover svg {
-  color: #8b7048 !important;
-}
-/* 分割线颜色 */
-body.eye-care .notes-toolbar .w-px {
-  background-color: #C4AE8A !important;
-}
-/* 工具栏按钮文字颜色 */
-body.eye-care .notes-toolbar > button,
-body.eye-care .notes-toolbar .relative > button {
-  color: #C4AE8A !important;
-}
-body.eye-care .notes-toolbar > button:hover,
-body.eye-care .notes-toolbar .relative > button:hover {
-  color: #8b7048 !important;
-}

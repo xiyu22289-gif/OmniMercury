@@ -233,7 +233,7 @@ export default function NotesPanel({ darkMode }: NotesPanelProps) {
       </div>
 
       {/* 格式工具栏 */}
-      <div className={`notes-toolbar flex items-center gap-0.5 px-2 py-1.5 border-b ${border} flex-wrap`}>
+      <div className={`flex items-center gap-0.5 px-2 py-1.5 border-b ${border} flex-wrap`}>
         <button onClick={() => execCmd('bold')} className={`p-1 rounded ${btnHover} transition-colors ${textMain}`} title={t('reader.bold')}>
           <Bold size={14} />
         </button>

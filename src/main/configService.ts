@@ -217,10 +217,10 @@ export function resetLlmConfig(): void {
 export const FEED_FETCH_TIMEOUT = 15_000
 
 /** AI API 请求超时（毫秒）— 完整响应最大等待时间 */
-export const AI_API_TIMEOUT = 180_000
+export const AI_API_TIMEOUT = 120_000
 
 /** AI 首 Token 超时（毫秒）— 流式响应中首个 token 的最大等待时间 */
-export const AI_FIRST_TOKEN_TIMEOUT = 30_000
+export const AI_FIRST_TOKEN_TIMEOUT = 15_000
 
 /** OPML 批量导入最大并发数 */
 export const OPML_IMPORT_CONCURRENCY = 4
