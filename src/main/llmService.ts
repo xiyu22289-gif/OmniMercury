@@ -357,48 +357,63 @@ function classifyError(err: any, url?: string, position?: number, context?: stri
     rawApiDetail = apiError
   }
   const msg: string = err instanceof Error ? err.message : String(err)
+  const lowerMsg = msg.toLowerCase()
   // 拼上原始 API 错误详情
   const fullMsg = rawApiDetail ? `${msg} [API: ${rawApiDetail}]` : msg
   const code: number | undefined = err?.status ?? err?.response?.status ?? err?.statusCode ?? apiError?.status ?? apiError?.status_code
   const timestamp = new Date().toISOString()
 
-  // 超时（axios/OpenAI SDK 超时标记）
+  // 超时（中英文 + axios/OpenAI SDK 超时标记）
   if (
-    msg.includes('timeout') || msg.includes('timed out') ||
-    msg.includes('ETIMEDOUT') || msg.includes('ECONNABORTED') ||
-    msg.includes('aborted')
+    lowerMsg.includes('timeout') || lowerMsg.includes('timed out') ||
+    lowerMsg.includes('etimedout') || lowerMsg.includes('econnaborted') ||
+    lowerMsg.includes('aborted') ||
+    msg.includes('超时') || msg.includes('首 Token')
   ) {
     return { errorType: 'timeout', message: fullMsg, url, statusCode: code, position, context, timestamp }
   }
 
   // 鉴权失败
   if (code === 401 || code === 403 ||
-    msg.includes('Unauthorized') || msg.includes('Forbidden') ||
+    lowerMsg.includes('unauthorized') || lowerMsg.includes('forbidden') ||
     msg.includes('API Key') || msg.includes('Incorrect API key') ||
-    msg.includes('authentication') || msg.includes('invalid api key')
+    lowerMsg.includes('authentication') || lowerMsg.includes('invalid api key') ||
+    msg.includes('鉴权') || msg.includes('密钥')
   ) {
     return { errorType: 'auth', message: fullMsg, url, statusCode: code, position, context, timestamp }
   }
 
   // 限流
-  if (code === 429 || msg.toLowerCase().includes('rate') || msg.includes('too many requests')) {
+  if (code === 429 || lowerMsg.includes('rate') || lowerMsg.includes('too many requests') || msg.includes('限流')) {
     return { errorType: 'rate_limit', message: fullMsg, url, statusCode: code, position, context, timestamp }
   }
 
-  // 网络错误（DNS / 连接）
+  // 网络错误（中英文 DNS / 连接 / 无法访问）
   if (
-    msg.includes('ENOTFOUND') || msg.includes('ECONNREFUSED') ||
-    msg.includes('ECONNRESET') || msg.includes('fetch failed') ||
-    msg.includes('network') || msg.includes('NetworkError') ||
-    msg.includes('connect') || msg.includes('getaddrinfo')
+    lowerMsg.includes('enotfound') || lowerMsg.includes('econnrefused') ||
+    lowerMsg.includes('econnreset') || lowerMsg.includes('fetch failed') ||
+    lowerMsg.includes('network') || lowerMsg.includes('networkerror') ||
+    lowerMsg.includes('connect') || lowerMsg.includes('getaddrinfo') ||
+    msg.includes('网络') || msg.includes('无法连接') || msg.includes('无法访问') ||
+    msg.includes('连接失败') || msg.includes('请检查网络')
   ) {
     return { errorType: 'network', message: fullMsg, url, statusCode: code, position, context, timestamp }
   }
 
+  // 空响应（AI 服务无返回）
+  if (
+    lowerMsg.includes('空响应') || lowerMsg.includes('empty response') ||
+    lowerMsg.includes('no response') || lowerMsg.includes('返回空') ||
+    msg.includes('无响应')
+  ) {
+    return { errorType: 'api', message: fullMsg, url, statusCode: code, position, context, timestamp }
+  }
+
   // 解析错误
   if (
-    msg.includes('JSON') || msg.includes('parse') || msg.includes('SyntaxError') ||
-    msg.includes('Unexpected token') || msg.includes('Invalid JSON')
+    lowerMsg.includes('json') || lowerMsg.includes('parse') || lowerMsg.includes('syntaxerror') ||
+    lowerMsg.includes('unexpected token') || lowerMsg.includes('invalid json') ||
+    msg.includes('解析')
   ) {
     return { errorType: 'parse', message: fullMsg, url, statusCode: code, position, context, timestamp }
   }
@@ -408,7 +423,7 @@ function classifyError(err: any, url?: string, position?: number, context?: stri
     return { errorType: 'api', message: fullMsg, url, statusCode: code, position, context, timestamp }
   }
 
-  // 默认
+  // 默认 — 保留原始错误信息，不做过度包装
   return { errorType: 'unknown', message: fullMsg, url, statusCode: code, position, context, timestamp }
 }
 

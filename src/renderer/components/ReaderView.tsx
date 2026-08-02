@@ -1747,6 +1747,16 @@ export default function ReaderView() {
   /** ★ HTML 渲染（优先使用，保留原始表格/换行/代码块结构） */
   const renderHtmlContent = () => {
     if (!articleContentHtml) return null
+    // ★ 防御：检测旧版错误缓存 HTML，降级为纯文本提示
+    const isErrorContent = articleContentHtml.includes('【正文提取失败】') || articleContentHtml.includes('【访问受限】') || articleContentHtml.includes('【Markdown 转换失败】')
+    if (isErrorContent) {
+      return (
+        <div className="my-6 p-6 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-700 rounded-lg text-center">
+          <p className="text-amber-600 dark:text-amber-400 text-sm font-medium mb-2">⚠️ 该文章内容暂不可用</p>
+          <p className="text-amber-500 dark:text-amber-500 text-xs">请尝试在浏览器中打开原文链接查看完整内容</p>
+        </div>
+      )
+    }
     const html = inArticleSearch.trim() ? highlightHtml(articleContentHtml) : articleContentHtml
     return (
       <div

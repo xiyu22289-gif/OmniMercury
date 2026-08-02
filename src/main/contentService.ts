@@ -820,7 +820,12 @@ export async function getOrFetchArticleContent(
   // 2. 非强制刷新时，如果 contentHtml(即 content 列) 存在且 > 500 字符，直接返回
   if (!forceRefresh && row?.content) {
     const htmlLen = row.content.length
-    if (htmlLen > 500) {
+    // ★ 检测旧版错误缓存（【正文提取失败】/【访问受限】），自动清除并重新抓取
+    const isCachedError = row.content.includes('【正文提取失败】') || row.content.includes('【访问受限】') || row.content.includes('【Markdown 转换失败】') || row.content.includes('【正文抓取失败】')
+    if (isCachedError) {
+      console.log(`[contentService] 检测到缓存的旧版错误内容，清除并重新抓取 articleId=${articleId}`)
+      getDb().update(articlesTable).set({ content: null, contentMd: null }).where(eq(articlesTable.id, articleId)).run()
+    } else if (htmlLen > 500) {
       console.log(`[contentService] 缓存命中 articleId=${articleId}, contentHtml=${htmlLen} 字符`)
       const fixedHtml = resolveImageUrls(row.content, articleUrl)
       return {
@@ -828,8 +833,9 @@ export async function getOrFetchArticleContent(
         contentHtml: fixedHtml,
         isCached: true,
       }
+    } else {
+      console.log(`[contentService] contentHtml 过短 (${htmlLen} 字符)，触发完整抓取 articleId=${articleId}`)
     }
-    console.log(`[contentService] contentHtml 过短 (${htmlLen} 字符)，触发完整抓取 articleId=${articleId}`)
   }
 
   // 3. 有 link → 抓取完整内容
@@ -868,7 +874,7 @@ export async function getOrFetchArticleContent(
         console.error(`[contentService] DB 写入失败 articleId=${articleId}:`, err)
       }
     } else {
-      console.log(`[contentService] 跳过 DB 写入 — 验证页面不缓存`)
+      console.log(`[contentService] 跳过 DB 写入 — 降级/验证内容不缓存`)
     }
 
     if ('degraded' in result && result.degraded) {
