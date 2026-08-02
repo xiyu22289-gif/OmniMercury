@@ -1,7 +1,7 @@
 import { ipcMain, BrowserWindow, dialog } from 'electron'
 import { addFeed, listFeeds, getArticles, getArticlesByIdList, searchArticles, fullTextSearch, getCachedArticleContent, refreshAllFeeds } from './feedService'
 import { parseOpmlFile, parseSubscriptionFile, importOpmlFile, exportOpmlFile } from './opmlService'
-import { getDb, getFeedById, feeds as feedsTable, articles as articlesTable, getTokenStats } from './db'
+import { getDb, getFeedById, feeds as feedsTable, articles as articlesTable, getTokenStats, clearTokenStats } from './db'
 import { eq } from 'drizzle-orm'
 import { summarizeArticle, translateArticle, translateParagraphs, testConnection, suggestTagsForArticle, translateSelection, summarizeSelection, listModels } from './llmService'
 import { getLlmConfig, getLlmGlobalConfig, setFunctionConfig, getFunctionConfig, setLlmConfig, resetLlmConfig } from './configService'
@@ -52,8 +52,17 @@ export function registerIpcHandlers(): void {
   })
 
   // ================================================================
-  // backend:getArticleContent — 获取文章正文（含 M3 清洗流水线）
+  // Token 用量统计
   // ================================================================
+  ipcMain.handle('llm:clearTokenStats', async () => {
+    try {
+      clearTokenStats()
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
   ipcMain.handle(
     'backend:getArticleContent',
     async (_event, articleId: number): Promise<IpcResponse> => {

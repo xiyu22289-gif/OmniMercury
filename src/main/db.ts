@@ -833,6 +833,11 @@ export function getTokenStats(days: number = 30): TokenStats[] {
   }));
 }
 
+/** 清除所有 Token 用量记录（重置统计） */
+export function clearTokenStats(): void {
+  getDb().delete(tokenUsage).run();
+}
+
 // ============================================================
 // M13: 浏览历史 CRUD
 // ============================================================

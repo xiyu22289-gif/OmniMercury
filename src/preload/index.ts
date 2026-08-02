@@ -102,6 +102,8 @@ const api = {
   // ============================================================
   getTokenStats: (): Promise<{ error: number; stats?: TokenStats[]; message?: string }> =>
     ipcRenderer.invoke('llm:getTokenStats'),
+  clearTokenStats: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('llm:clearTokenStats'),
 
   // ---- LLM 流式操作（invoke 触发，on 接收进度） ----
   summarize: (articleId: number, content: string, title: string, targetLang: string, detailLevel?: string) =>

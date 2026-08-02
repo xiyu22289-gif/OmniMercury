@@ -312,7 +312,23 @@ function TokenStatsPanel() {
           {stat.byOperation.length > 0 && (<div className="text-xs text-gray-500 dark:text-white/70 space-y-1">{stat.byOperation.map(op => (<div key={op.operation} className="flex items-center justify-between"><span>{op.operation === 'summarize' ? '📝 ' + t('llmSettings.operationSummarize') : '🌐 ' + t('llmSettings.operationTranslate')}</span><span>{t('llmSettings.inputTokens')} {formatTokens(op.prompt)} / {t('llmSettings.outputTokens')} {formatTokens(op.completion)}</span></div>))}</div>)}
         </div>
       ))}
-      <div className="flex justify-center"><button onClick={loadTokenStats} disabled={tokenStatsLoading} className="flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg bg-purple-50 text-purple-600 hover:bg-purple-100 dark:bg-purple-900/20 dark:text-purple-400 dark:hover:bg-purple-900/30 disabled:opacity-50 transition-colors"><RotateCcw size={12} />{t('llmSettings.refreshStats')}</button></div>
+      <div className="flex justify-center gap-2">
+        <button
+          onClick={async () => {
+            try {
+              await window.api.clearTokenStats()
+              // 重新加载（已是空数据）
+              await loadTokenStats()
+            } catch { /* 忽略 */ }
+          }}
+          disabled={tokenStatsLoading}
+          className="flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/30 disabled:opacity-50 transition-colors"
+          title="清除所有用量统计并重新开始"
+        >
+          <RotateCcw size={12} />
+          {t('llmSettings.refreshStats')}
+        </button>
+      </div>
     </div>
   )
 }

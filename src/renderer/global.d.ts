@@ -85,6 +85,8 @@ declare global {
 
       /** Token 用量统计 */
       getTokenStats: () => Promise<{ error: number; stats?: TokenStats[]; message?: string }>
+      /** 清除所有 Token 用量记录 */
+      clearTokenStats: () => Promise<{ success: boolean; error?: string }>
 
       // ---- M5 标签系统 ----
       getTags: () => Promise<{ success: boolean; data?: Tag[]; error?: string }>
