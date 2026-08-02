@@ -719,6 +719,74 @@ export function registerIpcHandlers(): void {
     }
   })
 
+  // ================================================================
+  // 导出单篇文章（HTML 两栏：原文+荧光笔 / 笔记）
+  // ================================================================
+  ipcMain.handle('article:export', async (event, articleId: number, includeHighlights: boolean, includeNotes: boolean) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return { success: false, error: '窗口不存在' }
+    try {
+      const { getNoteByArticleId, getArticleHighlights } = await import('./db')
+      const article = getDb().select({ title: articlesTable.title, content: articlesTable.content, contentMd: articlesTable.contentMd, link: articlesTable.link }).from(articlesTable).where(eq(articlesTable.id, articleId)).get()
+      if (!article) return { success: false, error: '文章不存在' }
+      const highlights = includeHighlights ? (getArticleHighlights(articleId) || '') : ''
+      const note = includeNotes ? (getNoteByArticleId(articleId)?.content || '') : ''
+      const safeName = (article.title || 'article').replace(/[\\/:*?"<>|]/g, '_').slice(0, 60)
+      const result = await dialog.showSaveDialog(win, {
+        title: '导出文章',
+        defaultPath: `${safeName}-${new Date().toISOString().slice(0, 10)}.html`,
+        filters: [{ name: 'HTML 文件', extensions: ['html'] }],
+      })
+      if (result.canceled || !result.filePath) return { success: false, error: '用户取消' }
+      const fs = await import('fs')
+      // ★ 荧光笔：如果已保存完整 HTML 快照（含 annotation span），直接用
+      let finalContentHtml: string
+      if (includeHighlights && highlights && highlights.includes('__annotation_highlight__')) {
+        finalContentHtml = highlights
+      } else {
+        finalContentHtml = article.content || `<pre>${article.contentMd || ''}</pre>`
+      }
+      const noteHtml = note ? note.replace(/</g, '<').replace(/>/g, '>').replace(/\n/g, '<br>') : '<p style="color:#999;">（暂无笔记）</p>'
+      const html = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>${article.title || '文章导出'}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "PingFang SC", "Microsoft YaHei", sans-serif; background: #f5f5f5; }
+  .container { display: flex; min-height: 100vh; }
+  .left { flex: 3; background: #fff; padding: 32px 40px; border-right: 1px solid #e5e7eb; }
+  .right { flex: 2; background: #fafafa; padding: 32px 28px; }
+  h1 { font-size: 1.5rem; font-weight: 700; color: #1a1a1a; margin-bottom: 24px; line-height: 1.4; }
+  .article-body { font-size: 0.95rem; line-height: 1.8; color: #333; }
+  .article-body img { max-width: 100%; height: auto; border-radius: 6px; margin: 12px 0; }
+  .article-body table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+  .article-body td, .article-body th { border: 1px solid #ddd; padding: 6px 10px; }
+  .article-body pre { background: #f0f0f0; padding: 12px 16px; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; }
+  .article-body blockquote { border-left: 3px solid #ddd; padding-left: 16px; color: #666; margin: 12px 0; }
+  .right h2 { font-size: 1rem; font-weight: 600; color: #666; margin-bottom: 16px; }
+  .notes-content { font-size: 0.9rem; line-height: 1.7; color: #555; }
+  .export-meta { font-size: 0.75rem; color: #999; margin-top: 32px; padding-top: 16px; border-top: 1px solid #eee; }
+</style></head>
+<body>
+<div class="container">
+  <div class="left">
+    <h1>${article.title || '（无标题）'}</h1>
+    <div class="article-body">${finalContentHtml}</div>
+    <div class="export-meta">原文链接：<a href="${article.link || '#'}">${article.link || ''}</a><br>导出时间：${new Date().toLocaleString('zh-CN')}</div>
+  </div>
+  <div class="right">
+    <h2>📝 笔记</h2>
+    <div class="notes-content">${noteHtml}</div>
+  </div>
+</div>
+</body></html>`
+      fs.writeFileSync(result.filePath, html, 'utf-8')
+      return { success: true, filePath: result.filePath }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
   ipcMain.handle('history:clear', async () => {
     try {
       const { clearBrowseHistory } = await import('./db')

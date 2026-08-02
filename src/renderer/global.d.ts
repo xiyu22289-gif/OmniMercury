@@ -109,6 +109,8 @@ declare global {
 
       // ---- 导出 ----
       exportSummaryMd: (articleTitle: string, summaryText: string) => Promise<{ success: boolean; filePath?: string; error?: string }>
+      /** 导出单篇文章为 HTML（可勾选荧光笔/笔记） */
+      exportArticle: (articleId: number, includeHighlights: boolean, includeNotes: boolean) => Promise<{ success: boolean; filePath?: string; error?: string }>
 
       // ---- OPML 导入 ----
       selectOpmlFile: () => Promise<{ canceled: boolean; filePath?: string; error?: string }>

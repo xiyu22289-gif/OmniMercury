@@ -335,6 +335,11 @@ export default function ReaderView() {
   const [quickCreateName, setQuickCreateName] = useState('')
   const [quickCreateColor, setQuickCreateColor] = useState('#3b82f6')
 
+  // ============ 导出文章对话框 ============
+  const [showExportDialog, setShowExportDialog] = useState(false)
+  const [exportIncludeHighlights, setExportIncludeHighlights] = useState(true)
+  const [exportIncludeNotes, setExportIncludeNotes] = useState(true)
+
   // ============ 标注功能 ============
   const [annotationMode, setAnnotationMode] = useState(false)
   const [annotationTool, setAnnotationTool] = useState<'highlighter' | 'eraser'>('highlighter')
@@ -350,50 +355,25 @@ export default function ReaderView() {
   const [annotationBtnRect, setAnnotationBtnRect] = useState<{ top: number; left: number } | null>(null)
 
   // ========== 标注持久化 ==========
+  /** 保存：直接序列化整个阅读区的 innerHTML（含所有 annotation span） */
   const saveAnnotations = useCallback(() => {
     const articleId = selectedArticleIdRef.current
     if (!articleId) return
     const area = readingAreaRef.current
     if (!area) return
-    const clones = area.querySelectorAll('.__annotation_highlight__')
-    const html = Array.from(clones).map(el => (el as HTMLElement).outerHTML).join('<!--annotation-->')
-    window.api.saveHighlights(articleId, html).catch(e => console.error('[ReaderView] 保存标注失败：', e))
+    window.api.saveHighlights(articleId, area.innerHTML).catch(e => console.error('[ReaderView] 保存标注失败：', e))
   }, [])
 
+  /** 加载：将保存的完整 innerHTML 替代 articleContentHtml，利用正常渲染路径恢复所有标注 */
   useEffect(() => {
     if (!selectedArticleId) return
     const loadAnnotations = async () => {
       try {
         const res = await window.api.getHighlights(selectedArticleId)
-        const html = res?.data ?? null
-        if (!html) return
-        const parts = html.split('<!--annotation-->')
-        if (parts.length === 0) return
-        const area = readingAreaRef.current
-        if (!area) { setTimeout(loadAnnotations, 300); return }
-        const parser = new DOMParser()
-        for (const part of parts) {
-          if (!part.trim()) continue
-          const doc = parser.parseFromString(part, 'text/html')
-          const span = doc.querySelector('.__annotation_highlight__')
-          if (!span?.textContent) continue
-          const searchText = span.textContent
-          const tw = document.createTreeWalker(area, NodeFilter.SHOW_TEXT, {
-            acceptNode: (n) => n.textContent?.includes(searchText) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP
-          })
-          let tn = tw.nextNode()
-          while (tn) {
-            const idx = (tn.textContent || '').indexOf(searchText)
-            if (idx >= 0) {
-              const r = document.createRange(); r.setStart(tn, idx); r.setEnd(tn, idx + searchText.length)
-              const ns = document.createElement('span'); ns.className = '__annotation_highlight__'
-              ns.style.cssText = (span as HTMLElement).style.cssText || ''
-              try { r.surroundContents(ns) } catch { const c = r.extractContents(); ns.appendChild(c); r.insertNode(ns) }
-              break
-            }
-            tn = tw.nextNode()
-          }
-        }
+        const savedHtml = res?.data ?? null
+        if (!savedHtml) return
+        // 直接替换 articleContentHtml，让 renderHtmlContent 渲染保存的完整 HTML
+        useStore.setState({ articleContentHtml: savedHtml })
       } catch (e) { console.error('[ReaderView] 加载标注失败：', e) }
     }
     const t = setTimeout(loadAnnotations, 500)
@@ -792,10 +772,9 @@ export default function ReaderView() {
         sel.removeAllRanges()
       } catch { /* 跨节点选区失败则静默 */ }
     } else if (tool === 'eraser') {
-      // 橡皮：清除选中文本所在的最内层 __annotation_highlight__ span
+      // 橡皮：从点击位置向上查找最内层的 annotation span，只清除这一笔
       const range = sel.getRangeAt(0)
       let node: Node | null = range.commonAncestorContainer
-      // 查找包含选区的 annotation span
       while (node) {
         if (node.nodeType === Node.ELEMENT_NODE && (node as HTMLElement).classList?.contains('__annotation_highlight__')) {
           const el = node as HTMLElement
@@ -804,39 +783,10 @@ export default function ReaderView() {
             while (el.firstChild) { parent.insertBefore(el.firstChild, el) }
             parent.removeChild(el)
           }
-          sel.removeAllRanges()
-          return
+          break
         }
         node = node.parentNode
       }
-      // 如果点击处没有 annotation span，尝试清除该区域附近的所有 annotation span
-      // （橡皮擦也可以清除整个选区内包含的 annotation span）
-      const startContainer = range.startContainer
-      const endContainer = range.endContainer
-      const walker = document.createTreeWalker(
-        range.commonAncestorContainer,
-        NodeFilter.SHOW_ELEMENT,
-        {
-          acceptNode: (n) => {
-            return (n as HTMLElement).classList?.contains('__annotation_highlight__')
-              ? NodeFilter.FILTER_ACCEPT
-              : NodeFilter.FILTER_SKIP
-          }
-        }
-      )
-      const toRemove: HTMLElement[] = []
-      let cur = walker.nextNode() as HTMLElement | null
-      while (cur) {
-        toRemove.push(cur)
-        cur = walker.nextNode() as HTMLElement | null
-      }
-      toRemove.forEach(el => {
-        const parent = el.parentNode
-        if (parent) {
-          while (el.firstChild) { parent.insertBefore(el.firstChild, el) }
-          parent.removeChild(el)
-        }
-      })
       sel.removeAllRanges()
     }
     // 每次标注操作后自动保存
@@ -1943,6 +1893,15 @@ export default function ReaderView() {
             >
               🔄 刷新正文
             </button>
+            {/* ★ 导出文章按钮 */}
+            <button
+              onClick={() => setShowExportDialog(true)}
+              className="flex items-center gap-1 text-xs text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300 bg-green-50 dark:bg-green-900/20 px-2 py-1 rounded transition-colors"
+              title="导出文章为 HTML"
+            >
+              <Download size={13} />
+              导出文章
+            </button>
           </div>
 
           {/* ===== M5 标签区域 ===== */}
@@ -2014,6 +1973,48 @@ export default function ReaderView() {
               )}
             </div>
           </div>
+
+          {/* ===== 导出文章对话框 ===== */}
+          {showExportDialog && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowExportDialog(false)}>
+              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 w-80 p-5" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100">📄 导出文章</h3>
+                  <button onClick={() => setShowExportDialog(false)} className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700"><X size={14} /></button>
+                </div>
+                <div className="space-y-3 mb-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={exportIncludeHighlights} onChange={e => setExportIncludeHighlights(e.target.checked)} className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-500" />
+                    <span className="text-sm text-gray-700 dark:text-gray-200">包含荧光笔笔迹</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={exportIncludeNotes} onChange={e => setExportIncludeNotes(e.target.checked)} className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-500" />
+                    <span className="text-sm text-gray-700 dark:text-gray-200">包含笔记</span>
+                  </label>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => setShowExportDialog(false)} className="flex-1 py-2 text-xs text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">取消</button>
+                  <button
+                    onClick={async () => {
+                      setShowExportDialog(false)
+                      try {
+                        const result = await window.api.exportArticle(selectedArticleId!, exportIncludeHighlights, exportIncludeNotes)
+                        if (!result.success && result.error !== '用户取消') {
+                          setError(result.error || '导出失败')
+                        }
+                      } catch (err) {
+                        setError('导出失败: ' + String(err))
+                      }
+                    }}
+                    className="flex-1 py-2 text-xs font-medium text-white bg-green-500 rounded-lg hover:bg-green-600 transition-colors flex items-center justify-center gap-1"
+                  >
+                    <Download size={13} />
+                    导出 HTML
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* ===== 标签管理面板 ===== */}
           {showTagPicker && (

@@ -178,6 +178,10 @@ const api = {
   exportSummaryMd: (articleTitle: string, summaryText: string): Promise<{ success: boolean; filePath?: string; error?: string }> =>
     ipcRenderer.invoke('summary:exportMd', articleTitle, summaryText),
 
+  // 导出单篇文章为 HTML
+  exportArticle: (articleId: number, includeHighlights: boolean, includeNotes: boolean): Promise<{ success: boolean; filePath?: string; error?: string }> =>
+    ipcRenderer.invoke('article:export', articleId, includeHighlights, includeNotes),
+
   // ---- OPML 导入 ----
   /** 打开文件选择对话框选择 OPML 文件 */
   selectOpmlFile: (): Promise<{ canceled: boolean; filePath?: string; error?: string }> =>
