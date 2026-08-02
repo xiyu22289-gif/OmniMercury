@@ -67,6 +67,15 @@ export const articleNotes = sqliteTable('article_notes', {
   updatedAt: text('updated_at').default(sql`(datetime('now'))`),
 });
 
+// ===== M16: 术语库 =====
+export const glossary = sqliteTable('glossary', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  sourceTerm: text('source_term').notNull(),
+  targetTerm: text('target_term').notNull(),
+  category: text('category'),
+  createdAt: text('created_at').default(sql`(datetime('now'))`),
+});
+
 // ===== M7: Token 用量统计 =====
 export const tokenUsage = sqliteTable('token_usage', {
   id: integer('id').primaryKey({ autoIncrement: true }),
@@ -101,6 +110,8 @@ export type ArticleTag = typeof articleTags.$inferSelect;
 export type NewArticleTag = typeof articleTags.$inferInsert;
 export type ArticleNote = typeof articleNotes.$inferSelect;
 export type NewArticleNote = typeof articleNotes.$inferInsert;
+export type Glossary = typeof glossary.$inferSelect;
+export type NewGlossary = typeof glossary.$inferInsert;
 export type TokenUsage = typeof tokenUsage.$inferSelect;
 export type NewTokenUsage = typeof tokenUsage.$inferInsert;
 
@@ -306,6 +317,21 @@ export function initDatabase(dbPath: string): BetterSQLite3Database {
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
         article_id  INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
         viewed_at   TEXT    DEFAULT (datetime('now'))
+      );
+    `);
+  } catch {
+    // 表已存在，忽略
+  }
+
+  // M16 兼容迁移：glossary 术语库表
+  try {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS glossary (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        source_term TEXT    NOT NULL,
+        target_term TEXT    NOT NULL,
+        category    TEXT,
+        created_at  TEXT    DEFAULT (datetime('now'))
       );
     `);
   } catch {
@@ -902,4 +928,20 @@ export function getArticleHighlights(articleId: number): string | null {
 export function saveArticleHighlights(articleId: number, highlights: string): void {
   const sqlite = getRawDb()
   sqlite.prepare('UPDATE articles SET highlights = ? WHERE id = ?').run(highlights, articleId)
+}
+
+// ============================================================
+// M16: Glossary CRUD
+// ============================================================
+export function getAllGlossary(): Glossary[] {
+  return getDb().select().from(glossary).orderBy(sql`${glossary.category} ASC, ${glossary.sourceTerm} ASC`).all()
+}
+export function addGlossaryTerm(sourceTerm: string, targetTerm: string, category?: string): Glossary {
+  return getDb().insert(glossary).values({ sourceTerm, targetTerm, category: category ?? null }).returning().get()
+}
+export function updateGlossaryTerm(id: number, sourceTerm: string, targetTerm: string, category?: string): void {
+  getDb().update(glossary).set({ sourceTerm, targetTerm, category: category ?? null }).where(eq(glossary.id, id)).run()
+}
+export function deleteGlossaryTerm(id: number): void {
+  getDb().delete(glossary).where(eq(glossary.id, id)).run()
 }

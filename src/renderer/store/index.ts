@@ -166,6 +166,12 @@ interface AppState {
   setSelectionSummary: (text: string) => void
   setSelectionSummaryLoading: (loading: boolean) => void
 
+  // ---- 翻译设置 ----
+  translationUseTextBased: boolean
+  translationUseGlossary: boolean
+  setTranslationUseTextBased: (v: boolean) => void
+  setTranslationUseGlossary: (v: boolean) => void
+
   // ---- 布局模式 ----
   layoutMode: 'full' | 'compact'
   setLayoutMode: (mode: 'full' | 'compact') => void
@@ -203,6 +209,8 @@ interface UiPrefs {
   translateTargetLang: string
   readerMode: 'reader' | 'original'
   layoutMode: 'full' | 'compact'
+  translationUseTextBased: boolean
+  translationUseGlossary: boolean
 }
 
 function loadUiPrefs(): Partial<UiPrefs> {
@@ -224,6 +232,8 @@ function saveUiPrefs(state: AppState): void {
       translateTargetLang: state.translateTargetLang,
       readerMode: state.readerMode,
       layoutMode: state.layoutMode,
+      translationUseTextBased: state.translationUseTextBased,
+      translationUseGlossary: state.translationUseGlossary,
     }
     localStorage.setItem(PERSIST_KEY, JSON.stringify(prefs))
   } catch {}
@@ -707,6 +717,18 @@ export const useStore = create<AppState>((set, get) => {
     clearSelectedParagraphs: () => set({ selectedParagraphIndices: new Set() }),
     setSelectionSummary: (summary) => set({ selectionSummary: summary }),
     setSelectionSummaryLoading: (loading) => set({ selectionSummaryLoading: loading }),
+
+    // ---- 翻译设置 ----
+    translationUseTextBased: saved.translationUseTextBased ?? true,
+    translationUseGlossary: saved.translationUseGlossary ?? false,
+    setTranslationUseTextBased: (v) => {
+      set({ translationUseTextBased: v })
+      saveUiPrefs(get())
+    },
+    setTranslationUseGlossary: (v) => {
+      set({ translationUseGlossary: v })
+      saveUiPrefs(get())
+    },
 
     // ---- 布局模式 ----
     layoutMode: saved.layoutMode ?? 'full',

@@ -128,6 +128,12 @@ declare global {
       getHighlights: (articleId: number) => Promise<{ success: boolean; data?: string | null; error?: string }>
       saveHighlights: (articleId: number, highlights: string) => Promise<{ success: boolean; error?: string }>
 
+      // ---- M16 术语库 ----
+      getGlossary: () => Promise<{ success: boolean; data?: import('../main/db').Glossary[]; error?: string }>
+      addGlossaryTerm: (sourceTerm: string, targetTerm: string, category?: string) => Promise<{ success: boolean; data?: any; error?: string }>
+      updateGlossaryTerm: (id: number, sourceTerm: string, targetTerm: string, category?: string) => Promise<{ success: boolean; error?: string }>
+      deleteGlossaryTerm: (id: number) => Promise<{ success: boolean; error?: string }>
+
       // ---- 窗口尺寸控制 ----
       setHalfScreen: () => Promise<{ success: boolean }>
       setFullScreen: () => Promise<{ success: boolean }>

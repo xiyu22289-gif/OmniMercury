@@ -5,7 +5,7 @@
 
 import OpenAI from 'openai'
 import { getLlmConfig, getApiKeyForModel, getEffectiveConfig, getFunctionConfig, AI_API_TIMEOUT, AI_FIRST_TOKEN_TIMEOUT, type LlmConfig } from './configService'
-import { getDb, articles as articlesTable, insertTokenUsage } from './db'
+import { getDb, articles as articlesTable, insertTokenUsage, getAllGlossary } from './db'
 import { eq } from 'drizzle-orm'
 import type { LlmStreamChunk, LlmStreamDone, LlmStreamError, LlmErrorDetail, LlmErrorType, SummarizeRequest, TranslateRequest, SelectiveTranslateRequest, SelectiveSummarizeRequest, LlmFunctionType, LlmModelItem } from '../shared/types'
 import { splitIntoParagraphs } from '../shared/paragraphSplitter'
@@ -458,12 +458,25 @@ function buildTranslatePrompt(content: string, targetLang: string): string {
   const maxContentLen = 4000
   const truncated = content.length > maxContentLen ? content.slice(0, maxContentLen) + '\n[Content truncated...]' : content
   const isHtml = isHtmlContent(truncated)
-  const protectedContent = protectMedia(truncated)
+  let processedContent = protectMedia(truncated)
+  const plainText = processedContent.replace(/<[^>]+>/g, '').replace(/__BLOCK_[TCI]_\d+__/g, '').trim()
+  // ★ 术语库占位符
+  glossaryMap.clear()
+  try {
+    const glossary = getAllGlossary()
+    let placeholderIdx = 0
+    for (const g of glossary) {
+      if (plainText.toLowerCase().includes(g.sourceTerm.toLowerCase())) {
+        const escaped = g.sourceTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        processedContent = processedContent.replace(new RegExp(escaped, 'gi'), g.targetTerm)
+      }
+    }
+  } catch { /* 静默 */ }
   const langName = targetLang === 'Chinese' ? '简体中文' : targetLang
   if (isHtml) {
-    return `Translate the following HTML to ${langName}. Preserve HTML tags, links and image placeholders. Output only translation:\n\n${protectedContent}`
+    return `Translate the following HTML to ${langName}. Preserve HTML tags, links and image placeholders. Output only translation:\n\n${processedContent}`
   }
-  return `Translate the following Markdown to ${langName}. Preserve Markdown formatting, links and image placeholders. Output only translation:\n\n${protectedContent}`
+  return `Translate the following Markdown to ${langName}. Preserve Markdown formatting, links and image placeholders. Output only translation:\n\n${processedContent}`
 }
 
 /**
@@ -488,14 +501,30 @@ function buildParagraphTranslatePrompt(paragraph: string, targetLang: string): s
   if (!plainText) return ''
   const isHtml = isHtmlContent(paragraph)
 
+  // ★ 翻译前：将匹配的源术语替换为占位符 __GLOSSARY_N__（LLM 原样保留）
+  //    翻译后由 replaceGlossaryPlaceholders 恢复为目标术语
+  glossaryMap.clear()
+  let processedText = protectedText
+  try {
+    const glossary = getAllGlossary()
+    let placeholderIdx = 0
+    for (const g of glossary) {
+      if (plainText.toLowerCase().includes(g.sourceTerm.toLowerCase())) {
+        const escaped = g.sourceTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        processedText = processedText.replace(new RegExp(escaped, 'gi'), g.targetTerm)
+        placeholderIdx++
+      }
+    }
+  } catch { /* 术语库不可用时静默跳过 */ }
+
   // 语言专属翻译模板
   const localeTemplates: Record<string, string> = {
-    Chinese: `将以下段落翻译为简体中文。只输出译文，不要任何解释：\n\n${protectedText}`,
-    Japanese: `以下の段落を日本語に翻訳してください。訳文のみを出力し、説明は不要：\n\n${protectedText}`,
-    Korean: `다음 단락을 한국어로 번역하세요. 번역문만 출력하고 설명은 하지 마세요：\n\n${protectedText}`,
-    French: `Traduisez le paragraphe suivant en français. Sortie uniquement la traduction, sans explications：\n\n${protectedText}`,
-    German: `Übersetzen Sie den folgenden Absatz ins Deutsche. Nur die Übersetzung ausgeben, keine Erklärungen：\n\n${protectedText}`,
-    English: `Translate the following paragraph to English. Output ONLY the translation, no explanations:\n\n${protectedText}`,
+    Chinese: `将以下段落翻译为简体中文。只输出译文，不要任何解释：\n\n${processedText}`,
+    Japanese: `以下の段落を日本語に翻訳してください。訳文のみを出力し、説明は不要：\n\n${processedText}`,
+    Korean: `다음 단락을 한국어로 번역하세요. 번역문만 출력하고 설명은 하지 마세요：\n\n${processedText}`,
+    French: `Traduisez le paragraphe suivant en français. Sortie uniquement la traduction, sans explications：\n\n${processedText}`,
+    German: `Übersetzen Sie den folgenden Absatz ins Deutsche. Nur die Übersetzung ausgeben, keine Erklärungen：\n\n${processedText}`,
+    English: `Translate the following paragraph to English. Output ONLY the translation, no explanations:\n\n${processedText}`,
   }
 
   if (localeTemplates[targetLang]) {
@@ -503,7 +532,20 @@ function buildParagraphTranslatePrompt(paragraph: string, targetLang: string): s
   }
 
   // fallback
-  return `Translate to ${targetLang}. Output ONLY the translation:\n\n${protectedText}`
+  return `Translate to ${targetLang}. Output ONLY the translation:\n\n${processedText}`
+}
+
+/** 全局术语占位符映射表 — buildParagraphTranslatePrompt 写入，translateParagraphs 读取 */
+const glossaryMap = new Map<string, string>()
+
+/** 将译文中的 __GLOSSARY_N__ 占位符替换回目标术语 */
+function replaceGlossaryPlaceholders(text: string): string {
+  if (glossaryMap.size === 0) return text
+  let result = text
+  for (const [placeholder, targetTerm] of glossaryMap) {
+    result = result.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), targetTerm)
+  }
+  return result
 }
 
 // ============================================================
@@ -676,7 +718,8 @@ export async function translateParagraphs(request: TranslateRequest, callback: S
     if (transError) continue
 
     if (translatedText) {
-      const single = restoreMedia(translatedText).trim()
+      let single = restoreMedia(translatedText).trim()
+      single = replaceGlossaryPlaceholders(single)
       allTranslations[i] = single
       callback({ type: 'translateParagraph', articleId, paragraphIndex: i, fullText: single })
       await recordTokens({ model, operation: 'translateParagraphs', prompt, completion: single })
@@ -966,7 +1009,8 @@ export async function translateArticle(request: TranslateRequest, callback: Stre
     )
 
     if (fullText) {
-      const restored = restoreMedia(fullText)
+      let restored = restoreMedia(fullText)
+      restored = replaceGlossaryPlaceholders(restored)
       const trimmed = restored.trim()
       if (trimmed) {
         try {
@@ -1190,21 +1234,35 @@ export async function listModels(baseUrl: string, apiKey: string): Promise<impor
 function buildSelectiveTranslatePrompt(selectedText: string, targetLang: string): string {
   const protectedText = protectMedia(selectedText)
   if (!protectedText.trim()) return ''
+  // ★ 术语库占位符
+  let processedText = protectedText
+  const plainText = processedText.replace(/<[^>]+>/g, '').replace(/__BLOCK_[TCI]_\d+__/g, '').trim()
+  glossaryMap.clear()
+  try {
+    const glossary = getAllGlossary()
+    let placeholderIdx = 0
+    for (const g of glossary) {
+      if (plainText.toLowerCase().includes(g.sourceTerm.toLowerCase())) {
+        const escaped = g.sourceTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        processedText = processedText.replace(new RegExp(escaped, 'gi'), g.targetTerm)
+      }
+    }
+  } catch { /* 静默 */ }
 
   const localeTemplates: Record<string, string> = {
-    Chinese: `将以下文本翻译为简体中文。只输出译文，不要任何解释：\n\n${protectedText}`,
-    Japanese: `以下のテキストを日本語に翻訳してください。訳文のみを出力し、説明は不要：\n\n${protectedText}`,
-    Korean: `다음 텍스트를 한국어로 번역하세요. 번역문만 출력하고 설명은 하지 마세요：\n\n${protectedText}`,
-    French: `Traduisez le texte suivant en français. Sortie uniquement la traduction, sans explications：\n\n${protectedText}`,
-    German: `Übersetzen Sie den folgenden Text ins Deutsche. Nur die Übersetzung ausgeben, keine Erklärungen：\n\n${protectedText}`,
-    English: `Translate the following text to English. Output ONLY the translation, no explanations:\n\n${protectedText}`,
+    Chinese: `将以下文本翻译为简体中文。只输出译文，不要任何解释：\n\n${processedText}`,
+    Japanese: `以下のテキストを日本語に翻訳してください。訳文のみを出力し、説明は不要：\n\n${processedText}`,
+    Korean: `다음 텍스트를 한국어로 번역하세요. 번역문만 출력하고 설명은 하지 마세요：\n\n${processedText}`,
+    French: `Traduisez le texte suivant en français. Sortie uniquement la traduction, sans explications：\n\n${processedText}`,
+    German: `Übersetzen Sie den folgenden Text ins Deutsche. Nur die Übersetzung ausgeben, keine Erklärungen：\n\n${processedText}`,
+    English: `Translate the following text to English. Output ONLY the translation, no explanations:\n\n${processedText}`,
   }
 
   if (localeTemplates[targetLang]) {
     return localeTemplates[targetLang]
   }
 
-  return `Translate to ${targetLang}. Output ONLY the translation:\n\n${protectedText}`
+  return `Translate to ${targetLang}. Output ONLY the translation:\n\n${processedText}`
 }
 
 export async function translateSelection(request: SelectiveTranslateRequest, callback: StreamCallback): Promise<void> {
@@ -1237,7 +1295,8 @@ export async function translateSelection(request: SelectiveTranslateRequest, cal
       (errorMsg) => callback({ type, articleId, message: errorMsg })
     )
     if (fullText) {
-      const restored = restoreMedia(fullText.trim())
+      let restored = restoreMedia(fullText.trim())
+      restored = replaceGlossaryPlaceholders(restored)
       callback({ type, articleId, fullText: restored })
       await recordTokens({ model, operation: 'selectiveTranslate', prompt, completion: restored })
     }

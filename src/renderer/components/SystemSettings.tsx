@@ -247,8 +247,47 @@ function GeneralSettingsPanel() {
 // ============ 翻译设置面板 ============
 
 function TranslationSettingsPanel() {
-  const [useTextBased, setUseTextBased] = useState(true)
-  const [useGlossary, setUseGlossary] = useState(false)
+  const {
+    translationUseTextBased, setTranslationUseTextBased,
+    translationUseGlossary, setTranslationUseGlossary,
+  } = useStore()
+  const [glossary, setGlossary] = useState<Array<{ id: number; sourceTerm: string; targetTerm: string; category: string | null }>>([])
+  const [newSource, setNewSource] = useState('')
+  const [newTarget, setNewTarget] = useState('')
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editSource, setEditSource] = useState('')
+  const [editTarget, setEditTarget] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    window.api.getGlossary().then(r => { if (r.success && r.data) setGlossary(r.data) }).catch(() => {})
+  }, [])
+
+  const handleAdd = async () => {
+    const s = newSource.trim(); const t = newTarget.trim()
+    if (!s || !t) return
+    setLoading(true)
+    try {
+      const r = await window.api.addGlossaryTerm(s, t)
+      if (r.success && r.data) { setGlossary(prev => [...prev, r.data]); setNewSource(''); setNewTarget('') }
+    } finally { setLoading(false) }
+  }
+
+  const handleUpdate = async () => {
+    const s = editSource.trim(); const t = editTarget.trim()
+    if (!s || !t || editingId === null) return
+    setLoading(true)
+    try {
+      await window.api.updateGlossaryTerm(editingId, s, t)
+      setGlossary(prev => prev.map(g => g.id === editingId ? { ...g, sourceTerm: s, targetTerm: t } : g))
+      setEditingId(null); setEditSource(''); setEditTarget('')
+    } finally { setLoading(false) }
+  }
+
+  const handleDelete = async (id: number) => {
+    setLoading(true)
+    try { await window.api.deleteGlossaryTerm(id); setGlossary(prev => prev.filter(g => g.id !== id)) } finally { setLoading(false) }
+  }
 
   return (
     <div className="px-5 py-4 space-y-5">
@@ -259,29 +298,55 @@ function TranslationSettingsPanel() {
         </label>
         <div className="space-y-3">
           <label className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg border-2 border-gray-200 dark:border-white/10 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-            <input
-              type="checkbox"
-              checked={useTextBased}
-              onChange={e => setUseTextBased(e.target.checked)}
-              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-            />
-            <div>
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-200">根据文本翻译</span>
-              <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">直接对原文文本进行语言模型翻译</p>
-            </div>
+            <input type="checkbox" checked={translationUseTextBased} onChange={e => setTranslationUseTextBased(e.target.checked)} className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+            <div><span className="text-sm font-medium text-gray-700 dark:text-gray-200">根据文本翻译</span><p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">直接对原文文本进行语言模型翻译</p></div>
           </label>
           <label className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg border-2 border-gray-200 dark:border-white/10 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-            <input
-              type="checkbox"
-              checked={useGlossary}
-              onChange={e => setUseGlossary(e.target.checked)}
-              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-            />
-            <div>
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-200">使用术语库翻译</span>
-              <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">翻译时参考自定义术语库，确保专业名词翻译一致</p>
-            </div>
+            <input type="checkbox" checked={translationUseGlossary} onChange={e => setTranslationUseGlossary(e.target.checked)} className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+            <div><span className="text-sm font-medium text-gray-700 dark:text-gray-200">使用术语库翻译</span><p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">翻译时参考自定义术语库，确保专业名词翻译一致</p></div>
           </label>
+        </div>
+      </div>
+
+      <hr className="border-gray-200 dark:border-gray-700" />
+
+      {/* 术语库管理 */}
+      <div>
+        <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
+          📖 术语库
+        </label>
+        <div className="flex gap-2 mb-3">
+          <input type="text" value={newSource} onChange={e => setNewSource(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleAdd() }} placeholder="英文术语" className="flex-1 px-2 py-1.5 text-xs border-2 border-gray-300 dark:border-white/20 bg-white dark:bg-gray-700 dark:text-white rounded focus:outline-none focus:ring-1 focus:ring-blue-500" />
+          <input type="text" value={newTarget} onChange={e => setNewTarget(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleAdd() }} placeholder="中文翻译" className="flex-1 px-2 py-1.5 text-xs border-2 border-gray-300 dark:border-white/20 bg-white dark:bg-gray-700 dark:text-white rounded focus:outline-none focus:ring-1 focus:ring-blue-500" />
+          <button onClick={handleAdd} disabled={loading || !newSource.trim() || !newTarget.trim()} className="px-3 py-1.5 text-xs font-medium text-white bg-blue-500 rounded-lg hover:bg-blue-600 disabled:opacity-40 transition-colors flex items-center gap-1"><Plus size={13} />添加</button>
+        </div>
+        <div className="max-h-52 overflow-y-auto space-y-0.5">
+          {glossary.length === 0 ? (
+            <div className="py-4 text-center text-xs text-gray-400">暂无术语，请添加</div>
+          ) : (
+            glossary.map(g => (
+              <div key={g.id} className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors group text-xs">
+                {editingId === g.id ? (
+                  <>
+                    <input value={editSource} onChange={e => setEditSource(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleUpdate() }} className="flex-1 px-1.5 py-0.5 text-xs border border-gray-300 dark:border-gray-500 bg-white dark:bg-gray-700 dark:text-gray-100 rounded" autoFocus />
+                    <input value={editTarget} onChange={e => setEditTarget(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleUpdate() }} className="flex-1 px-1.5 py-0.5 text-xs border border-gray-300 dark:border-gray-500 bg-white dark:bg-gray-700 dark:text-gray-100 rounded" />
+                    <button onClick={() => { setEditingId(null); setEditSource(''); setEditTarget('') }} className="px-1 py-0.5 text-gray-400 hover:text-red-500"><X size={12} /></button>
+                    <button onClick={handleUpdate} disabled={loading || !editSource.trim() || !editTarget.trim()} className="px-1 py-0.5 text-green-500 hover:text-green-600 disabled:opacity-40">✓</button>
+                  </>
+                ) : (
+                  <>
+                    <span className="flex-1 text-gray-700 dark:text-gray-200 truncate font-medium">{g.sourceTerm}</span>
+                    <span className="text-gray-400 dark:text-gray-500">→</span>
+                    <span className="flex-1 text-gray-700 dark:text-gray-200 truncate">{g.targetTerm}</span>
+                    <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => { setEditingId(g.id); setEditSource(g.sourceTerm); setEditTarget(g.targetTerm) }} className="px-1 py-0.5 text-gray-400 hover:text-blue-500" title="编辑"><Edit size={11} /></button>
+                      <button onClick={() => handleDelete(g.id)} className="px-1 py-0.5 text-gray-400 hover:text-red-500" title="删除"><Trash2 size={11} /></button>
+                    </div>
+                  </>
+                )}
+              </div>
+            ))
+          )}
         </div>
       </div>
     </div>

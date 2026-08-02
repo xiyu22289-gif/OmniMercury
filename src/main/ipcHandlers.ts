@@ -811,6 +811,45 @@ export function registerIpcHandlers(): void {
     return { success: true }
   })
 
+  // ================================================================
+  // M16: 术语库
+  // ================================================================
+  ipcMain.handle('glossary:getAll', async () => {
+    try {
+      const { getAllGlossary } = await import('./db')
+      return { success: true, data: getAllGlossary() }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+  ipcMain.handle('glossary:add', async (_event, sourceTerm: string, targetTerm: string, category?: string) => {
+    try {
+      const { addGlossaryTerm } = await import('./db')
+      const result = addGlossaryTerm(sourceTerm, targetTerm, category)
+      return { success: true, data: result }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+  ipcMain.handle('glossary:update', async (_event, id: number, sourceTerm: string, targetTerm: string, category?: string) => {
+    try {
+      const { updateGlossaryTerm } = await import('./db')
+      updateGlossaryTerm(id, sourceTerm, targetTerm, category)
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+  ipcMain.handle('glossary:delete', async (_event, id: number) => {
+    try {
+      const { deleteGlossaryTerm } = await import('./db')
+      deleteGlossaryTerm(id)
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
   ipcMain.handle('history:clear', async () => {
     try {
       const { clearBrowseHistory } = await import('./db')

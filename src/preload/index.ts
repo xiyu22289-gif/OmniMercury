@@ -228,6 +228,16 @@ const api = {
   askQuestion: (articleId: number, articleContent: string, articleTitle: string, question: string, lang?: string): Promise<{ success: boolean }> =>
     ipcRenderer.invoke('llm:askQuestion', articleId, articleContent, articleTitle, question, lang),
 
+  // ---- M16: 术语库 ----
+  getGlossary: (): Promise<{ success: boolean; data?: import('../main/db').Glossary[]; error?: string }> =>
+    ipcRenderer.invoke('glossary:getAll'),
+  addGlossaryTerm: (sourceTerm: string, targetTerm: string, category?: string): Promise<{ success: boolean; data?: any; error?: string }> =>
+    ipcRenderer.invoke('glossary:add', sourceTerm, targetTerm, category),
+  updateGlossaryTerm: (id: number, sourceTerm: string, targetTerm: string, category?: string): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('glossary:update', id, sourceTerm, targetTerm, category),
+  deleteGlossaryTerm: (id: number): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('glossary:delete', id),
+
   // ---- 窗口尺寸控制 ----
   setHalfScreen: (): Promise<{ success: boolean }> =>
     ipcRenderer.invoke('window:setHalfScreen'),
